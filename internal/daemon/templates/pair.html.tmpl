@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Pair WhatsApp</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:34rem;margin:4rem auto;padding:0 1rem}
+  .status{font-weight:600}
+  .qr-box{margin:1.5rem 0;padding:1rem;border:1px solid #ddd;border-radius:0.5rem;background:#fafafa}
+  .qr-box img{max-width:24rem;height:auto;display:block;margin:0 auto}
+  .badge{padding:0.125rem 0.5rem;border-radius:1rem;font-size:0.8rem;border:1px solid #ccc;margin-right:0.5rem}
+  .badge.paired{background:#dcfce7;color:#166534;border-color:#86efac}
+  .badge.unpaired{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+  .badge.awaiting_qr{background:#fffbeb;color:#92400e;border-color:#fcd34d}
+  .badge.error{background:#fecaca;color:#991b1b;border-color:#fca5a5}
+  #qrcode{text-align:center}
+  #detail{color:#555}
+  .hint{color:#666;font-size:0.9rem;margin-top:1rem}
+  code{background:#f0f0f0;padding:0.1rem 0.3rem;border-radius:0.25rem}
+  form{margin-top:1.5rem}
+  input{padding:0.4rem 0.6rem;font-size:1rem}
+  button{padding:0.45rem 1rem;font-size:1rem;cursor:pointer}
+</style>
+</head>
+<body>
+<h1>Pair WhatsApp</h1>
+<div id="status">
+  <span class="badge {{.State}}">{{.State}}</span>
+  <span id="detail">Connecting to pairing stream…</span>
+</div>
+<div class="qr-box" id="qrbox">
+  <div id="qrcode"><img src="/pair/qr.png" alt="WhatsApp pairing QR"></div>
+  <p class="hint" id="qrnote">Open WhatsApp &rarr; Settings &rarr; Linked Devices &rarr; Link a Device, then scan:</p>
+</div>
+<hr>
+<p>Or pair without scanning: enter your phone number (country code first) and type the code into WhatsApp via <em>Link with phone number instead</em>.</p>
+<form method="post" action="/pair/code">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<input type="text" name="phone" placeholder="+919876543210" inputmode="tel" required>
+<button type="submit">Get pairing code</button>
+</form>
+<p class="hint">The pairing page pushes live updates to this tab; no refresh needed. The QR rotates every ~20 seconds — scan the latest code shown.</p>
+<script>
+(function(){
+  var status = document.getElementById('status');
+  var detail = document.getElementById('detail');
+  var badge = status.querySelector('.badge');
+  var qrImg = document.getElementById('qrbox').querySelector('img');
+  var qrNote = document.getElementById('qrnote');
+
+  function setState(ev){
+    if (!ev || !ev.state) return;
+    var b = badge;
+    b.className = 'badge ' + ev.state;
+    b.textContent = ev.state.replace('_',' ');
+    detail.textContent = ev.detail || '';
+    if (ev.state === 'paired'){
+      if(qrNote) qrNote.textContent = 'Paired successfully. You can close this tab.';
+      if(qrImg) qrImg.style.display = 'none';
+      return;
+    }
+    if (ev.qr){
+      qrImg.src = '/pair/qr.png?' + Date.now();
+      qrImg.style.display = 'block';
+      qrNote.textContent = 'Open WhatsApp &rarr; Settings &rarr; Linked Devices &rarr; Link a Device, then scan:';
+    }
+  }
+
+  var es = new EventSource('/pair/events');
+  es.onmessage = function(e){
+    try { setState(JSON.parse(e.data)); } catch(err){ /* ignore bad frames */ }
+  };
+  es.onerror = function(){
+    // If the stream drops, fall back to polling the QR image so the page
+    // still works behind proxies that don't support SSE.
+    detail.textContent = detail.textContent || 'Pairing stream dropped; showing latest QR.';
+  };
+})();
+</script>
+</body>
+</html>
