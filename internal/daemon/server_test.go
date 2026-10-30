@@ -73,6 +73,14 @@ func (f *fakePairDriver) Logout(ctx context.Context) error {
 
 func (f *fakePairDriver) Disconnect() {}
 
+func (f *fakePairDriver) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor string, count int, useLID bool) (string, error) {
+	return "history sync requested", nil
+}
+
+func (f *fakePairDriver) ListChatJIDs() ([]string, error) {
+	return []string{"12345@s.whatsapp.net", "67890@g.us"}, nil
+}
+
 func waitFor(t *testing.T, pred func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

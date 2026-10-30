@@ -43,6 +43,10 @@ func (c *Client) StartEventHandler() {
 			c.log.Debugf("Receipt for %d messages: %s", len(v.MessageIDs), v.Type)
 		case *events.UndecryptableMessage:
 			c.log.Warnf("Undecryptable message from %s", v.Info.Sender)
+		case *events.LabelEdit:
+			c.handleLabelEdit(v)
+		case *events.LabelAssociationChat:
+			c.handleLabelAssociationChat(v)
 		default:
 			c.log.Debugf("Unhandled event type: %T", v)
 		}
@@ -389,14 +393,14 @@ func (c *Client) handleHistorySync(historySync *events.HistorySync) {
 // history-sync payload; pass nil for live messages.
 func (c *Client) GetChatName(jid types.JID, chatJID string, conversation *waHistorySync.Conversation, sender string) string {
 	if existing := c.store.FindChatName(chatJID); existing != "" {
-		c.log.Infof("Using existing chat name for %s: %s", chatJID, existing)
+		c.log.Infof("Using existing chat name for %s: %s", c.redactor.JID(chatJID), existing)
 		return existing
 	}
 
 	var name string
 
 	if jid.Server == "g.us" {
-		c.log.Infof("Getting name for group: %s", chatJID)
+		c.log.Infof("Getting name for group: %s", c.redactor.JID(chatJID))
 
 		if conversation != nil {
 			if dn := conversation.GetDisplayName(); dn != "" {
@@ -412,11 +416,11 @@ func (c *Client) GetChatName(jid types.JID, chatJID string, conversation *waHist
 
 		c.log.Infof("Using group name: %s", name)
 	} else {
-		c.log.Infof("Getting name for contact: %s", chatJID)
+		c.log.Infof("Getting name for contact: %s", c.redactor.JID(chatJID))
 
 		name = c.resolveChatNameFallback(context.Background(), jid, sender)
 
-		c.log.Infof("Using contact name: %s", name)
+		c.log.Infof("Using contact name: %s", c.redactor.Body(name))
 	}
 
 	return name
@@ -562,6 +566,53 @@ func extractPollOptionNames(pc *waProto.PollCreationMessage) []string {
 		out = append(out, o.GetOptionName())
 	}
 	return out
+}
+
+// handleLabelEdit stores a label edit event (label created/updated/deleted).
+func (c *Client) handleLabelEdit(evt *events.LabelEdit) {
+	if c.metricSink != nil {
+		c.metricSink.IncMessagesIn()
+	}
+	labelID := evt.LabelID
+	labelName := ""
+	color := ""
+	if action := evt.Action; action != nil {
+		if action.Name != nil {
+			labelName = *action.Name
+		}
+		if action.Color != nil {
+			color = fmt.Sprintf("%d", *action.Color)
+		}
+	}
+
+	if err := c.store.StoreLabel(labelID, labelName, color); err != nil {
+		c.log.Warnf("Failed to store label %s: %v", labelID, err)
+		return
+	}
+	c.log.Infof("[label] %s: name=%s color=%s", labelID, labelName, color)
+}
+
+// handleLabelAssociationChat stores a label association event (chat labeled/unlabeled).
+func (c *Client) handleLabelAssociationChat(evt *events.LabelAssociationChat) {
+	if c.metricSink != nil {
+		c.metricSink.IncMessagesIn()
+	}
+	chatJID := evt.JID.String()
+	labelID := evt.LabelID
+	labeled := false
+	if action := evt.Action; action != nil {
+		labeled = action.GetLabeled()
+	}
+
+	if err := c.store.StoreLabelAssociation(chatJID, labelID, labeled); err != nil {
+		c.log.Warnf("Failed to store label association %s/%s: %v", chatJID, labelID, err)
+		return
+	}
+	actionStr := "unlabeled"
+	if labeled {
+		actionStr = "labeled"
+	}
+	c.log.Infof("[label] %s: %s with label %s", actionStr, c.redactor.JID(chatJID), labelID)
 }
 
 // handlePollVote decrypts an incoming PollUpdateMessage, reverses its

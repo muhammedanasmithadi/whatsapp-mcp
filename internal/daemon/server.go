@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -30,6 +31,10 @@ type pairDriver interface {
 	Connect(ctx context.Context, onLoggedOut func()) error
 	Logout(ctx context.Context) error
 	Disconnect()
+	// RequestHistorySync asks WhatsApp to backfill messages for a chat.
+	RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor string, count int, useLID bool) (string, error)
+	// ListChatJIDs returns all cached chat JIDs (used for full history sync opt-in).
+	ListChatJIDs() ([]string, error)
 }
 
 // Config configures a daemon Server. Addr may be "host:port" or "host:0"
@@ -41,16 +46,19 @@ type pairDriver interface {
 // `Authorization: Bearer <token>`. Loopback-bound operation passes an
 // empty token and leaves these routes unauthenticated.
 type Config struct {
-	Addr      string
-	Driver    pairDriver
-	MCPMount  func(mux *http.ServeMux)
-	AuthToken string
+	Addr            string
+	Driver          pairDriver
+	MCPMount        func(mux *http.ServeMux)
+	AuthToken       string
+	FullHistorySync bool // after pairing, request full history sync for all cached chats
+	Logger          *log.Logger
 }
 
 // Server is the long-lived daemon process. Safe for a single Run call.
 type Server struct {
 	cfg   Config
 	cache *PairCache
+	log   *log.Logger
 	// handlers is set in Run and exposed so the client can report metrics.
 	handlers *pairHandlers
 
@@ -84,6 +92,7 @@ func New(cfg Config) (*Server, error) {
 	return &Server{
 		cfg:          cfg,
 		cache:        NewPairCache(),
+		log:          cfg.Logger,
 		wsSubs:       make(map[chan wsEvent]struct{}),
 		wsRegister:   make(chan chan wsEvent),
 		wsUnregister: make(chan chan wsEvent),
@@ -286,13 +295,43 @@ func (s *Server) bootDriver(ctx context.Context) error {
 		s.cache.SetPaired()
 		// Transition into Connect to install the LoggedOut handler.
 		_ = s.cfg.Driver.Connect(ctx, s.onLoggedOut(ctx))
+		// If full history sync is requested, backfill every cached chat.
+		if s.cfg.FullHistorySync {
+			go s.requestFullHistorySync(ctx)
+		}
 	}
 
 	if s.cfg.Driver.IsLoggedIn() {
 		s.cache.SetPaired()
+		if s.cfg.FullHistorySync {
+			go s.requestFullHistorySync(ctx)
+		}
 		return s.cfg.Driver.Connect(ctx, s.onLoggedOut(ctx))
 	}
 	return s.cfg.Driver.StartPairing(ctx, onQR, onPairSuccess)
+}
+
+// requestFullHistorySync asks WhatsApp to backfill older messages for every
+// cached chat. It is fire-and-forget: each RequestHistorySync call delivers
+// results asynchronously through the event handler. Runs in its own goroutine
+// so bootDriver doesn't block.
+func (s *Server) requestFullHistorySync(ctx context.Context) {
+	jids, err := s.cfg.Driver.ListChatJIDs()
+	if err != nil {
+		s.cache.SetError("full history sync: failed to list chats: " + err.Error())
+		return
+	}
+	for _, jid := range jids {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		if _, err := s.cfg.Driver.RequestHistorySync(ctx, jid, time.Time{}, "oldest", 50, true); err != nil {
+			s.log.Printf("[WARN] full history sync: failed for %s: %v", jid, err)
+		}
+	}
+	s.log.Printf("[INFO] full history sync: requested backfill for %d chats", len(jids))
 }
 
 // onLoggedOut returns a callback the driver invokes when the remote device

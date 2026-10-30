@@ -23,6 +23,8 @@ func (s *Store) FormatMessage(ctx context.Context, m Message, showChatInfo bool)
 	contentPrefix := ""
 	if m.MediaType != "" {
 		contentPrefix = "[" + m.MediaType + " - Message ID: " + m.ID + " - Chat JID: " + m.ChatJID + "] "
+	} else {
+		contentPrefix = "[Message ID: " + m.ID + "] "
 	}
 
 	var senderName string

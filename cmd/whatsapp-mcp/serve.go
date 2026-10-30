@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -23,10 +24,11 @@ import (
 
 func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	var (
-		addr      string
-		allowRemote bool
-		readOnly   bool
-		logFormat  string
+		addr           string
+		allowRemote    bool
+		readOnly       bool
+		logFormat      string
+		fullHistorySync bool
 	)
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -34,6 +36,7 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	fs.BoolVar(&allowRemote, "allow-remote", false, "allow binding to a non-loopback address")
 	fs.BoolVar(&readOnly, "read-only", false, "expose only read/query tools; disable send, edit, delete, mark-read, group/privacy mutations (env WHATSAPP_MCP_READ_ONLY)")
 	fs.StringVar(&logFormat, "log-format", "text", "log output format: text (default) or json")
+	fs.BoolVar(&fullHistorySync, "full-history-sync", false, "after pairing, request full history sync for all cached chats (env WHATSAPP_MCP_FULL_HISTORY_SYNC)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -41,6 +44,11 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	if !readOnly {
 		if v := os.Getenv("WHATSAPP_MCP_READ_ONLY"); v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes") {
 			readOnly = true
+		}
+	}
+	if !fullHistorySync {
+		if v := os.Getenv("WHATSAPP_MCP_FULL_HISTORY_SYNC"); v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes") {
+			fullHistorySync = true
 		}
 	}
 
@@ -134,9 +142,11 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	// to the MCP server (so pairing_status can surface the live QR), then
 	// mount the MCP HTTP handler back onto the daemon.
 	d, err := daemon.New(daemon.Config{
-		Addr:      addr,
-		Driver:    drv,
-		AuthToken: authToken,
+		Addr:            addr,
+		Driver:          drv,
+		AuthToken:       authToken,
+		FullHistorySync: fullHistorySync,
+		Logger:          log.New(os.Stderr, "Daemon ", log.LstdFlags),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "daemon.New: %v\n", err)

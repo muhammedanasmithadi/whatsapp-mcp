@@ -156,6 +156,25 @@ func (s *Store) Close() error {
 	return nil
 }
 
+// ListChatJIDs returns all cached chat JIDs. Used by the full history-sync
+// opt-in to request backfill for every chat after pairing.
+func (s *Store) ListChatJIDs() ([]string, error) {
+	rows, err := s.db.Query("SELECT DISTINCT chat_jid FROM messages")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var jids []string
+	for rows.Next() {
+		var jid string
+		if err := rows.Scan(&jid); err != nil {
+			return nil, err
+		}
+		jids = append(jids, jid)
+	}
+	return jids, rows.Err()
+}
+
 // StoreChat upserts a chat row.
 func (s *Store) StoreChat(jid, name string, lastMessageTime time.Time) error {
 	_, err := s.db.Exec(
@@ -308,6 +327,67 @@ func (s *Store) HasInboundFrom(chatJID string) (bool, error) {
 	return exists == 1, nil
 }
 
+// StoreLabel upserts a label row.
+func (s *Store) StoreLabel(labelID, name, color string) error {
+	_, err := s.db.Exec(
+		"INSERT OR REPLACE INTO labels (label_id, name, color) VALUES (?, ?, ?)",
+		labelID, name, color,
+	)
+	return err
+}
+
+// StoreLabelAssociation upserts a label association for a chat.
+func (s *Store) StoreLabelAssociation(chatJID, labelID string, labeled bool) error {
+	_, err := s.db.Exec(
+		"INSERT OR REPLACE INTO label_associations (chat_jid, label_id, labeled) VALUES (?, ?, ?)",
+		chatJID, labelID, labeled,
+	)
+	return err
+}
+
+// ListLabels returns all known labels.
+func (s *Store) ListLabels() ([]map[string]string, error) {
+	rows, err := s.db.Query("SELECT label_id, name, color FROM labels ORDER BY name")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var labels []map[string]string
+	for rows.Next() {
+		var labelID, name, color string
+		if err := rows.Scan(&labelID, &name, &color); err != nil {
+			return nil, err
+		}
+		labels = append(labels, map[string]string{
+			"label_id": labelID,
+			"name":     name,
+			"color":    color,
+		})
+	}
+	return labels, rows.Err()
+}
+
+// ListChatsByLabel returns all chat JIDs that have the given label.
+func (s *Store) ListChatsByLabel(labelID string) ([]string, error) {
+	rows, err := s.db.Query(
+		"SELECT chat_jid FROM label_associations WHERE label_id = ? AND labeled = 1",
+		labelID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var jids []string
+	for rows.Next() {
+		var jid string
+		if err := rows.Scan(&jid); err != nil {
+			return nil, err
+		}
+		jids = append(jids, jid)
+	}
+	return jids, rows.Err()
+}
+
 // FindChatName returns the name stored for a chat JID, empty if none.
 func (s *Store) FindChatName(jid string) string {
 	var name string
@@ -378,6 +458,21 @@ CREATE TABLE IF NOT EXISTS poll_votes (
 	selected_options_json TEXT NOT NULL,
 	timestamp TIMESTAMP NOT NULL,
 	PRIMARY KEY (poll_message_id, poll_chat_jid, voter_jid)
+);
+
+CREATE TABLE IF NOT EXISTS labels (
+	label_id TEXT PRIMARY KEY,
+	name TEXT,
+	color TEXT
+);
+
+CREATE TABLE IF NOT EXISTS label_associations (
+	chat_jid TEXT NOT NULL,
+	label_id TEXT NOT NULL,
+	labeled BOOLEAN NOT NULL DEFAULT 1,
+	PRIMARY KEY (chat_jid, label_id),
+	FOREIGN KEY (chat_jid) REFERENCES chats(jid),
+	FOREIGN KEY (label_id) REFERENCES labels(label_id)
 );
 `
 

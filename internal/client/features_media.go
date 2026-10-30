@@ -14,7 +14,7 @@ import (
 )
 
 // SendPoll sends a poll message. options are presented in the order given.
-// selectableCount is clamped to 1 when <= 0.
+// selectableCount is clamped to 1 when <= 0. Rate-limited.
 func (c *Client) SendPoll(ctx context.Context, recipient, question string, options []string, selectableCount int) SendResult {
 	if len(options) < 2 {
 		return SendResult{Success: false, Message: "poll needs at least 2 options"}
@@ -28,6 +28,9 @@ func (c *Client) SendPoll(ctx context.Context, recipient, question string, optio
 
 	recipientJID, err := parseRecipient(recipient)
 	if err != nil {
+		return SendResult{Success: false, Message: err.Error()}
+	}
+	if err := c.checkActionRate(ctx, recipientJID); err != nil {
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
@@ -56,7 +59,7 @@ func (c *Client) SendPoll(ctx context.Context, recipient, question string, optio
 
 // SendPollVote casts a vote on a previously-seen poll. pollMessageID is the
 // original poll's message ID. options must exactly match the option names
-// on the poll creation message.
+// on the poll creation message. Rate-limited.
 func (c *Client) SendPollVote(ctx context.Context, chatJID, pollMessageID string, options []string) SendResult {
 	if !c.wa.IsConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
@@ -70,6 +73,9 @@ func (c *Client) SendPollVote(ctx context.Context, chatJID, pollMessageID string
 
 	chat, err := parseRecipient(chatJID)
 	if err != nil {
+		return SendResult{Success: false, Message: err.Error()}
+	}
+	if err := c.checkActionRate(ctx, chat); err != nil {
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
@@ -177,6 +183,7 @@ func resolvePollSenderJID(sender string, chat types.JID) (types.JID, error) {
 
 // SendContactCard sends a contact vCard. If vcardOverride is non-empty, it is
 // sent verbatim; otherwise buildVCard(name, phone) synthesises a vCard 3.0.
+// Rate-limited.
 func (c *Client) SendContactCard(ctx context.Context, recipient, name, phone, vcardOverride string) SendResult {
 	if !c.wa.IsConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
@@ -187,6 +194,9 @@ func (c *Client) SendContactCard(ctx context.Context, recipient, name, phone, vc
 
 	recipientJID, err := parseRecipient(recipient)
 	if err != nil {
+		return SendResult{Success: false, Message: err.Error()}
+	}
+	if err := c.checkActionRate(ctx, recipientJID); err != nil {
 		return SendResult{Success: false, Message: err.Error()}
 	}
 

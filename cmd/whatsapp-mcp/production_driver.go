@@ -128,4 +128,14 @@ func (p *productionDriver) PairPhone(ctx context.Context, phone string) (string,
 	return p.c.PairPhone(ctx, phone)
 }
 
+// RequestHistorySync asks WhatsApp to backfill messages for a chat.
+func (p *productionDriver) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor string, count int, useLID bool) (string, error) {
+	return p.c.RequestHistorySync(ctx, chatJID, fromTimestamp, anchor, count, useLID)
+}
+
+// ListChatJIDs returns all cached chat JIDs.
+func (p *productionDriver) ListChatJIDs() ([]string, error) {
+	return p.c.Store().ListChatJIDs()
+}
+
 func (p *productionDriver) Disconnect() { p.c.Disconnect() }

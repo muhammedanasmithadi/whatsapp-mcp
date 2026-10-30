@@ -13,6 +13,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/sealjay/mcp-whatsapp/internal/ratelimit"
+	"github.com/sealjay/mcp-whatsapp/internal/store"
 )
 
 // MarkRead marks messageIDs as read for the given chat. senderJID is the
@@ -87,7 +88,30 @@ func (c *Client) MarkChatRead(ctx context.Context, chatJID string, limit int) (i
 	return count, nil
 }
 
+// checkActionRate applies the daemon-side rate limit to non-message WhatsApp
+// actions (reactions, replies, edits, revokes, poll votes, typing). It shares
+// the same limiter and windows as checkSendRate so an LLM cannot bypass the
+// send cap by switching to reactions.
+func (c *Client) checkActionRate(ctx context.Context, chatJID types.JID) error {
+	if c.limiter == nil {
+		return nil
+	}
+	if ratelimit.BypassFromContext(ctx) {
+		c.log.Warnf("RATE LIMIT OVERRIDE: action to %s bypassed the limiter via X-Rate-Limit-Override", c.redactor.JID(chatJID.String()))
+		return nil
+	}
+	isContact := c.IsKnownContact(chatJID)
+	if d := c.limiter.AllowSend(isContact); !d.Allowed {
+		c.log.Warnf("Rate limited: action to %s denied (%s); retry in %s", c.redactor.JID(chatJID.String()), d.Reason, d.RetryAfter.Round(time.Second))
+		return fmt.Errorf(
+			"rate limited: %s — retry in %s (set the X-Rate-Limit-Override header to bypass; see the daemon rate-limit docs)",
+			d.Reason, d.RetryAfter.Round(time.Second))
+	}
+	return nil
+}
+
 // SendReaction adds (or clears, if emoji is empty) a reaction to a message.
+// Rate-limited and cached like other outbound actions.
 func (c *Client) SendReaction(ctx context.Context, chatJID, messageID, senderJID, emoji string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -95,6 +119,9 @@ func (c *Client) SendReaction(ctx context.Context, chatJID, messageID, senderJID
 	chat, err := types.ParseJID(chatJID)
 	if err != nil {
 		return fmt.Errorf("invalid chat JID: %w", err)
+	}
+	if err := c.checkActionRate(ctx, chat); err != nil {
+		return err
 	}
 	var sender types.JID
 	if senderJID != "" {
@@ -105,13 +132,57 @@ func (c *Client) SendReaction(ctx context.Context, chatJID, messageID, senderJID
 	}
 
 	reaction := c.wa.BuildReaction(chat, sender, types.MessageID(messageID), emoji)
-	if _, err := c.wa.SendMessage(ctx, chat, reaction); err != nil {
+	resp, err := c.wa.SendMessage(ctx, chat, reaction)
+	if err != nil {
 		return fmt.Errorf("send reaction: %w", err)
 	}
+
+	// Cache the reaction so local history reflects it.
+	c.persistReaction(ctx, chat, resp.ID, messageID, emoji)
 	return nil
 }
 
+// persistReaction stores an outbound reaction in the message cache so it
+// appears in list_messages / get_message_context alongside other history.
+func (c *Client) persistReaction(ctx context.Context, chat types.JID, msgID, targetMessageID, emoji string) {
+	chatJID := chat.String()
+	if !strings.HasSuffix(chatJID, "@g.us") {
+		chatJID = c.store.ResolveLIDToJID(chatJID)
+	}
+
+	chatName := c.resolveChatNameFallback(ctx, chat, "")
+
+	now := time.Now()
+	if err := c.store.StoreChat(chatJID, chatName, now); err != nil {
+		c.log.Warnf("Failed to store chat for reaction: %v", err)
+	}
+
+	ourJID := ""
+	if c.wa.Store.ID != nil {
+		ourJID = c.wa.Store.ID.User
+	}
+
+	content := "[reaction] " + emoji
+	if emoji == "" {
+		content = "[reaction cleared]"
+	}
+
+	if err := c.store.StoreMessage(ctx, store.Message{
+		ID:         msgID,
+		ChatJID:    chatJID,
+		Sender:     ourJID,
+		Content:    content,
+		Timestamp:  now,
+		IsFromMe:   true,
+	}, nil, nil, nil, 0); err != nil {
+		c.log.Warnf("Failed to store reaction: %v", err)
+		return
+	}
+	c.log.Infof("[%s] -> %s [reaction %s]: %s", now.Format("2006-01-02 15:04:05"), c.redactor.JID(chatJID), c.redactor.MsgID(msgID), content)
+}
+
 // SendReply sends a text reply that quotes targetMessageID from chatJID.
+// Rate-limited and cached like other outbound actions.
 func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, targetSenderJID, body string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -119,6 +190,9 @@ func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, target
 	chat, err := types.ParseJID(chatJID)
 	if err != nil {
 		return fmt.Errorf("invalid chat JID: %w", err)
+	}
+	if err := c.checkActionRate(ctx, chat); err != nil {
+		return err
 	}
 
 	participant := ""
@@ -146,14 +220,18 @@ func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, target
 		MessageContextInfo: c.ephemeralContextInfo(ctx, chat),
 	}
 
-	if _, err := c.wa.SendMessage(ctx, chat, msg); err != nil {
+	resp, err := c.wa.SendMessage(ctx, chat, msg)
+	if err != nil {
 		return fmt.Errorf("send reply: %w", err)
 	}
+
+	// Cache the reply so local history stays complete.
+	c.persistSent(ctx, chat, resp.ID, body, "", msg)
 	return nil
 }
 
 // EditMessage edits a previously-sent message. The new body becomes the new
-// conversation text.
+// conversation text. Rate-limited.
 func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -161,6 +239,9 @@ func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody st
 	chat, err := types.ParseJID(chatJID)
 	if err != nil {
 		return fmt.Errorf("invalid chat JID: %w", err)
+	}
+	if err := c.checkActionRate(ctx, chat); err != nil {
+		return err
 	}
 
 	newContent := &waProto.Message{
@@ -175,7 +256,7 @@ func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody st
 
 // DeleteMessage revokes a message for everyone. senderJID is required only
 // when revoking someone else's message as a group admin; for your own
-// messages pass "".
+// messages pass "". Rate-limited because this is destructive.
 func (c *Client) DeleteMessage(ctx context.Context, chatJID, messageID, senderJID string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -183,6 +264,9 @@ func (c *Client) DeleteMessage(ctx context.Context, chatJID, messageID, senderJI
 	chat, err := types.ParseJID(chatJID)
 	if err != nil {
 		return fmt.Errorf("invalid chat JID: %w", err)
+	}
+	if err := c.checkActionRate(ctx, chat); err != nil {
+		return err
 	}
 	var sender types.JID
 	if senderJID != "" {
@@ -201,6 +285,7 @@ func (c *Client) DeleteMessage(ctx context.Context, chatJID, messageID, senderJI
 
 // SendTyping sets chat presence to "composing" when active is true, or
 // "paused" when false. kind may be "audio" to indicate a voice recording.
+// Rate-limited because presence spam can trigger abuse flags.
 func (c *Client) SendTyping(ctx context.Context, chatJID string, active bool, kind string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -208,6 +293,9 @@ func (c *Client) SendTyping(ctx context.Context, chatJID string, active bool, ki
 	chat, err := types.ParseJID(chatJID)
 	if err != nil {
 		return fmt.Errorf("invalid chat JID: %w", err)
+	}
+	if err := c.checkActionRate(ctx, chat); err != nil {
+		return err
 	}
 
 	state := types.ChatPresencePaused

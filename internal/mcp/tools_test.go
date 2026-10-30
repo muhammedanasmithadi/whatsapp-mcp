@@ -26,7 +26,9 @@ var expectedToolNames = []string{
 	"join_group_with_link",
 	"leave_group",
 	"list_chats",
+	"list_chats_by_label",
 	"list_groups",
+	"list_labels",
 	"list_messages",
 	"mark_chat_read",
 	"mark_read",
@@ -117,7 +119,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 
 func TestNewServer_ToolCount(t *testing.T) {
 	s := NewServer(nil, nil)
-	const want = 43
+	const want = 45
 	if got := len(s.MCP().ListTools()); got != want {
 		t.Errorf("tool count = %d, want %d", got, want)
 	}

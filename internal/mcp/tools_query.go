@@ -11,7 +11,7 @@ import (
 
 // registerQueryTools wires read-only query tools: list_chats, get_chat,
 // list_messages, get_message_context, search_contacts, get_status,
-// is_on_whatsapp.
+// is_on_whatsapp, list_labels, list_chats_by_label.
 func (s *Server) registerQueryTools() {
 	s.registerSearchContacts()
 	s.registerListMessages()
@@ -21,6 +21,8 @@ func (s *Server) registerQueryTools() {
 	s.registerIsOnWhatsApp()
 	s.registerGetStatus()
 	s.registerPairingStatus()
+	s.registerListLabels()
+	s.registerListChatsByLabel()
 }
 
 // -- search_contacts --------------------------------------------------------
@@ -331,4 +333,50 @@ func (s *Server) registerPairingStatus() {
 		}
 		return resultJSON(resp)
 	})
+}
+
+// -- list_labels ----------------------------------------------------------
+
+func (s *Server) registerListLabels() {
+	tool := mcp.NewTool("list_labels",
+		mcp.WithDescription("List all WhatsApp Business labels known to the paired account. Labels are a WhatsApp Business feature; personal accounts may have none. Read-only; no side effects. Returns a JSON array of label objects (each with label_id, name, color)."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.mcp.AddTool(tool, func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		labels, err := s.client.Store().ListLabels()
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultJSON(labels)
+	})
+}
+
+// -- list_chats_by_label --------------------------------------------------
+
+type listChatsByLabelArgs struct {
+	LabelID string `json:"label_id"`
+}
+
+func (s *Server) registerListChatsByLabel() {
+	tool := mcp.NewTool("list_chats_by_label",
+		mcp.WithDescription("List all chat JIDs that have the given WhatsApp Business label. Read-only; no side effects. Returns a JSON array of chat JID strings."),
+		mcp.WithString("label_id", mcp.Required(), mcp.Description("WhatsApp Business label ID (use `list_labels` to discover label IDs)")),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, a listChatsByLabelArgs) (*mcp.CallToolResult, error) {
+		if a.LabelID == "" {
+			return mcp.NewToolResultError("label_id is required"), nil
+		}
+		jids, err := s.client.Store().ListChatsByLabel(a.LabelID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultJSON(jids)
+	}))
 }
