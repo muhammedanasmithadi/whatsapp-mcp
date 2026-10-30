@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 // pairDriver is the minimal surface the Server needs from the underlying
@@ -48,11 +51,26 @@ type Config struct {
 type Server struct {
 	cfg   Config
 	cache *PairCache
+	// handlers is set in Run and exposed so the client can report metrics.
+	handlers *pairHandlers
+
+	// WebSocket broadcast hub for real-time message push notifications.
+	wsMu       sync.Mutex
+	wsSubs     map[chan wsEvent]struct{}
+	wsRegister chan chan wsEvent
+	wsUnregister chan chan wsEvent
+	wsBroadcast  chan wsEvent
 
 	mu         sync.Mutex
 	httpServer *http.Server
 	boundAddr  string
 	listenerOK chan struct{} // closed once the listener is bound (tests use this)
+}
+
+// wsEvent is a real-time event pushed to WebSocket subscribers.
+type wsEvent struct {
+	Type string `json:"type"` // "message", "paired", "unpaired", "error"
+	Data string `json:"data"`
 }
 
 // New constructs a Server but does not start any goroutines yet.
@@ -64,9 +82,13 @@ func New(cfg Config) (*Server, error) {
 		return nil, errors.New("daemon.New: Driver required")
 	}
 	return &Server{
-		cfg:        cfg,
-		cache:      NewPairCache(),
-		listenerOK: make(chan struct{}),
+		cfg:          cfg,
+		cache:        NewPairCache(),
+		wsSubs:       make(map[chan wsEvent]struct{}),
+		wsRegister:   make(chan chan wsEvent),
+		wsUnregister: make(chan chan wsEvent),
+		wsBroadcast:  make(chan wsEvent, 256),
+		listenerOK:   make(chan struct{}),
 	}, nil
 }
 
@@ -89,6 +111,101 @@ func (s *Server) BoundAddr() string {
 	return s.boundAddr
 }
 
+// MetricSink implementation — delegates to the internal pairHandlers.
+// These are no-ops if handlers haven't been created yet (e.g. before Run).
+func (s *Server) IncMessagesIn()   { if s.handlers != nil { s.handlers.incMessagesIn() } }
+func (s *Server) IncMessagesOut()  { if s.handlers != nil { s.handlers.incMessagesOut() } }
+func (s *Server) IncSends()        { if s.handlers != nil { s.handlers.incSends() } }
+func (s *Server) IncErrors()       { if s.handlers != nil { s.handlers.incErrors() } }
+func (s *Server) IncRateLimited()  { if s.handlers != nil { s.handlers.incRateLimited() } }
+
+// PublishWS publishes a real-time event to all WebSocket subscribers. Safe to
+// call from any goroutine; non-blocking if the broadcast channel is full.
+func (s *Server) PublishWS(evType, data string) {
+	select {
+	case s.wsBroadcast <- wsEvent{Type: evType, Data: data}:
+	default:
+		// Drop if the broadcast channel is full — better than blocking.
+	}
+}
+
+// wshub is the WebSocket broadcast hub. It registers/unregisters subscribers
+// and fan-outs broadcast events to all connected clients. Runs in its own
+// goroutine started from Run().
+func (s *Server) wshub(ctx context.Context) {
+	for {
+		select {
+		case ch := <-s.wsRegister:
+			s.wsMu.Lock()
+			s.wsSubs[ch] = struct{}{}
+			s.wsMu.Unlock()
+		case ch := <-s.wsUnregister:
+			s.wsMu.Lock()
+			delete(s.wsSubs, ch)
+			close(ch)
+			s.wsMu.Unlock()
+		case ev := <-s.wsBroadcast:
+			s.wsMu.Lock()
+			for ch := range s.wsSubs {
+				select {
+				case ch <- ev:
+				default:
+					// Slow subscriber: drop rather than block.
+				}
+			}
+			s.wsMu.Unlock()
+		case <-ctx.Done():
+			s.wsMu.Lock()
+			for ch := range s.wsSubs {
+				close(ch)
+			}
+			s.wsSubs = make(map[chan wsEvent]struct{})
+			s.wsMu.Unlock()
+			return
+		}
+	}
+}
+
+// handleWSEvents upgrades the HTTP connection to a WebSocket and forwards
+// broadcast events to the client until the connection closes.
+func (s *Server) handleWSEvents(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		http.Error(w, "websocket upgrade failed", http.StatusInternalServerError)
+		return
+	}
+	defer conn.Close(websocket.StatusInternalError, "connection closed")
+
+	ctx := r.Context()
+	ch := make(chan wsEvent, 16)
+
+	s.wsMu.Lock()
+	s.wsSubs[ch] = struct{}{}
+	s.wsMu.Unlock()
+
+	defer func() {
+		s.wsMu.Lock()
+		delete(s.wsSubs, ch)
+		close(ch)
+		s.wsMu.Unlock()
+	}()
+
+	for {
+		select {
+		case ev := <-ch:
+			data, err := json.Marshal(ev)
+			if err != nil {
+				return
+			}
+			if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 // Run starts the HTTP listener, begins the pairing state machine, and
 // blocks until ctx is cancelled. On cancel, performs the shutdown
 // sequence: drain HTTP → Disconnect driver.
@@ -99,7 +216,14 @@ func (s *Server) Run(ctx context.Context) error {
 		coder = pc
 	}
 	handlers := newPairHandlers(s.cache, s.cfg.Driver, coder)
+	s.handlers = handlers
 	handlers.mount(mux)
+
+	// WebSocket broadcast hub for real-time push notifications.
+	go s.wshub(ctx)
+
+	mux.HandleFunc("/ws/events", s.handleWSEvents)
+
 	if s.cfg.MCPMount != nil {
 		s.cfg.MCPMount(mux)
 	} else {

@@ -58,6 +58,9 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 	}
 
 	if err := c.checkSendRate(ctx, recipientJID); err != nil {
+		if c.metricSink != nil {
+			c.metricSink.IncRateLimited()
+		}
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
@@ -74,9 +77,20 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 		msg.Conversation = proto.String(message)
 	}
 
+	if c.metricSink != nil {
+		c.metricSink.IncSends()
+	}
+
 	resp, err := c.wa.SendMessage(ctx, recipientJID, msg)
 	if err != nil {
+		if c.metricSink != nil {
+			c.metricSink.IncErrors()
+		}
 		return SendResult{Success: false, Message: fmt.Sprintf("Error sending message: %v", err)}
+	}
+
+	if c.metricSink != nil {
+		c.metricSink.IncMessagesOut()
 	}
 
 	// Cache the sent message so local history stays complete.

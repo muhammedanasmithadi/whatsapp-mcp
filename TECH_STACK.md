@@ -4,12 +4,15 @@
 
 | Layer | Choice | Why |
 |---|---|---|
-| Language | Go 1.26 | Single static binary, fast startup, low memory (~16 MB RSS), excellent concurrency for the long-lived WhatsApp socket + MCP HTTP server. You already have Go 1.27 via mise. |
-| WhatsApp protocol | whatsmeow (WhatsApp Web multidevice) | The de-facto Go library for linking a personal account as a "device." Reads your real chats via QR pairing. Unofficial — WhatsApp ToS discourages it (~20-day session rotation, linked-device cap). |
-| Message store | SQLite (2 files: messages.db, whatsapp.db) | Zero-config, file-per-account, ACID, easy to back up/encrypt. No separate DB process. |
-| MCP transport | Streamable HTTP (`mark3labs/mcp-go`) | Stateless, works over HTTP, no stdio juggling. OpenCode/Claude/Cursor connect to `http://127.0.0.1:8765/mcp`. |
-| Pairing UX | Embedded Go templates + SSE (`/pair/events`) | Event-driven QR/status push instead of 5-second page auto-refresh. |
-| Packaging / ops | `go build` single binary + systemd unit + Dockerfile | Deploy once, auto-restart, loopback-only by default. |
+| Language | Go 1.27.0 | Single static binary, fast startup, low memory (~16 MB RSS), excellent concurrency for the long-lived WhatsApp socket + MCP HTTP server. You already have Go 1.27 via mise. |
+| WhatsApp protocol | whatsmeow (WhatsApp Web multidevice) | The de-facto Go library for linking a personal account as a "device." Reads your real chats via QR pairing. Unofficial — WhatsApp ToS discourages it (~20-day session rotation, linked-device cap). v0.0.0-20261029 pinned. |
+| Message store | SQLite (2 files: messages.db, whatsapp.db) | Zero-config, file-per-account, ACID, WAL journal mode, easy to back up/encrypt. No separate DB process. |
+| MCP transport | Streamable HTTP (`mark3labs/mcp-go` v1.4.0) | Stateless, works over HTTP, no stdio juggling. OpenCode/Claude/Cursor connect to `http://127.0.0.1:8765/mcp`. |
+| Real-time push | WebSocket (`/ws/events`) + SSE (`/pair/events`) | WS broadcast hub pushes new-message events to connected clients; SSE pushes pairing state transitions live. |
+| Observability | `/healthz` + `/metrics` (Prometheus text) | Health endpoint for orchestrators; Prometheus counters for messages in/out, sends, errors, rate limits, pairing state, uptime. |
+| Logging | Structured JSON (`--log-format json`) | Each log line is a self-contained JSON object for log-collector ingestion. Text mode for human readability. |
+| Pairing UX | Embedded Go templates + event-driven SSE | QR/state pushed to browser instantly instead of 5-second auto-refresh. |
+| Packaging / ops | `go build` single binary + systemd unit + Dockerfile | Deploy once, auto-restart, loopback-only by default. Docker multi-stage build for easy portability. |
 
 **Dependency footprint:** ~12 direct deps, dominated by `go.mau.fi/whatsmeow` (Signal-protocol E2E, WebSocket to WhatsApp servers) and `mattn/go-sqlite3` (CGO). Binary ~37 MB.
 
@@ -34,11 +37,34 @@ Multi-instance WhatsApp management API with its own REST surface, instances, QR 
 - **Verdict:** Relevant if you later want to offer WhatsApp MCP as a multi-tenant service. Not for personal use.
 
 ### 4. Official Meta WhatsApp Business Cloud API (no community wrapper)
-Meta does **not** publish an official MCP server. Their org has only `meta/mcpguard-dynamic` (an eBPF sandbox for MCP tool calls). The official path is the Cloud API + a community MCP wrapper (e.g. `@pappcorn/whatsapp-mcp`, `waseemnasir2k26/whatsapp-cloud-mcp`).
+Meta does **not** publish an official MCP server. Their GitHub org has only `meta/mcpguard-dynamic` (an eBPF sandbox for MCP tool calls). The official path is the Cloud API + a community MCP wrapper (e.g. `@pappcorn/whatsapp-mcp`, `waseemnasir2k26/whatsapp-cloud-mcp`).
 
 ## Recommendation
 
 **Stay on the current Go + whatsmeow stack.** For a personal-account WhatsApp MCP the language is not the bottleneck — the WhatsApp protocol (unofficial multidevice), message freshness, media CDN expiry, and prompt-injection safety are. Switching to Node/Python/Rust buys nothing and adds ops surface. Invest effort in the MCP tool surface, pairing UX, health endpoints, and media reliability instead.
+
+### Dependency upgrades applied
+
+| Dependency | Before | After | Reason |
+|---|---|---|---|
+| Go language | 1.26.0 | 1.27.0 | Latest stable, performance + security improvements |
+| mark3labs/mcp-go | v1.3.0 | v1.4.0 | Bug fixes: session IDs, resource registries, stdio cleanup, OTEL |
+| go.mau.fi/whatsmeow | v0.0.0-20261016 | v0.0.0-20261029 | Protocol compatibility, bug fixes |
+
+### Observability stack
+
+| Endpoint | Format | Purpose |
+|---|---|---|
+| `GET /healthz` | JSON | connected/paired/state/uptime — for systemd, load balancers, MCP clients |
+| `GET /metrics` | Prometheus text | messages_in/out, sends, errors, rate_limited, pairing_state gauge, uptime |
+| Logs | text or JSON | `--log-format json` for log collectors; text for human operators |
+
+### Real-time push
+
+| Transport | Endpoint | Purpose |
+|---|---|---|
+| SSE | `/pair/events` | Pairing state transitions (unpaired → awaiting_qr → paired → error) |
+| WebSocket | `/ws/events` | New-message push notifications — clients connect and receive JSON events as messages arrive |
 
 ---
 

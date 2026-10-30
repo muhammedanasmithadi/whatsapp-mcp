@@ -3,6 +3,7 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,14 @@ import (
 
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
+
+// logEvent is a single structured log entry emitted in JSON mode.
+type logEvent struct {
+	Time   string `json:"ts"`
+	Level  string `json:"level"`
+	Module string `json:"module"`
+	Msg    string `json:"msg"`
+}
 
 var (
 	logColors = map[string]string{
@@ -76,4 +85,50 @@ func (s *stderrLogger) Sub(mod string) waLog.Logger {
 		color: s.color,
 		min:   s.min,
 	}
+}
+
+// jsonLogger emits structured JSON log entries to stderr. Each line is a
+// self-contained JSON object suitable for ingestion by log collectors.
+type jsonLogger struct {
+	mod  string
+	min  int
+	enc  *json.Encoder
+}
+
+func newJSONLogger(module string, level string) waLog.Logger {
+	return &jsonLogger{
+		mod: module,
+		min: logLevelToInt[strings.ToUpper(level)],
+		enc: json.NewEncoder(os.Stderr),
+	}
+}
+
+func (j *jsonLogger) output(level, msg string) {
+	if logLevelToInt[level] < j.min {
+		return
+	}
+	_ = j.enc.Encode(logEvent{
+		Time:   time.Now().Format(time.RFC3339Nano),
+		Level:  level,
+		Module: j.mod,
+		Msg:    msg,
+	})
+}
+
+func (j *jsonLogger) Errorf(msg string, args ...interface{}) { j.output("ERROR", fmt.Sprintf(msg, args...)) }
+func (j *jsonLogger) Warnf(msg string, args ...interface{})  { j.output("WARN", fmt.Sprintf(msg, args...)) }
+func (j *jsonLogger) Infof(msg string, args ...interface{})  { j.output("INFO", fmt.Sprintf(msg, args...)) }
+func (j *jsonLogger) Debugf(msg string, args ...interface{}) { j.output("DEBUG", fmt.Sprintf(msg, args...)) }
+
+func (j *jsonLogger) Sub(mod string) waLog.Logger {
+	return &jsonLogger{
+		mod:  fmt.Sprintf("%s/%s", j.mod, mod),
+		min:  j.min,
+		enc:  j.enc,
+	}
+}
+
+// NewJSONLogger returns a waLog.Logger that writes structured JSON to stderr.
+func NewJSONLogger(module string, level string) waLog.Logger {
+	return newJSONLogger(module, level)
 }

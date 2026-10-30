@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 
@@ -182,14 +183,28 @@ func (c *Client) handleMessage(msg *events.Message) {
 
 	err := c.store.StoreMessage(context.Background(), nm.msg, nm.mediaKey, nm.fileSHA256, nm.fileEncSHA256, nm.fileLength)
 
-	if err == nil && len(pollOptions) > 0 {
-		if perr := c.store.StorePollMetadata(context.Background(), msg.Info.ID, nm.chatJID, pollOptions); perr != nil {
-			c.log.Warnf("Failed to store poll metadata for %s: %v", msg.Info.ID, perr)
+	if err == nil {
+		if c.metricSink != nil {
+			c.metricSink.IncMessagesIn()
+		}
+		if c.onIncomingMsg != nil {
+			payload := fmt.Sprintf(`{"chat_jid":"%s","sender":"%s","content":"%s","media_type":"%s","timestamp":"%s"}`,
+				c.redactor.JID(nm.msg.ChatJID), c.redactor.JID(nm.msg.Sender), c.redactor.Body(nm.msg.Content),
+				nm.msg.MediaType, nm.msg.Timestamp.Format(time.RFC3339))
+			c.onIncomingMsg(payload)
+		}
+		if len(pollOptions) > 0 {
+			if perr := c.store.StorePollMetadata(context.Background(), msg.Info.ID, nm.chatJID, pollOptions); perr != nil {
+				c.log.Warnf("Failed to store poll metadata for %s: %v", msg.Info.ID, perr)
+			}
 		}
 	}
 
 	if err != nil {
 		c.log.Warnf("Failed to store message: %v", err)
+		if c.metricSink != nil {
+			c.metricSink.IncErrors()
+		}
 		return
 	}
 
@@ -319,7 +334,13 @@ func (c *Client) handleHistorySync(historySync *events.HistorySync) {
 
 			if err := c.store.StoreMessage(ctx, nm.msg, nm.mediaKey, nm.fileSHA256, nm.fileEncSHA256, nm.fileLength); err != nil {
 				c.log.Warnf("Failed to store history message: %v", err)
+				if c.metricSink != nil {
+					c.metricSink.IncErrors()
+				}
 				continue
+			}
+			if c.metricSink != nil {
+				c.metricSink.IncMessagesIn()
 			}
 			syncedCount++
 			if nm.msg.MediaType != "" {

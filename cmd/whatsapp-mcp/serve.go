@@ -18,19 +18,22 @@ import (
 	mcpsrv "github.com/sealjay/mcp-whatsapp/internal/mcp"
 	"github.com/sealjay/mcp-whatsapp/internal/security"
 	"github.com/sealjay/mcp-whatsapp/internal/store"
+	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	var (
-		addr     string
+		addr      string
 		allowRemote bool
-		readOnly bool
+		readOnly   bool
+		logFormat  string
 	)
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&addr, "addr", "", "HTTP bind address (default: 127.0.0.1:8765, env WHATSAPP_MCP_ADDR)")
 	fs.BoolVar(&allowRemote, "allow-remote", false, "allow binding to a non-loopback address")
 	fs.BoolVar(&readOnly, "read-only", false, "expose only read/query tools; disable send, edit, delete, mark-read, group/privacy mutations (env WHATSAPP_MCP_READ_ONLY)")
+	fs.StringVar(&logFormat, "log-format", "text", "log output format: text (default) or json")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -98,10 +101,24 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 		deviceName = "WhatsApp MCP"
 	}
 
+	if logFormat == "" {
+		logFormat = os.Getenv("WHATSAPP_MCP_LOG_FORMAT")
+	}
+	if logFormat == "" {
+		logFormat = "text"
+	}
+
+	var logger waLog.Logger
+	if logFormat == "json" {
+		logger = client.NewJSONLogger("Client", "INFO")
+	} else {
+		logger = client.NewStderrLogger("Client", "INFO", false)
+	}
+
 	c, err := client.New(ctx, client.Config{
 		StoreDir:         storeDir,
 		Store:            st,
-		Logger:           client.NewStderrLogger("Client", "INFO", false),
+		Logger:           logger,
 		AllowedMediaRoot: allowedMediaRoot,
 		Redactor:         redactor,
 		DeviceName:       deviceName,
@@ -125,6 +142,15 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 		fmt.Fprintf(os.Stderr, "daemon.New: %v\n", err)
 		return 1
 	}
+
+	// Wire the daemon as the client's metrics sink so send/receive/error
+	// counters are exposed at /metrics.
+	c.SetMetricSink(d)
+
+	// Wire real-time message events to WebSocket subscribers.
+	c.SetOnIncomingMessage(func(data string) {
+		d.PublishWS("message", data)
+	})
 
 	mcpOpts := []mcpsrv.Option{}
 	if readOnly {

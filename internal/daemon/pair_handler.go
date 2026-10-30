@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sealjay/mcp-whatsapp/internal/client"
@@ -64,6 +65,15 @@ type pairHandlers struct {
 	pairEventLimiter *Limiter
 
 	startedAt time.Time
+
+	// Metrics counters (Prometheus text format at /metrics).
+	metrics struct {
+		messagesIn   int64
+		messagesOut  int64
+		sendsTotal   int64
+		errorsTotal  int64
+		rateLimited  int64
+	}
 
 	// CSRF protection for the reset endpoint.
 	csrfMu    sync.Mutex
@@ -128,6 +138,7 @@ func (h *pairHandlers) mount(mux *http.ServeMux) {
 	mux.HandleFunc("/pair/reset", h.handlePairReset)
 	mux.HandleFunc("/pair/code", h.handlePairCode)
 	mux.HandleFunc("/healthz", h.handleHealth)
+	mux.HandleFunc("/metrics", h.handleMetrics)
 }
 
 // healthzResponse is the JSON body of /healthz.
@@ -157,6 +168,82 @@ func (h *pairHandlers) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// handleMetrics exposes Prometheus-format metrics for scraping.
+func (h *pairHandlers) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "GET required", http.StatusMethodNotAllowed)
+		return
+	}
+	snap := h.cache.Snapshot()
+
+	var pairingState float64
+	switch snap.State {
+	case PairStateUnpaired:
+		pairingState = 0
+	case PairStateAwaitingQR:
+		pairingState = 1
+	case PairStatePaired:
+		pairingState = 2
+	case PairStateError:
+		pairingState = 3
+	}
+
+	mi := atomic.LoadInt64(&h.metrics.messagesIn)
+	mo := atomic.LoadInt64(&h.metrics.messagesOut)
+	sends := atomic.LoadInt64(&h.metrics.sendsTotal)
+	errs := atomic.LoadInt64(&h.metrics.errorsTotal)
+	rl := atomic.LoadInt64(&h.metrics.rateLimited)
+	uptime := int64(time.Since(h.startedAt).Seconds())
+
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	fmt.Fprintf(w, "# HELP whatsapp_mcp_pairing_state Pairing state gauge (0=unpaired,1=awaiting_qr,2=paired,3=error)\n")
+	fmt.Fprintf(w, "# TYPE whatsapp_mcp_pairing_state gauge\n")
+	fmt.Fprintf(w, "whatsapp_mcp_pairing_state %g\n", pairingState)
+	fmt.Fprintf(w, "# HELP whatsapp_mcp_messages_in_total Total incoming messages received\n")
+	fmt.Fprintf(w, "# TYPE whatsapp_mcp_messages_in_total counter\n")
+	fmt.Fprintf(w, "whatsapp_mcp_messages_in_total %d\n", mi)
+	fmt.Fprintf(w, "# HELP whatsapp_mcp_messages_out_total Total outgoing messages sent\n")
+	fmt.Fprintf(w, "# TYPE whatsapp_mcp_messages_out_total counter\n")
+	fmt.Fprintf(w, "whatsapp_mcp_messages_out_total %d\n", mo)
+	fmt.Fprintf(w, "# HELP whatsapp_mcp_sends_total Total send tool invocations\n")
+	fmt.Fprintf(w, "# TYPE whatsapp_mcp_sends_total counter\n")
+	fmt.Fprintf(w, "whatsapp_mcp_sends_total %d\n", sends)
+	fmt.Fprintf(w, "# HELP whatsapp_mcp_errors_total Total errors\n")
+	fmt.Fprintf(w, "# TYPE whatsapp_mcp_errors_total counter\n")
+	fmt.Fprintf(w, "whatsapp_mcp_errors_total %d\n", errs)
+	fmt.Fprintf(w, "# HELP whatsapp_mcp_rate_limited_total Total rate-limited requests\n")
+	fmt.Fprintf(w, "# TYPE whatsapp_mcp_rate_limited_total counter\n")
+	fmt.Fprintf(w, "whatsapp_mcp_rate_limited_total %d\n", rl)
+	fmt.Fprintf(w, "# HELP whatsapp_mcp_uptime_seconds Daemon uptime in seconds\n")
+	fmt.Fprintf(w, "# TYPE whatsapp_mcp_uptime_seconds counter\n")
+	fmt.Fprintf(w, "whatsapp_mcp_uptime_seconds %d\n", uptime)
+}
+
+// incMessagesIn increments the incoming message counter.
+func (h *pairHandlers) incMessagesIn() {
+	atomic.AddInt64(&h.metrics.messagesIn, 1)
+}
+
+// incMessagesOut increments the outgoing message counter.
+func (h *pairHandlers) incMessagesOut() {
+	atomic.AddInt64(&h.metrics.messagesOut, 1)
+}
+
+// incSends increments the send tool invocation counter.
+func (h *pairHandlers) incSends() {
+	atomic.AddInt64(&h.metrics.sendsTotal, 1)
+}
+
+// incErrors increments the error counter.
+func (h *pairHandlers) incErrors() {
+	atomic.AddInt64(&h.metrics.errorsTotal, 1)
+}
+
+// incRateLimited increments the rate-limited counter.
+func (h *pairHandlers) incRateLimited() {
+	atomic.AddInt64(&h.metrics.rateLimited, 1)
 }
 
 func (h *pairHandlers) handlePairPage(w http.ResponseWriter, r *http.Request) {

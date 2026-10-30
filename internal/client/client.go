@@ -33,7 +33,7 @@ type Config struct {
 	AllowedMediaRoot string             // absolute path; media_path args must live under this
 	Redactor         *security.Redactor // optional; defaults to a redacting instance
 	// DeviceName overrides the name shown for this linked device in WhatsApp's
-	// "Linked Devices" list. Defaults to "whatsmeow" when empty. Set via
+	// "Linked Devices" list. Defaults to "WhatsApp MCP" when empty. Set via
 	// env WHATSAPP_MCP_DEVICE_NAME in the CLI.
 	DeviceName string
 	// RateLimiter throttles outbound sends and usync lookups. Optional; New
@@ -41,6 +41,22 @@ type Config struct {
 	// explicitly-configured limiter to override the defaults, or leave the
 	// field nil on a Client literal (as unit tests do) to disable limiting.
 	RateLimiter *ratelimit.Limiter
+	// MetricSink, if set, receives Prometheus counter increments for
+	// messages in/out, sends, errors, and rate-limited requests.
+	MetricSink MetricSink
+	// OnIncomingMessage, if set, is called with a JSON payload for every
+	// newly stored incoming message. Used by the daemon to push real-time
+	// events to WebSocket subscribers.
+	OnIncomingMessage func(data string)
+}
+
+// MetricSink receives Prometheus counter increments from the client.
+type MetricSink interface {
+	IncMessagesIn()
+	IncMessagesOut()
+	IncSends()
+	IncErrors()
+	IncRateLimited()
 }
 
 // Client wraps a whatsmeow.Client together with the message cache and logger.
@@ -54,6 +70,8 @@ type Client struct {
 	allowedMediaRoot string
 	redactor         *security.Redactor
 	limiter          *ratelimit.Limiter
+	metricSink       MetricSink
+	onIncomingMsg    func(data string)
 }
 
 // New constructs a Client. It sets the latest WhatsApp version best-effort,
@@ -144,7 +162,22 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		allowedMediaRoot: cfg.AllowedMediaRoot,
 		redactor:         redactor,
 		limiter:          limiter,
+		metricSink:       cfg.MetricSink,
+		onIncomingMsg:    cfg.OnIncomingMessage,
 	}, nil
+}
+
+// SetMetricSink sets the metrics sink after construction. Useful when the
+// sink (the daemon's pairHandlers) is created after the client.
+func (c *Client) SetMetricSink(sink MetricSink) {
+	c.metricSink = sink
+}
+
+// SetOnIncomingMessage sets the callback invoked for every newly stored
+// incoming message. Used by the daemon to push real-time events to WebSocket
+// subscribers.
+func (c *Client) SetOnIncomingMessage(fn func(data string)) {
+	c.onIncomingMsg = fn
 }
 
 // ValidateMediaPath is a bound convenience wrapper around
