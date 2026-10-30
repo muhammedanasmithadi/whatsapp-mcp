@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/sealjay/mcp-whatsapp/internal/security"
 	"go.mau.fi/whatsmeow"
@@ -45,6 +47,30 @@ func (d *MediaDownloader) GetFileSHA256() []byte    { return d.FileSHA256 }
 func (d *MediaDownloader) GetFileEncSHA256() []byte { return d.FileEncSHA256 }
 func (d *MediaDownloader) GetMediaType() whatsmeow.MediaType {
 	return d.MediaType
+}
+
+// IsMediaExpired reports whether err is a WhatsApp CDN expiry error (403,
+// 404, or 410) meaning the media URL has expired and must be refreshed by
+// re-syncing the chat (see RecoverMedia).
+func IsMediaExpired(err error) bool {
+	var dhe whatsmeow.DownloadHTTPError
+	if errors.As(err, &dhe) && dhe.Response != nil {
+		switch dhe.Response.StatusCode {
+		case http.StatusForbidden, http.StatusNotFound, http.StatusGone:
+			return true
+		}
+	}
+	// Also match by error value for the package-level sentinel errors.
+	for _, sample := range []error{
+		whatsmeow.ErrMediaDownloadFailedWith403,
+		whatsmeow.ErrMediaDownloadFailedWith404,
+		whatsmeow.ErrMediaDownloadFailedWith410,
+	} {
+		if errors.Is(err, sample) {
+			return true
+		}
+	}
+	return false
 }
 
 // Download fetches media for a previously-cached message and writes it under
@@ -168,6 +194,12 @@ func (c *Client) Download(ctx context.Context, messageID, chatJID, outputPath st
 		err = errors.New("media downloader is unavailable")
 	}
 	if err != nil {
+		if IsMediaExpired(err) {
+			return DownloadResult{
+				Success: false,
+				Message: fmt.Sprintf("media URL has expired (CDN 403/404/410). Run request_sync on chat %s to refresh media URLs, then retry download_media", chatJID),
+			}
+		}
 		return DownloadResult{Success: false, Message: fmt.Sprintf("failed to download media: %v", err)}
 	}
 
@@ -292,6 +324,20 @@ func placeAtOutput(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+// RecoverMedia requests a fresh history sync for the chat containing the
+// given message so WhatsApp re-sends it with a current media URL. After the
+// sync completes, the cached media URL/direct_path are refreshed and
+// download_media can be retried. Returns a description of what was requested.
+func (c *Client) RecoverMedia(ctx context.Context, messageID, chatJID string) (string, error) {
+	// Ask WhatsApp to backfill from the oldest cached message up to and
+	// including the target message, so the media URL is refreshed.
+	msg, err := c.RequestHistorySync(ctx, chatJID, time.Time{}, "oldest", 50, true)
+	if err != nil {
+		return "", fmt.Errorf("request history sync for media recovery: %w", err)
+	}
+	return msg, nil
 }
 
 // preferredDirectPath picks the value handed to whatsmeow as the download's

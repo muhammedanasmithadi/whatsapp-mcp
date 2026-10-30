@@ -9,16 +9,26 @@
 | 3 | Incoming contact cards silently dropped | Stored as `[contact card] Name` (+ vCard) text | `internal/client/events.go` |
 | 4 | Device shows as "whatsmeow" in Linked Devices | Configurable `DeviceName` (default "WhatsApp MCP") via `WHATSAPP_MCP_DEVICE_NAME` | `internal/client/client.go`, `cmd/whatsapp-mcp/{serve,login}.go` |
 | 5 | Pairing page auto-refreshes every 5 s (polling) | Event-driven SSE `/pair/events` pushes QR/state transitions live | `internal/daemon/pair_handler.go`, `pair_cache.go`, `templates/pair.html.tmpl` |
+| 6 | No health/readiness endpoint | `GET /healthz` returns connected/paired/state/uptime | `internal/daemon/pair_handler.go` |
+| 7 | No Prometheus metrics | `GET /metrics` returns messages in/out, sends, errors, rate-limited, pairing state, uptime | `internal/daemon/pair_handler.go` |
+| 8 | No structured logging | `--log-format json` / `WHATSAPP_MCP_LOG_FORMAT=json` emits JSON log lines | `internal/client/logger.go`, `cmd/whatsapp-mcp/serve.go` |
+| 9 | No WebSocket real-time push | `WS /ws/events` broadcasts new-message events to connected clients | `internal/daemon/server.go` |
+| 10 | Edit/delete propagation to cache | `IsEdit` handled in `handleMessage`; `store.UpdateMessage` / `store.RevokeMessage` added | `internal/client/events.go`, `internal/store/store.go` |
+| 12 | Media 403 / unrecoverable after CDN expiry | `IsMediaExpired` detects 403/404/410; `recover_media` MCP tool + `RecoverMedia` client method | `internal/client/download.go`, `internal/mcp/tools_message.go` |
+| 13 | Pairing session expires; needs restart to re-pair | Auto-retry with exponential backoff in `StartPairing`; `onLoggedOut` runs in goroutine | `cmd/whatsapp-mcp/production_driver.go`, `internal/daemon/server.go` |
 
 ## Gap backlog (from upstream issues, not yet fixed)
 
 | Priority | Issue | Description | Effort |
 |---|---|---|---|
-| P0 | #65 No health/readiness endpoint | `/healthz` returning connected/paired/store state so systemd/orchestrators can detect logged-out/banned/stream-replaced | ~1h |
-| P0 | #72/#67 download_media 403 / media unrecoverable after CDN expiry | History-synced media fails to download; no re-upload recovery | ~4-8h (needs whatsmeow media re-fetch) |
-| P1 | #70/#71 Edited & deleted-for-everyone messages keep original content in cache | Apply revoke/edit events to stored rows | ~2h |
-| P1 | #76/#77 Pairing session expires; needs restart to re-pair | Auto-start a new pairing flow when the previous expires instead of requiring `serve` restart | ~3h |
 | P1 | #78/#79 Replies & reactions bypass send rate limiter; sent replies not cached | Extend ratelimit to replies/reactions; cache outbound messages | ~3h |
+| P2 | #59/#60 Full history sync when linking a device | Opt-in bulk backfill at pairing time instead of only recent window | ~4h |
+| P2 | #52/#56 Voice-note transcription via pluggable STT endpoint | Transcribe incoming `.ogg` voice notes to text | ~6h (external ASR dep) |
+| P2 | #51/#53 Read-only WhatsApp Business label support | List labels, find chats by label | ~3h |
+| P3 | #69 Publish container image to GHCR on release tags | CI container build/publish | ~2h |
+| P3 | #82 Include message ID on every `list_messages` line | Debuggability | ~0.5h |
+| P3 | #80/#85 Remote clients can't retrieve documents/videos / send attachments from download links | Embed or proxy media for remote MCP clients | ~4h |
+| P3 | #75/#74 Redact chat names, contact names, full JIDs in logs | Already partially done; extend to all log paths | ~1h |
 | P2 | #59/#60 Full history sync when linking a device | Opt-in bulk backfill at pairing time instead of only recent window | ~4h |
 | P2 | #52/#56 Voice-note transcription via pluggable STT endpoint | Transcribe incoming `.ogg` voice notes to text | ~6h (external ASR dep) |
 | P2 | #51/#53 Read-only WhatsApp Business label support | List labels, find chats by label | ~3h |

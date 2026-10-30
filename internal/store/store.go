@@ -182,6 +182,49 @@ func (s *Store) StoreMessage(ctx context.Context, m Message, mediaKey, fileSHA25
 	return err
 }
 
+// UpdateMessage replaces the content of an existing message row. Used when
+// WhatsApp delivers an edit event for a previously-cached message. Returns
+// sql.ErrNoRows when no matching row exists.
+func (s *Store) UpdateMessage(ctx context.Context, id, chatJID, content string) error {
+	result, err := s.db.ExecContext(ctx,
+		"UPDATE messages SET content = ? WHERE id = ? AND chat_jid = ?",
+		content, id, chatJID,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// RevokeMessage marks a message as deleted-for-everyone in the local cache.
+// The content is replaced with a placeholder and the media fields are cleared
+// so downstream consumers (list_messages, download_media) treat it as revoked.
+// Returns sql.ErrNoRows when no matching row exists.
+func (s *Store) RevokeMessage(ctx context.Context, id, chatJID string) error {
+	result, err := s.db.ExecContext(ctx,
+		"UPDATE messages SET content = '[deleted]', media_type = '', url = '', direct_path = '', media_key = NULL, file_sha256 = NULL, file_enc_sha256 = NULL, file_length = 0 WHERE id = ? AND chat_jid = ?",
+		id, chatJID,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // StoreMediaInfo updates the media columns of an existing message row.
 func (s *Store) StoreMediaInfo(id, chatJID, url, directPath string, mediaKey, fileSHA256, fileEncSHA256 []byte, fileLength uint64) error {
 	_, err := s.db.Exec(

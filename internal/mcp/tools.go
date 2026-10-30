@@ -22,6 +22,7 @@ func (s *Server) registerTools() {
 		// media download are kept because they are read-side operations.
 		s.registerRequestSync()
 		s.registerDownloadMedia()
+		s.registerRecoverMedia()
 		s.registerListGroups()
 		s.registerGetGroupInfo()
 		s.registerGetGroupInviteLink()

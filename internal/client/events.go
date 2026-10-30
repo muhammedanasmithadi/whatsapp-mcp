@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -174,6 +175,31 @@ func (c *Client) handleMessage(msg *events.Message) {
 			if nm.msg.Content == "" {
 				nm.msg.Content = "[poll] " + pc.GetName()
 			}
+		}
+	}
+
+	// WhatsApp wraps edited messages in EditedMessage and sets IsEdit. When
+	// we see one, update the stored row instead of inserting a duplicate.
+	if msg.IsEdit {
+		if err := c.store.UpdateMessage(context.Background(), msg.Info.ID, nm.chatJID, nm.msg.Content); err != nil {
+			if err == sql.ErrNoRows {
+				// No cached row to update — fall through and insert fresh.
+				c.log.Warnf("Edit for unknown message %s in chat %s, inserting as new",
+					c.redactor.MsgID(msg.Info.ID), c.redactor.JID(nm.chatJID))
+			} else {
+				c.log.Warnf("Failed to apply edit to message %s: %v", c.redactor.MsgID(msg.Info.ID), err)
+				if c.metricSink != nil {
+					c.metricSink.IncErrors()
+				}
+				return
+			}
+		} else {
+			if c.metricSink != nil {
+				c.metricSink.IncMessagesIn()
+			}
+			c.log.Infof("[%s] %s %s: EDITED %s", msg.Info.Timestamp.Format("2006-01-02 15:04:05"),
+				"<-", c.redactor.JID(nm.msg.Sender), c.redactor.JID(nm.chatJID))
+			return
 		}
 	}
 

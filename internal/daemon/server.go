@@ -297,7 +297,7 @@ func (s *Server) bootDriver(ctx context.Context) error {
 
 // onLoggedOut returns a callback the driver invokes when the remote device
 // revokes the session. Flips the cache to unpaired and kicks the pairing
-// flow back up.
+// flow back up in a separate goroutine so whatsmeow's event loop isn't blocked.
 func (s *Server) onLoggedOut(ctx context.Context) func() {
 	return func() {
 		s.cache.Reset()
@@ -306,7 +306,9 @@ func (s *Server) onLoggedOut(ctx context.Context) func() {
 			s.cache.SetPaired()
 			_ = s.cfg.Driver.Connect(ctx, s.onLoggedOut(ctx))
 		}
-		_ = s.cfg.Driver.StartPairing(ctx, onQR, onPairSuccess)
+		go func() {
+			_ = s.cfg.Driver.StartPairing(ctx, onQR, onPairSuccess)
+		}()
 	}
 }
 

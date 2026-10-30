@@ -14,7 +14,7 @@ import (
 
 // registerMessageTools wires message-mutation and history tools:
 // edit_message, delete_message, mark_read, mark_chat_read, request_sync,
-// download_media.
+// download_media, recover_media.
 func (s *Server) registerMessageTools() {
 	s.registerEditMessage()
 	s.registerDeleteMessage()
@@ -22,6 +22,7 @@ func (s *Server) registerMessageTools() {
 	s.registerMarkChatRead()
 	s.registerRequestSync()
 	s.registerDownloadMedia()
+	s.registerRecoverMedia()
 }
 
 // -- edit_message -----------------------------------------------------------
@@ -253,5 +254,34 @@ func (s *Server) registerDownloadMedia() {
 		}
 		r := s.client.Download(ctx, a.MessageID, a.ChatJID, a.OutputPath)
 		return downloadMediaResult(r)
+	}))
+}
+
+// -- recover_media ----------------------------------------------------------
+
+type recoverMediaArgs struct {
+	MessageID string `json:"message_id"`
+	ChatJID   string `json:"chat_jid"`
+}
+
+func (s *Server) registerRecoverMedia() {
+	tool := mcp.NewTool("recover_media",
+		mcp.WithDescription("Recovers a media message whose CDN URL has expired (download_media returned a 403/404/410). Requests a fresh history sync for the chat so WhatsApp re-sends the message with a current media URL. After the sync completes (typically within a few seconds), retry download_media. No notification is sent to the sender or chat."),
+		mcp.WithString("message_id", mcp.Required(), mcp.Description("WhatsApp message ID of the media message to recover (use `message_id` from list_messages)")),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a recoverMediaArgs) (*mcp.CallToolResult, error) {
+		if a.MessageID == "" || a.ChatJID == "" {
+			return mcp.NewToolResultError("message_id and chat_jid are required"), nil
+		}
+		msg, err := s.client.RecoverMedia(ctx, a.MessageID, a.ChatJID)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to recover media: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Media recovery requested for message %s in chat %s. WhatsApp is re-sending the message with a fresh media URL. Retry download_media shortly.\n%s", a.MessageID, a.ChatJID, msg)), nil
 	}))
 }
