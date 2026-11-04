@@ -224,7 +224,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if pc, ok := s.cfg.Driver.(pairCoder); ok {
 		coder = pc
 	}
-	handlers := newPairHandlers(s.cache, s.cfg.Driver, coder)
+	handlers := newPairHandlers(s.cache, s.cfg.Driver, coder, s.PublishWS)
 	s.handlers = handlers
 	handlers.mount(mux)
 

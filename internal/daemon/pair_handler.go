@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"strings"
 	"os"
@@ -79,10 +80,11 @@ type pairHandlers struct {
 	// CSRF protection for the reset endpoint.
 	csrfMu    sync.Mutex
 	csrfToken string
+	publishWS func(evType, data string)
 }
 
 // newPairHandlers constructs handlers with default rate limiters.
-func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder) *pairHandlers {
+func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishWS func(evType, data string)) *pairHandlers {
 	return &pairHandlers{
 		cache: cache,
 		reset: reset,
@@ -99,6 +101,7 @@ func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder) *pairHan
 		// initial handshake and let the TCP keep-alive carry the stream.
 		pairEventLimiter: NewLimiter(30.0/60.0, 3), // 30/min, burst 3
 		startedAt:        time.Now(),
+		publishWS:        publishWS,
 	}
 }
 
@@ -141,6 +144,7 @@ func (h *pairHandlers) mount(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", h.handleHealth)
 	mux.HandleFunc("/metrics", h.handleMetrics)
 	mux.HandleFunc("/media/download/", h.handleMediaDownload)
+	mux.HandleFunc("/webhook/", h.handleWebhook)
 }
 
 // mediaDownloadRequest parses the /media/download/{message_id}/{chat_jid} path.
@@ -282,6 +286,55 @@ func (h *pairHandlers) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP whatsapp_mcp_uptime_seconds Daemon uptime in seconds\n")
 	fmt.Fprintf(w, "# TYPE whatsapp_mcp_uptime_seconds counter\n")
 	fmt.Fprintf(w, "whatsapp_mcp_uptime_seconds %d\n", uptime)
+}
+
+// handleWebhook receives incoming WhatsApp webhook events from a reverse
+// webhook setup (e.g. via a ngrok tunnel or public URL). It parses the JSON
+// payload and forwards new messages to WebSocket subscribers via SSE so the
+// agent can react instantly instead of polling.
+func (h *pairHandlers) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	var payload struct {
+		Type      string `json:"type"`
+		MessageID string `json:"message_id"`
+		ChatJID   string `json:"chat_jid"`
+		Sender    string `json:"sender"`
+		Content   string `json:"content"`
+		Timestamp int64  `json:"timestamp"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	if payload.MessageID == "" || payload.ChatJID == "" {
+		http.Error(w, "message_id and chat_jid are required", http.StatusBadRequest)
+		return
+	}
+
+	// Broadcast to WebSocket subscribers.
+	data, _ := json.Marshal(map[string]any{
+		"type":       payload.Type,
+		"message_id": payload.MessageID,
+		"chat_jid":   payload.ChatJID,
+		"sender":     payload.Sender,
+		"content":    payload.Content,
+		"timestamp":  payload.Timestamp,
+	})
+	h.publishWS("webhook_message", string(data))
+
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"status":"ok","message_id":"%s"}`, payload.MessageID)
 }
 
 // incMessagesIn increments the incoming message counter.

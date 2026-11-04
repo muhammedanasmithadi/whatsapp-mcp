@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
@@ -29,7 +30,7 @@ func newTestHandlers(paired bool, qr string, err error) (*pairHandlers, *fakeRes
 		cache.SetQR(qr)
 	}
 	reset := &fakeResetter{err: err}
-	h := newPairHandlers(cache, reset, nil)
+	h := newPairHandlers(cache, reset, nil, nil)
 	return h, reset
 }
 
@@ -243,7 +244,7 @@ func TestPairReset_RateLimited(t *testing.T) {
 func TestPairTemplate_EscapesToken(t *testing.T) {
 	cache := NewPairCache()
 	cache.SetPaired()
-	h := newPairHandlers(cache, &fakeResetter{}, nil)
+	h := newPairHandlers(cache, &fakeResetter{}, nil, nil)
 
 	// Inject a CSRFToken containing a script tag to verify html/template escapes it.
 	// We need to call the template directly since the handler doesn't set CSRFToken yet.
@@ -277,7 +278,7 @@ func (f *fakePairCoder) PairPhone(_ context.Context, _ string) (string, error) {
 
 func TestHandlePairCode_Success(t *testing.T) {
 	cache := NewPairCache()
-	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{code: "ABCD1234"})
+	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{code: "ABCD1234"}, nil)
 	h.csrfToken = "tok"
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/pair/code", strings.NewReader("csrf_token=tok&phone=+919876543210"))
@@ -293,7 +294,7 @@ func TestHandlePairCode_Success(t *testing.T) {
 
 func TestHandlePairCode_RateLimited(t *testing.T) {
 	cache := NewPairCache()
-	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{})
+	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{}, nil)
 	// Burst is 1; the first request consumes it (it fails CSRF first, but the
 	// limiter has already allowed and spent its token), so the next is 429.
 	w := httptest.NewRecorder()
@@ -307,7 +308,7 @@ func TestHandlePairCode_RateLimited(t *testing.T) {
 
 func TestHandlePairCode_NoCoder(t *testing.T) {
 	cache := NewPairCache()
-	h := newPairHandlers(cache, &fakeResetter{}, nil)
+	h := newPairHandlers(cache, &fakeResetter{}, nil, nil)
 	w := httptest.NewRecorder()
 	h.handlePairCode(w, httptest.NewRequest(http.MethodPost, "/pair/code", strings.NewReader("phone=919876543210")))
 	if w.Code != http.StatusNotImplemented {
@@ -317,7 +318,7 @@ func TestHandlePairCode_NoCoder(t *testing.T) {
 
 func TestHandlePairCode_InvalidPhone(t *testing.T) {
 	cache := NewPairCache()
-	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{})
+	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{}, nil)
 	h.csrfToken = "tok"
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/pair/code", strings.NewReader("csrf_token=tok&phone=0123456"))
@@ -349,5 +350,126 @@ func TestFormatPairingCode(t *testing.T) {
 	}
 	if got := client.FormatPairingCode("SHORT"); got != "SHORT" {
 		t.Fatalf("want SHORT unchanged, got %q", got)
+	}
+}
+
+// TestPairCacheBroadcast verifies that PairCache fans state transitions to
+// SSE subscribers in real time.
+func TestPairCacheBroadcast(t *testing.T) {
+	cache := NewPairCache()
+
+	sub := cache.Subscribe()
+	defer cache.Unsubscribe(sub)
+
+	// Initial state should be unpaired.
+	ev := <-sub
+	if ev.State != PairStateUnpaired {
+		t.Fatalf("initial state: want unpaired, got %q", ev.State)
+	}
+
+	// SetQR should emit awaiting_qr.
+	cache.SetQR("test-qr-payload")
+	ev = <-sub
+	if ev.State != PairStateAwaitingQR {
+		t.Fatalf("after SetQR: want awaiting_qr, got %q", ev.State)
+	}
+	if ev.QR != "test-qr-payload" {
+		t.Fatalf("after SetQR: want QR=%q, got %q", "test-qr-payload", ev.QR)
+	}
+
+	// SetPaired should emit paired.
+	cache.SetPaired()
+	ev = <-sub
+	if ev.State != PairStatePaired {
+		t.Fatalf("after SetPaired: want paired, got %q", ev.State)
+	}
+	if ev.QR != "" {
+		t.Fatalf("after SetPaired: want empty QR, got %q", ev.QR)
+	}
+
+	// Reset should go back to unpaired.
+	cache.Reset()
+	ev = <-sub
+	if ev.State != PairStateUnpaired {
+		t.Fatalf("after Reset: want unpaired, got %q", ev.State)
+	}
+}
+
+// TestPairCacheSubscribersMultiple verifies that multiple SSE subscribers
+// all receive the same state transitions.
+func TestPairCacheMultipleSubscribers(t *testing.T) {
+	cache := NewPairCache()
+
+	sub1 := cache.Subscribe()
+	sub2 := cache.Subscribe()
+	defer cache.Unsubscribe(sub1)
+	defer cache.Unsubscribe(sub2)
+
+	// Consume initial snapshot from both subscribers.
+	<-sub1
+	<-sub2
+
+	cache.SetQR("qr-123")
+
+	ev1 := <-sub1
+	ev2 := <-sub2
+	if ev1.State != PairStateAwaitingQR || ev2.State != PairStateAwaitingQR {
+		t.Fatalf("both subscribers should get awaiting_qr: got %q and %q", ev1.State, ev2.State)
+	}
+	if ev1.QR != "qr-123" || ev2.QR != "qr-123" {
+		t.Fatalf("both subscribers should receive QR=%q: got %q and %q", "qr-123", ev1.QR, ev2.QR)
+	}
+}
+
+// TestPairCacheSlowSubscriber verifies that a slow subscriber does not block
+// other subscribers (dropped message behavior).
+func TestPairCacheSlowSubscriber(t *testing.T) {
+	cache := NewPairCache()
+
+	slow := make(chan PairEvent, 0) // zero buffer - will block
+	fast := make(chan PairEvent, 16)
+
+	cache.mu.Lock()
+	cache.subscribers[slow] = struct{}{}
+	cache.subscribers[fast] = struct{}{}
+	cache.mu.Unlock()
+
+	// This should not block even though slow subscriber can't receive.
+	cache.SetQR("test-qr")
+
+	// Fast subscriber should still get the event.
+	select {
+	case ev := <-fast:
+		if ev.QR != "test-qr" {
+			t.Fatalf("fast subscriber: want QR=%q, got %q", "test-qr", ev.QR)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("fast subscriber did not receive event")
+	}
+
+	// Clean up
+	cache.mu.Lock()
+	delete(cache.subscribers, slow)
+	delete(cache.subscribers, fast)
+	close(slow)
+	close(fast)
+	cache.mu.Unlock()
+}
+
+// TestSSE_HandlerMounted verifies the SSE endpoint is mounted on the mux.
+// The SSE connection is long-lived, so we can't fully test streaming in a
+// unit test without cancelling the request context. PairCache tests cover
+// the state transition logic.
+func TestSSE_HandlerMounted(t *testing.T) {
+	cache := NewPairCache()
+	h := newPairHandlers(cache, &fakeResetter{}, nil, nil)
+
+	mux := http.NewServeMux()
+	h.mount(mux)
+
+	// Verify the SSE endpoint is registered.
+	req := httptest.NewRequest(http.MethodGet, "/pair/events", nil)
+	if _, pattern := mux.Handler(req); pattern != "/pair/events" {
+		t.Fatalf("SSE endpoint /pair/events should be mounted, got pattern %q", pattern)
 	}
 }
