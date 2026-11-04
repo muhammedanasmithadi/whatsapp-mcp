@@ -14,11 +14,12 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/sealjay/mcp-whatsapp/internal/client"
-	"github.com/sealjay/mcp-whatsapp/internal/daemon"
-	mcpsrv "github.com/sealjay/mcp-whatsapp/internal/mcp"
-	"github.com/sealjay/mcp-whatsapp/internal/security"
-	"github.com/sealjay/mcp-whatsapp/internal/store"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/daemon"
+	mcpsrv "github.com/muhammedanasmithadi/whatsapp-mcp/internal/mcp"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/stt"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
@@ -29,6 +30,7 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 		readOnly       bool
 		logFormat      string
 		fullHistorySync bool
+		enabledTools   string
 	)
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -37,6 +39,7 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	fs.BoolVar(&readOnly, "read-only", false, "expose only read/query tools; disable send, edit, delete, mark-read, group/privacy mutations (env WHATSAPP_MCP_READ_ONLY)")
 	fs.StringVar(&logFormat, "log-format", "text", "log output format: text (default) or json")
 	fs.BoolVar(&fullHistorySync, "full-history-sync", false, "after pairing, request full history sync for all cached chats (env WHATSAPP_MCP_FULL_HISTORY_SYNC)")
+	fs.StringVar(&enabledTools, "enabled-tools", "", "comma-separated list of tool names to enable; if set, only these tools are registered (env WHATSAPP_MCP_ENABLED_TOOLS)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -49,6 +52,19 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	if !fullHistorySync {
 		if v := os.Getenv("WHATSAPP_MCP_FULL_HISTORY_SYNC"); v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes") {
 			fullHistorySync = true
+		}
+	}
+
+	var toolNames []string
+	if enabledTools != "" {
+		toolNames = strings.Split(enabledTools, ",")
+		for i, n := range toolNames {
+			toolNames[i] = strings.TrimSpace(n)
+		}
+	} else if v := os.Getenv("WHATSAPP_MCP_ENABLED_TOOLS"); v != "" {
+		toolNames = strings.Split(v, ",")
+		for i, n := range toolNames {
+			toolNames[i] = strings.TrimSpace(n)
 		}
 	}
 
@@ -123,6 +139,13 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 		logger = client.NewStderrLogger("Client", "INFO", false)
 	}
 
+	// Voice-note transcription client (optional).
+	var sttClient stt.Client
+	if ep := os.Getenv("WHATSAPP_MCP_STT_ENDPOINT"); ep != "" {
+		sttClient = stt.NewHTTPClient()
+		fmt.Fprintf(os.Stderr, "voice-note transcription enabled: %s\n", ep)
+	}
+
 	c, err := client.New(ctx, client.Config{
 		StoreDir:         storeDir,
 		Store:            st,
@@ -130,6 +153,7 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 		AllowedMediaRoot: allowedMediaRoot,
 		Redactor:         redactor,
 		DeviceName:       deviceName,
+		STTClient:        sttClient,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "init client: %v\n", err)
@@ -166,6 +190,10 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	if readOnly {
 		mcpOpts = append(mcpOpts, mcpsrv.WithReadOnly(true))
 		fmt.Fprintln(os.Stderr, "read-only mode: send/edit/delete/mark/group/privacy tools disabled")
+	}
+	if len(toolNames) > 0 {
+		mcpOpts = append(mcpOpts, mcpsrv.WithAllowedTools(toolNames))
+		fmt.Fprintf(os.Stderr, "allow-list mode: only %d tools enabled\n", len(toolNames))
 	}
 	mcpServer := mcpsrv.NewServer(c, d.Cache(), mcpOpts...)
 	d.SetMCPMount(mcpServer.AttachHTTP)

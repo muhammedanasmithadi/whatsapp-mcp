@@ -9,12 +9,12 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/sealjay/mcp-whatsapp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
 // registerMessageTools wires message-mutation and history tools:
 // edit_message, delete_message, mark_read, mark_chat_read, request_sync,
-// download_media, recover_media.
+// download_media, recover_media, transcribe_voice_note.
 func (s *Server) registerMessageTools() {
 	s.registerEditMessage()
 	s.registerDeleteMessage()
@@ -23,6 +23,7 @@ func (s *Server) registerMessageTools() {
 	s.registerRequestSync()
 	s.registerDownloadMedia()
 	s.registerRecoverMedia()
+	s.registerTranscribeVoiceNote()
 }
 
 // -- edit_message -----------------------------------------------------------
@@ -44,10 +45,12 @@ func (s *Server) registerEditMessage() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a editMessageArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a editMessageArgs) (*mcp.CallToolResult, error) {
 		if err := s.client.EditMessage(ctx, a.ChatJID, a.MessageID, a.NewBody); err != nil {
+			s.auditLog("edit_message", a.ChatJID, a.MessageID, "edit", "error", err.Error())
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		s.auditLog("edit_message", a.ChatJID, a.MessageID, "edit", "success", "edited")
 		return mcp.NewToolResultText("Message edited"), nil
 	}))
 }
@@ -71,10 +74,12 @@ func (s *Server) registerDeleteMessage() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a deleteMessageArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a deleteMessageArgs) (*mcp.CallToolResult, error) {
 		if err := s.client.DeleteMessage(ctx, a.ChatJID, a.MessageID, a.SenderJID); err != nil {
+			s.auditLog("delete_message", a.ChatJID, a.MessageID, "delete", "error", err.Error())
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		s.auditLog("delete_message", a.ChatJID, a.MessageID, "delete", "success", "deleted")
 		return mcp.NewToolResultText("Message deleted"), nil
 	}))
 }
@@ -98,7 +103,7 @@ func (s *Server) registerMarkRead() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a markReadArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a markReadArgs) (*mcp.CallToolResult, error) {
 		if len(a.MessageIDs) == 0 {
 			return mcp.NewToolResultError("message_ids must not be empty"), nil
 		}
@@ -126,7 +131,7 @@ func (s *Server) registerMarkChatRead() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a markChatReadArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a markChatReadArgs) (*mcp.CallToolResult, error) {
 		if a.ChatJID == "" {
 			return mcp.NewToolResultError("chat_jid is required"), nil
 		}
@@ -197,7 +202,7 @@ func (s *Server) registerRequestSync() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a requestSyncArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a requestSyncArgs) (*mcp.CallToolResult, error) {
 		if a.ChatJID == "" {
 			return mcp.NewToolResultError("chat_jid: required"), nil
 		}
@@ -248,7 +253,7 @@ func (s *Server) registerDownloadMedia() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a downloadMediaArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a downloadMediaArgs) (*mcp.CallToolResult, error) {
 		if a.MessageID == "" || a.ChatJID == "" {
 			return mcp.NewToolResultError("message_id and chat_jid are required"), nil
 		}
@@ -274,7 +279,7 @@ func (s *Server) registerRecoverMedia() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a recoverMediaArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a recoverMediaArgs) (*mcp.CallToolResult, error) {
 		if a.MessageID == "" || a.ChatJID == "" {
 			return mcp.NewToolResultError("message_id and chat_jid are required"), nil
 		}
@@ -283,5 +288,37 @@ func (s *Server) registerRecoverMedia() {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to recover media: %v", err)), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Media recovery requested for message %s in chat %s. WhatsApp is re-sending the message with a fresh media URL. Retry download_media shortly.\n%s", a.MessageID, a.ChatJID, msg)), nil
+	}))
+}
+
+// -- transcribe_voice_note ----------------------------------------------------
+
+type transcribeVoiceNoteArgs struct {
+	MessageID string `json:"message_id"`
+	ChatJID   string `json:"chat_jid"`
+}
+
+func (s *Server) registerTranscribeVoiceNote() {
+	tool := mcp.NewTool("transcribe_voice_note",
+		mcp.WithDescription("Transcribes a WhatsApp voice note (audio message) to text using the configured speech-to-text endpoint. Requires WHATSAPP_MCP_STT_ENDPOINT to be set. The message must be an audio/voice note. Returns the transcribed text."),
+		mcp.WithString("message_id", mcp.Required(), mcp.Description("WhatsApp message ID of the voice note (use `message_id` from list_messages)")),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a transcribeVoiceNoteArgs) (*mcp.CallToolResult, error) {
+		if a.MessageID == "" || a.ChatJID == "" {
+			return mcp.NewToolResultError("message_id and chat_jid are required"), nil
+		}
+		text, err := s.client.TranscribeVoiceNote(ctx, a.MessageID, a.ChatJID)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to transcribe voice note: %v", err)), nil
+		}
+		if text == "" {
+			return mcp.NewToolResultText("(no transcript returned by STT service)"), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Voice note transcript: %s", text)), nil
 	}))
 }

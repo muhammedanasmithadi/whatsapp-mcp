@@ -10,11 +10,12 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/sealjay/mcp-whatsapp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
 //go:embed templates/*.tmpl
@@ -139,6 +140,68 @@ func (h *pairHandlers) mount(mux *http.ServeMux) {
 	mux.HandleFunc("/pair/code", h.handlePairCode)
 	mux.HandleFunc("/healthz", h.handleHealth)
 	mux.HandleFunc("/metrics", h.handleMetrics)
+	mux.HandleFunc("/media/download/", h.handleMediaDownload)
+}
+
+// mediaDownloadRequest parses the /media/download/{message_id}/{chat_jid} path.
+type mediaDownloadRequest struct {
+	messageID string
+	chatJID   string
+}
+
+// parseMediaDownloadRequest extracts message_id and chat_jid from the URL path.
+// Expected path: /media/download/{message_id}/{chat_jid}
+func parseMediaDownloadRequest(r *http.Request) (mediaDownloadRequest, bool) {
+	path := r.URL.Path
+	prefix := "/media/download/"
+	if !strings.HasPrefix(path, prefix) {
+		return mediaDownloadRequest{}, false
+	}
+	rest := path[len(prefix):]
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return mediaDownloadRequest{}, false
+	}
+	return mediaDownloadRequest{
+		messageID: parts[0],
+		chatJID:   parts[1],
+	}, true
+}
+
+// handleMediaDownload downloads media and serves it directly over HTTP.
+// This allows remote MCP clients to retrieve media without filesystem access.
+func (h *pairHandlers) handleMediaDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "GET required", http.StatusMethodNotAllowed)
+		return
+	}
+	req, ok := parseMediaDownloadRequest(r)
+	if !ok {
+		http.Error(w, "invalid path; expected /media/download/{message_id}/{chat_jid}", http.StatusBadRequest)
+		return
+	}
+	client, ok := h.reset.(*client.Client)
+	if !ok {
+		http.Error(w, "media download not available", http.StatusInternalServerError)
+		return
+	}
+	result := client.Download(r.Context(), req.messageID, req.chatJID, "")
+	if !result.Success {
+		http.Error(w, result.Message, http.StatusBadRequest)
+		return
+	}
+	data, err := os.ReadFile(result.Path)
+	if err != nil {
+		http.Error(w, "failed to read media file", http.StatusInternalServerError)
+		return
+	}
+	// Determine content type.
+	contentType := http.DetectContentType(data)
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(data)
 }
 
 // healthzResponse is the JSON body of /healthz.

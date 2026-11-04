@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sealjay/mcp-whatsapp/internal/client"
-	mcpsrv "github.com/sealjay/mcp-whatsapp/internal/mcp"
-	"github.com/sealjay/mcp-whatsapp/internal/security"
-	"github.com/sealjay/mcp-whatsapp/internal/store"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
+	mcpsrv "github.com/muhammedanasmithadi/whatsapp-mcp/internal/mcp"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
 // runSmoke boots the store + client (without connecting to WhatsApp servers)

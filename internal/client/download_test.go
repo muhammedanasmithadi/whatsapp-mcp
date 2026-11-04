@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sealjay/mcp-whatsapp/internal/store"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 	"go.mau.fi/whatsmeow"
 )
 

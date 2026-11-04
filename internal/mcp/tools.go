@@ -23,6 +23,7 @@ func (s *Server) registerTools() {
 		s.registerRequestSync()
 		s.registerDownloadMedia()
 		s.registerRecoverMedia()
+		s.registerTranscribeVoiceNote()
 		s.registerListGroups()
 		s.registerGetGroupInfo()
 		s.registerGetGroupInviteLink()

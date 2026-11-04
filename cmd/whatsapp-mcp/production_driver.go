@@ -7,7 +7,7 @@ import (
 
 	"go.mau.fi/whatsmeow/types/events"
 
-	"github.com/sealjay/mcp-whatsapp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
 // productionDriver adapts *client.Client to the daemon.pairDriver interface.

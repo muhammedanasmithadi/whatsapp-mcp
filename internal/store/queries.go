@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"sort"
 	"strings"
@@ -23,9 +24,52 @@ type ListMessagesParams struct {
 	Query          string
 	Limit          int
 	Page           int
+	Cursor         string
 	IncludeContext bool
 	ContextBefore  int
 	ContextAfter   int
+}
+
+// ListMessagesResult is the output of ListMessagesCursor: a page of messages
+// plus keyset-pagination metadata so callers can resume walks without offset
+// drift.
+type ListMessagesResult struct {
+	Messages   []Message `json:"messages"`
+	NextCursor string    `json:"next_cursor,omitempty"`
+	HasMore    bool      `json:"has_more"`
+	Count      int       `json:"count"`
+}
+
+// cursorPayload encodes the (timestamp, id) position of the last message in a
+// page so the next call can resume keyset pagination from exactly that point.
+// Timestamps are stored as "2006-01-02 15:04:05" to match the on-disk format;
+// binding a time.Time would append a "+00:00" timezone suffix that breaks the
+// TEXT comparison at the boundary (the stored value becomes a prefix of the
+// bound value and incorrectly compares as less-than).
+type cursorPayload struct {
+	T string `json:"t"` // "2006-01-02 15:04:05" UTC timestamp
+	I string `json:"i"` // message id
+}
+
+// encodeCursor returns an opaque cursor string for the given timestamp + id.
+func encodeCursor(ts time.Time, id string) string {
+	p := cursorPayload{T: ts.UTC().Format("2006-01-02 15:04:05"), I: id}
+	return base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%s", p.T, p.I)))
+}
+
+// decodeCursor reverses encodeCursor, returning the timestamp string and message id.
+// The timestamp is returned as a string (not time.Time) so it can be bound to
+// SQLite without a timezone suffix.
+func decodeCursor(cursor string) (ts string, id string, err error) {
+	raw, err := base64.URLEncoding.DecodeString(cursor)
+	if err != nil {
+		return "", "", fmt.Errorf("decode cursor: %w", err)
+	}
+	parts := strings.SplitN(string(raw), "|", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid cursor format")
+	}
+	return parts[0], parts[1], nil
 }
 
 // ListMessages returns messages matching the given filters, optionally expanded
@@ -415,6 +459,201 @@ func (s *Store) scanListMessageRow(row interface {
 	m.IsGroup = strings.HasSuffix(m.ChatJID, "@g.us")
 	m.SenderPhone = s.resolveSenderPhone(m.Sender)
 	return m, nil
+}
+
+// ListMessagesCursor returns a page of messages using keyset pagination.
+// When cursor is set, only messages strictly older than the cursor's
+// (timestamp, id) are returned. Fetches limit+1 rows to detect has_more.
+// Ordering is always timestamp DESC, id DESC.
+func (s *Store) ListMessagesCursor(ctx context.Context, params ListMessagesParams) (*ListMessagesResult, error) {
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	var (
+		whereClauses []string
+		args         []any
+	)
+
+	if !params.After.IsZero() {
+		whereClauses = append(whereClauses, "messages.timestamp > ?")
+		args = append(args, params.After)
+	}
+	if !params.Before.IsZero() {
+		whereClauses = append(whereClauses, "messages.timestamp < ?")
+		args = append(args, params.Before)
+	}
+	if params.SenderPhone != "" {
+		whereClauses = append(whereClauses, "messages.sender = ?")
+		args = append(args, params.SenderPhone)
+	}
+	if params.ChatJID != "" {
+		whereClauses = append(whereClauses, "messages.chat_jid = ?")
+		args = append(args, params.ChatJID)
+	}
+	if params.Query != "" {
+		whereClauses = append(whereClauses, "LOWER(messages.content) LIKE LOWER(?)")
+		args = append(args, "%"+params.Query+"%")
+	}
+	if params.Cursor != "" {
+		cursorTs, cursorID, err := decodeCursor(params.Cursor)
+		if err != nil {
+			return nil, fmt.Errorf("invalid cursor: %w", err)
+		}
+		whereClauses = append(whereClauses,
+			"(messages.timestamp < ? OR (messages.timestamp = ? AND messages.id < ?))")
+		args = append(args, cursorTs, cursorTs, cursorID)
+	}
+
+	var b strings.Builder
+	b.WriteString("SELECT " + listMessageColumns + " FROM messages")
+	b.WriteString(" JOIN chats ON messages.chat_jid = chats.jid")
+	if len(whereClauses) > 0 {
+		b.WriteString(" WHERE ")
+		b.WriteString(strings.Join(whereClauses, " AND "))
+	}
+	b.WriteString(" ORDER BY messages.timestamp DESC, messages.id DESC")
+	b.WriteString(" LIMIT ?")
+	args = append(args, limit+1)
+
+	rows, err := s.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list messages cursor: %w", err)
+	}
+	defer rows.Close()
+
+	var result []Message
+	for rows.Next() {
+		m, err := s.scanListMessageRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
+	}
+
+	// Only emit a next_cursor when there are more rows to fetch. On the last
+	// page the cursor would point at the final message, which is useless.
+	var nextCursor string
+	if hasMore && len(result) > 0 {
+		last := result[len(result)-1]
+		nextCursor = encodeCursor(last.Timestamp, last.ID)
+	}
+
+	return &ListMessagesResult{
+		Messages:   result,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+		Count:      len(result),
+	}, nil
+}
+
+// ListMediaMessages returns messages that have media attached (media_type != ""),
+// using the same keyset-pagination contract as ListMessagesCursor.
+func (s *Store) ListMediaMessages(ctx context.Context, params ListMessagesParams) (*ListMessagesResult, error) {
+	params.Query = "" // media listing does not do substring matching
+	return s.listMessagesWithMediaFilter(ctx, params)
+}
+
+func (s *Store) listMessagesWithMediaFilter(ctx context.Context, params ListMessagesParams) (*ListMessagesResult, error) {
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	var (
+		whereClauses []string
+		args         []any
+	)
+
+	// Only messages that actually have media.
+	whereClauses = append(whereClauses, "messages.media_type != '' AND messages.media_type IS NOT NULL")
+
+	if !params.After.IsZero() {
+		whereClauses = append(whereClauses, "messages.timestamp > ?")
+		args = append(args, params.After)
+	}
+	if !params.Before.IsZero() {
+		whereClauses = append(whereClauses, "messages.timestamp < ?")
+		args = append(args, params.Before)
+	}
+	if params.SenderPhone != "" {
+		whereClauses = append(whereClauses, "messages.sender = ?")
+		args = append(args, params.SenderPhone)
+	}
+	if params.ChatJID != "" {
+		whereClauses = append(whereClauses, "messages.chat_jid = ?")
+		args = append(args, params.ChatJID)
+	}
+	if params.Cursor != "" {
+		cursorTs, cursorID, err := decodeCursor(params.Cursor)
+		if err != nil {
+			return nil, fmt.Errorf("invalid cursor: %w", err)
+		}
+		whereClauses = append(whereClauses,
+			"(messages.timestamp < ? OR (messages.timestamp = ? AND messages.id < ?))")
+		args = append(args, cursorTs, cursorTs, cursorID)
+	}
+
+	var b strings.Builder
+	b.WriteString("SELECT " + listMessageColumns + " FROM messages")
+	b.WriteString(" JOIN chats ON messages.chat_jid = chats.jid")
+	b.WriteString(" WHERE ")
+	b.WriteString(strings.Join(whereClauses, " AND "))
+	b.WriteString(" ORDER BY messages.timestamp DESC, messages.id DESC")
+	b.WriteString(" LIMIT ?")
+	args = append(args, limit+1)
+
+	rows, err := s.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list media messages: %w", err)
+	}
+	defer rows.Close()
+
+	var result []Message
+	for rows.Next() {
+		m, err := s.scanListMessageRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
+	}
+
+	// Only emit a next_cursor when there are more rows to fetch.
+	var nextCursor string
+	if hasMore && len(result) > 0 {
+		last := result[len(result)-1]
+		nextCursor = encodeCursor(last.Timestamp, last.ID)
+	}
+
+	return &ListMessagesResult{
+		Messages:   result,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+		Count:      len(result),
+	}, nil
 }
 
 // resolveSenderPhone returns a full phone (bare user part) for a message

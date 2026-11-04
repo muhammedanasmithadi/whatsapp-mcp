@@ -12,8 +12,8 @@ import (
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/sealjay/mcp-whatsapp/internal/security"
-	"github.com/sealjay/mcp-whatsapp/internal/store"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
 // newClientWithStore builds a *Client that has only the message store and

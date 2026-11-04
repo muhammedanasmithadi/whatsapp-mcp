@@ -52,6 +52,15 @@ CREATE TABLE IF NOT EXISTS whatsmeow_contacts (
     PRIMARY KEY (our_jid, their_jid)
 );
 
+-- Client-side read-position bookmarks (not part of whatsmeow's schema).
+CREATE TABLE IF NOT EXISTS message_read_positions (
+    chat_jid TEXT PRIMARY KEY,
+    last_read_message_id TEXT,
+    last_read_at TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (chat_jid) REFERENCES chats(jid)
+);
+
 -- Chats: one direct, one group, one direct that was a LID chat originally,
 -- plus an unresolved @lid chat that SearchContacts must filter out.
 INSERT INTO chats (jid, name, last_message_time) VALUES

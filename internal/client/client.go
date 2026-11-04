@@ -20,9 +20,10 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 
-	"github.com/sealjay/mcp-whatsapp/internal/ratelimit"
-	"github.com/sealjay/mcp-whatsapp/internal/security"
-	"github.com/sealjay/mcp-whatsapp/internal/store"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/ratelimit"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/stt"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
 // Config configures a new Client.
@@ -48,6 +49,8 @@ type Config struct {
 	// newly stored incoming message. Used by the daemon to push real-time
 	// events to WebSocket subscribers.
 	OnIncomingMessage func(data string)
+	// STTClient, if set, is used to transcribe incoming voice notes.
+	STTClient stt.Client
 }
 
 // MetricSink receives Prometheus counter increments from the client.
@@ -72,6 +75,7 @@ type Client struct {
 	limiter          *ratelimit.Limiter
 	metricSink       MetricSink
 	onIncomingMsg    func(data string)
+	sttClient        stt.Client
 }
 
 // New constructs a Client. It sets the latest WhatsApp version best-effort,
@@ -164,6 +168,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		limiter:          limiter,
 		metricSink:       cfg.MetricSink,
 		onIncomingMsg:    cfg.OnIncomingMessage,
+		sttClient:        cfg.STTClient,
 	}, nil
 }
 

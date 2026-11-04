@@ -83,6 +83,18 @@ type MessageContext struct {
 	After   []Message `json:"after,omitempty"`
 }
 
+// MessageReadPosition tracks the last message the local agent has read (or
+// otherwise processed) in a given chat. It is a client-side bookmark: WhatsApp
+// itself does not expose read receipts for received messages to linked devices,
+// so we store our own position so callers can resume walks without re-scanning
+// from the top of a chat.
+type MessageReadPosition struct {
+	ChatJID           string    `json:"chat_jid"`
+	LastReadMessageID string    `json:"last_read_message_id,omitempty"`
+	LastReadAt        time.Time `json:"last_read_at,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
+}
+
 // Store handles the message cache and read-only access to whatsmeow's DB.
 type Store struct {
 	db          *sql.DB
@@ -388,6 +400,51 @@ func (s *Store) ListChatsByLabel(labelID string) ([]string, error) {
 	return jids, rows.Err()
 }
 
+// AuditLogEntry is a single entry in the audit log of agent-initiated actions.
+type AuditLogEntry struct {
+	ID        int64     `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	ToolName  string    `json:"tool_name"`
+	ChatJID   string    `json:"chat_jid,omitempty"`
+	MessageID string    `json:"message_id,omitempty"`
+	Action    string    `json:"action"`
+	Result    string    `json:"result"`
+	Details   string    `json:"details,omitempty"`
+}
+
+// AuditLog records an agent-initiated action in the append-only audit log.
+func (s *Store) AuditLog(toolName, chatJID, messageID, action, result, details string) error {
+	_, err := s.db.Exec(
+		"INSERT INTO audit_log (tool_name, chat_jid, message_id, action, result, details) VALUES (?, ?, ?, ?, ?, ?)",
+		toolName, chatJID, messageID, action, result, details,
+	)
+	return err
+}
+
+// ListAuditLog returns the most recent audit log entries, limited by count.
+func (s *Store) ListAuditLog(limit int) ([]AuditLogEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(
+		"SELECT id, timestamp, tool_name, chat_jid, message_id, action, result, details FROM audit_log ORDER BY id DESC LIMIT ?",
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var entries []AuditLogEntry
+	for rows.Next() {
+		var e AuditLogEntry
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ToolName, &e.ChatJID, &e.MessageID, &e.Action, &e.Result, &e.Details); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
 // FindChatName returns the name stored for a chat JID, empty if none.
 func (s *Store) FindChatName(jid string) string {
 	var name string
@@ -422,6 +479,57 @@ func (s *Store) RecentIncomingMessages(ctx context.Context, chatJID string, limi
 		senders = append(senders, sender)
 	}
 	return ids, senders, rows.Err()
+}
+
+// GetReadPosition returns the stored read position for a chat, or
+// sql.ErrNoRows when no position has been recorded yet.
+func (s *Store) GetReadPosition(ctx context.Context, chatJID string) (*MessageReadPosition, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT chat_jid, last_read_message_id, last_read_at, updated_at
+		FROM message_read_positions
+		WHERE chat_jid = ?`, chatJID)
+	var p MessageReadPosition
+	var lastReadAt, updatedAt sql.NullTime
+	if err := row.Scan(&p.ChatJID, &p.LastReadMessageID, &lastReadAt, &updatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, sql.ErrNoRows
+		}
+		return nil, fmt.Errorf("get read position: %w", err)
+	}
+	if lastReadAt.Valid {
+		p.LastReadAt = lastReadAt.Time
+	}
+	if updatedAt.Valid {
+		p.UpdatedAt = updatedAt.Time
+	}
+	return &p, nil
+}
+
+// SetReadPosition upserts the read position for a chat. lastReadAt is the
+// timestamp of the last message the caller has processed; if zero, the
+// message's own timestamp is looked up and used.
+func (s *Store) SetReadPosition(ctx context.Context, chatJID, messageID string, lastReadAt time.Time) error {
+	if lastReadAt.IsZero() {
+		err := s.db.QueryRowContext(ctx, `
+			SELECT timestamp FROM messages WHERE id = ? AND chat_jid = ?`,
+			messageID, chatJID).Scan(&lastReadAt)
+		if err != nil {
+			return fmt.Errorf("set read position: resolve message timestamp: %w", err)
+		}
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO message_read_positions (chat_jid, last_read_message_id, last_read_at, updated_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(chat_jid) DO UPDATE SET
+			last_read_message_id = excluded.last_read_message_id,
+			last_read_at = excluded.last_read_at,
+			updated_at = CURRENT_TIMESTAMP`,
+		chatJID, messageID, lastReadAt,
+	)
+	if err != nil {
+		return fmt.Errorf("set read position: %w", err)
+	}
+	return nil
 }
 
 const schema = `
@@ -473,6 +581,25 @@ CREATE TABLE IF NOT EXISTS label_associations (
 	PRIMARY KEY (chat_jid, label_id),
 	FOREIGN KEY (chat_jid) REFERENCES chats(jid),
 	FOREIGN KEY (label_id) REFERENCES labels(label_id)
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	tool_name TEXT NOT NULL,
+	chat_jid TEXT,
+	message_id TEXT,
+	action TEXT NOT NULL,
+	result TEXT NOT NULL,
+	details TEXT
+);
+
+CREATE TABLE IF NOT EXISTS message_read_positions (
+	chat_jid TEXT PRIMARY KEY,
+	last_read_message_id TEXT,
+	last_read_at TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (chat_jid) REFERENCES chats(jid)
 );
 `
 

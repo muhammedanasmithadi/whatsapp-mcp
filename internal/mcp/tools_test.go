@@ -21,6 +21,7 @@ var expectedToolNames = []string{
 	"get_message_context",
 	"get_poll_results",
 	"get_privacy_settings",
+	"get_read_position",
 	"get_status",
 	"is_on_whatsapp",
 	"join_group_with_link",
@@ -29,13 +30,17 @@ var expectedToolNames = []string{
 	"list_chats_by_label",
 	"list_groups",
 	"list_labels",
+	"list_media_messages",
 	"list_messages",
 	"mark_chat_read",
 	"mark_read",
+	"mark_read_position",
 	"pairing_status",
+	"get_audit_log",
 	"recover_media",
 	"request_sync",
 	"search_contacts",
+	"transcribe_voice_note",
 	"send_audio_message",
 	"send_contact_card",
 	"send_file",
@@ -119,7 +124,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 
 func TestNewServer_ToolCount(t *testing.T) {
 	s := NewServer(nil, nil)
-	const want = 45
+	const want = 50
 	if got := len(s.MCP().ListTools()); got != want {
 		t.Errorf("tool count = %d, want %d", got, want)
 	}

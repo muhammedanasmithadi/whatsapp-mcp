@@ -3,10 +3,11 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/sealjay/mcp-whatsapp/internal/store"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
 // registerQueryTools wires read-only query tools: list_chats, get_chat,
@@ -18,11 +19,15 @@ func (s *Server) registerQueryTools() {
 	s.registerListChats()
 	s.registerGetChat()
 	s.registerGetMessageContext()
+	s.registerGetReadPosition()
+	s.registerMarkReadPosition()
+	s.registerListMediaMessages()
 	s.registerIsOnWhatsApp()
 	s.registerGetStatus()
 	s.registerPairingStatus()
 	s.registerListLabels()
 	s.registerListChatsByLabel()
+	s.registerGetAuditLog()
 }
 
 // -- search_contacts --------------------------------------------------------
@@ -40,7 +45,7 @@ func (s *Server) registerSearchContacts() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a searchContactsArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a searchContactsArgs) (*mcp.CallToolResult, error) {
 		contacts, err := s.client.Store().SearchContacts(ctx, a.Query)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -59,6 +64,8 @@ type listMessagesArgs struct {
 	Query             string `json:"query,omitempty"`
 	Limit             int    `json:"limit,omitempty"`
 	Page              int    `json:"page,omitempty"`
+	Cursor            string `json:"cursor,omitempty"`
+	Format            string `json:"format,omitempty"`
 	IncludeContext    *bool  `json:"include_context,omitempty"`
 	ContextBefore     int    `json:"context_before,omitempty"`
 	ContextAfter      int    `json:"context_after,omitempty"`
@@ -66,7 +73,7 @@ type listMessagesArgs struct {
 
 func (s *Server) registerListMessages() {
 	tool := mcp.NewTool("list_messages",
-		mcp.WithDescription(offlineSafePrefix+"Search and page through cached WhatsApp messages, optionally filtering by chat, sender, time range, and substring; can include surrounding context messages. Read-only; no side effects. Use get_message_context to expand around a single known message ID, or request_sync to backfill missing history. Returns a human-readable formatted text block listing matching messages."),
+		mcp.WithDescription(offlineSafePrefix+"Search and page through cached WhatsApp messages, optionally filtering by chat, sender, time range, and substring; can include surrounding context messages. Read-only; no side effects. Use get_message_context to expand around a single known message ID, or request_sync to backfill missing history. Set format=json to receive a structured result with messages plus next_cursor/has_more for keyset pagination (use the cursor from a prior response to walk backwards without offset drift). Returns a human-readable formatted text block by default, or a JSON object when format=json."),
 		mcp.WithString("after", mcp.Description("ISO-8601 UTC lower bound on message timestamp (inclusive)")),
 		mcp.WithString("before", mcp.Description("ISO-8601 UTC upper bound on message timestamp (inclusive)")),
 		mcp.WithString("sender_phone_number", mcp.Description("filter to messages sent by this phone or JID ("+jidDesc+")")),
@@ -74,6 +81,8 @@ func (s *Server) registerListMessages() {
 		mcp.WithString("query", mcp.Description("case-insensitive substring to match within message body")),
 		mcp.WithNumber("limit", mcp.DefaultNumber(20), mcp.Description("max messages to return (default 20, capped at 100 server-side)")),
 		mcp.WithNumber("page", mcp.DefaultNumber(0), mcp.Description("zero-based page index for paging through results (default 0)")),
+		mcp.WithString("cursor", mcp.Description("opaque cursor from a prior format=json response; resume keyset pagination from that message instead of using page/offset")),
+		mcp.WithString("format", mcp.Enum("text", "json"), mcp.Description("output format: `text` (default) returns a formatted block; `json` returns {messages, next_cursor, has_more, count}")),
 		mcp.WithBoolean("include_context", mcp.DefaultBool(true), mcp.Description("if true, attach a few surrounding messages to each match (defaults to true)")),
 		mcp.WithNumber("context_before", mcp.DefaultNumber(1), mcp.Description("messages to include before each match (default 1, capped at 20 server-side)")),
 		mcp.WithNumber("context_after", mcp.DefaultNumber(1), mcp.Description("messages to include after each match (default 1, capped at 20 server-side)")),
@@ -82,7 +91,7 @@ func (s *Server) registerListMessages() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a listMessagesArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a listMessagesArgs) (*mcp.CallToolResult, error) {
 		// Clamp parameters to server-side upper bounds.
 		limit := a.Limit
 		if limit > 100 {
@@ -96,6 +105,50 @@ func (s *Server) registerListMessages() {
 		if ctxAfter > 20 {
 			ctxAfter = 20
 		}
+
+		useJSON := a.Format == "json"
+		useCursor := a.Cursor != ""
+
+		if useCursor || useJSON {
+			// Keyset pagination path: stable, no offset drift.
+			params := store.ListMessagesParams{
+				SenderPhone:    a.SenderPhoneNumber,
+				ChatJID:        a.ChatJID,
+				Query:          a.Query,
+				Limit:          limit,
+				Cursor:         a.Cursor,
+				IncludeContext: false, // context expansion is incompatible with cursor pagination
+				ContextBefore:  ctxBefore,
+				ContextAfter:   ctxAfter,
+			}
+			if a.After != "" {
+				t, err := parseTimestamp(a.After)
+				if err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("invalid 'after': %v", err)), nil
+				}
+				params.After = t
+			}
+			if a.Before != "" {
+				t, err := parseTimestamp(a.Before)
+				if err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("invalid 'before': %v", err)), nil
+				}
+				params.Before = t
+			}
+			result, err := s.client.Store().ListMessagesCursor(ctx, params)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if useJSON {
+				return resultJSON(result)
+			}
+			// Text format with cursor: still render the page, but no cursor
+			// metadata is embeddable in plain text. Switch to format=json to
+			// get next_cursor/has_more.
+			return mcp.NewToolResultText(s.client.Store().FormatMessagesList(ctx, result.Messages, true)), nil
+		}
+
+		// Legacy page/offset path (unchanged behavior).
 		params := store.ListMessagesParams{
 			SenderPhone:    a.SenderPhoneNumber,
 			ChatJID:        a.ChatJID,
@@ -128,6 +181,124 @@ func (s *Server) registerListMessages() {
 	}))
 }
 
+// -- get_read_position ------------------------------------------------------
+
+type getReadPositionArgs struct {
+	ChatJID string `json:"chat_jid"`
+}
+
+func (s *Server) registerGetReadPosition() {
+	tool := mcp.NewTool("get_read_position",
+		mcp.WithDescription("Return the stored read position for a chat: the last message_id and timestamp the local agent has processed, plus when the position was last updated. Read-only; no side effects. Returns sql.ErrNoRows-equivalent (a not-found JSON object) when no position has been recorded for this chat. Use mark_read_position to set or advance it."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a getReadPositionArgs) (*mcp.CallToolResult, error) {
+		pos, err := s.client.Store().GetReadPosition(ctx, a.ChatJID)
+		if err != nil {
+			return mcp.NewToolResultText(fmt.Sprintf(`{"chat_jid":%q,"error":"not found"}`, a.ChatJID)), nil
+		}
+		return resultJSON(pos)
+	}))
+}
+
+// -- mark_read_position -----------------------------------------------------
+
+type markReadPositionArgs struct {
+	ChatJID    string `json:"chat_jid"`
+	MessageID  string `json:"message_id"`
+	Timestamp  string `json:"timestamp,omitempty"`
+}
+
+func (s *Server) registerMarkReadPosition() {
+	tool := mcp.NewTool("mark_read_position",
+		mcp.WithDescription("Record that the local agent has processed up to a given message in a chat. Upserts a per-chat read position (chat_jid, last_read_message_id, last_read_at) so subsequent list_messages cursor walks can resume from here instead of re-scanning from the top. Read-only from WhatsApp's perspective (no messages are sent or acked); this is purely local bookkeeping."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithString("message_id", mcp.Required(), mcp.Description("WhatsApp message ID to treat as the last-read position (use message_id from list_messages)")),
+		mcp.WithString("timestamp", mcp.Description("ISO-8601 UTC timestamp of the last-read message; if omitted, the message's own timestamp is looked up from the cache")),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a markReadPositionArgs) (*mcp.CallToolResult, error) {
+		var ts time.Time
+		if a.Timestamp != "" {
+			var err error
+			ts, err = parseTimestamp(a.Timestamp)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid 'timestamp': %v", err)), nil
+			}
+		}
+		if err := s.client.Store().SetReadPosition(ctx, a.ChatJID, a.MessageID, ts); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		pos, _ := s.client.Store().GetReadPosition(ctx, a.ChatJID)
+		return resultJSON(pos)
+	}))
+}
+
+// -- list_media_messages ----------------------------------------------------
+
+type listMediaMessagesArgs struct {
+	After             string `json:"after,omitempty"`
+	Before            string `json:"before,omitempty"`
+	SenderPhoneNumber string `json:"sender_phone_number,omitempty"`
+	ChatJID           string `json:"chat_jid,omitempty"`
+	Limit             int    `json:"limit,omitempty"`
+	Cursor            string `json:"cursor,omitempty"`
+}
+
+func (s *Server) registerListMediaMessages() {
+	tool := mcp.NewTool("list_media_messages",
+		mcp.WithDescription("List cached messages that have media attached (image, video, audio, document), with the same keyset-pagination contract as list_messages format=json. Use this to discover media message IDs for bulk download_media calls. Returns a JSON object {messages, next_cursor, has_more, count}; each message includes media_type, filename, url, direct_path, and file_length."),
+		mcp.WithString("after", mcp.Description("ISO-8601 UTC lower bound on message timestamp (inclusive)")),
+		mcp.WithString("before", mcp.Description("ISO-8601 UTC upper bound on message timestamp (inclusive)")),
+		mcp.WithString("sender_phone_number", mcp.Description("filter to messages sent by this phone or JID ("+jidDesc+")")),
+		mcp.WithString("chat_jid", mcp.Description("filter to messages in this chat ("+jidDesc+")")),
+		mcp.WithNumber("limit", mcp.DefaultNumber(20), mcp.Description("max messages to return (default 20, capped at 100 server-side)")),
+		mcp.WithString("cursor", mcp.Description("opaque cursor from a prior response; resume keyset pagination from that message")),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a listMediaMessagesArgs) (*mcp.CallToolResult, error) {
+		limit := a.Limit
+		if limit > 100 {
+			limit = 100
+		}
+		params := store.ListMessagesParams{
+			SenderPhone: a.SenderPhoneNumber,
+			ChatJID:     a.ChatJID,
+			Limit:       limit,
+			Cursor:      a.Cursor,
+		}
+		if a.After != "" {
+			t, err := parseTimestamp(a.After)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid 'after': %v", err)), nil
+			}
+			params.After = t
+		}
+		if a.Before != "" {
+			t, err := parseTimestamp(a.Before)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid 'before': %v", err)), nil
+			}
+			params.Before = t
+		}
+		result, err := s.client.Store().ListMediaMessages(ctx, params)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultJSON(result)
+	}))
+}
+
 // -- list_chats -------------------------------------------------------------
 
 type listChatsArgs struct {
@@ -151,7 +322,7 @@ func (s *Server) registerListChats() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a listChatsArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a listChatsArgs) (*mcp.CallToolResult, error) {
 		sortBy := a.SortBy
 		if sortBy == "" {
 			sortBy = "last_active"
@@ -182,7 +353,7 @@ func (s *Server) registerGetChat() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a getChatArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a getChatArgs) (*mcp.CallToolResult, error) {
 		include := a.IncludeLastMessage == nil || *a.IncludeLastMessage
 		chat, err := s.client.Store().GetChat(ctx, a.ChatJID, include)
 		if err != nil {
@@ -214,7 +385,7 @@ func (s *Server) registerGetMessageContext() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a getMessageContextArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a getMessageContextArgs) (*mcp.CallToolResult, error) {
 		before, after := a.Before, a.After
 		if before <= 0 {
 			before = 5
@@ -245,7 +416,7 @@ func (s *Server) registerIsOnWhatsApp() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a isOnWhatsAppArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a isOnWhatsAppArgs) (*mcp.CallToolResult, error) {
 		if len(a.Phones) == 0 {
 			return mcp.NewToolResultError("phones must not be empty"), nil
 		}
@@ -268,7 +439,7 @@ func (s *Server) registerGetStatus() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
-	s.mcp.AddTool(tool, func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.addTool(tool, func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		status := map[string]any{
 			"connected": s.client.IsConnected(),
 		}
@@ -301,7 +472,7 @@ func (s *Server) registerPairingStatus() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
-	s.mcp.AddTool(tool, func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.addTool(tool, func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var ownJID, ownPhone string
 		ready := false
 		// Short-circuits before touching s.client unless we are paired, so a
@@ -345,7 +516,7 @@ func (s *Server) registerListLabels() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
-	s.mcp.AddTool(tool, func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.addTool(tool, func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		labels, err := s.client.Store().ListLabels()
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -369,7 +540,7 @@ func (s *Server) registerListChatsByLabel() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
-	s.mcp.AddTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, a listChatsByLabelArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, a listChatsByLabelArgs) (*mcp.CallToolResult, error) {
 		if a.LabelID == "" {
 			return mcp.NewToolResultError("label_id is required"), nil
 		}
@@ -378,5 +549,33 @@ func (s *Server) registerListChatsByLabel() {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return resultJSON(jids)
+	}))
+}
+
+// -- get_audit_log ----------------------------------------------------------
+
+type getAuditLogArgs struct {
+	Limit int `json:"limit,omitempty"`
+}
+
+func (s *Server) registerGetAuditLog() {
+	tool := mcp.NewTool("get_audit_log",
+		mcp.WithDescription("Returns the most recent audit log entries of agent-initiated WhatsApp actions. Each entry includes the tool name, action, result, timestamp, and any associated chat/message IDs. Read-only; no side effects. Useful for auditing what the AI agent has done on your WhatsApp account."),
+		mcp.WithNumber("limit", mcp.DefaultNumber(50), mcp.Description("maximum number of entries to return (default 50)")),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(_ context.Context, _ mcp.CallToolRequest, a getAuditLogArgs) (*mcp.CallToolResult, error) {
+		limit := int(a.Limit)
+		if limit <= 0 {
+			limit = 50
+		}
+		entries, err := s.client.Store().ListAuditLog(limit)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultJSON(entries)
 	}))
 }

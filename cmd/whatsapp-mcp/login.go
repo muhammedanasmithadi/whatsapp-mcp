@@ -8,9 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/sealjay/mcp-whatsapp/internal/client"
-	"github.com/sealjay/mcp-whatsapp/internal/security"
-	"github.com/sealjay/mcp-whatsapp/internal/store"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
 func runLogin(storeDir string, redactor *security.Redactor, args []string) int {

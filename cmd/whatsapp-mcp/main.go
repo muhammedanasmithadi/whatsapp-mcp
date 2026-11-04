@@ -12,8 +12,8 @@ import (
 	"os"
 	"strings"
 
-	mcpsrv "github.com/sealjay/mcp-whatsapp/internal/mcp"
-	"github.com/sealjay/mcp-whatsapp/internal/security"
+	mcpsrv "github.com/muhammedanasmithadi/whatsapp-mcp/internal/mcp"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
 )
 
 // Version is overridden at build time via -ldflags "-X main.Version=...".

@@ -8,7 +8,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/sealjay/mcp-whatsapp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
 // resultJSON serialises v to JSON and wraps it in a text tool result.

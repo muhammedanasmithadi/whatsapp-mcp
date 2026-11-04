@@ -7,7 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/sealjay/mcp-whatsapp/internal/ratelimit"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/ratelimit"
 )
 
 // TestWithRateLimitOverride verifies the header → context bypass mapping. The

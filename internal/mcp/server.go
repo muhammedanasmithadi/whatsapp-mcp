@@ -5,9 +5,10 @@ package mcp
 import (
 	"net/http"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/sealjay/mcp-whatsapp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
 // pairingCache is the minimal pairing-state surface pairing_status needs.
@@ -25,6 +26,10 @@ type Server struct {
 	mcp      *server.MCPServer
 	cache    pairingCache
 	readOnly bool
+	// toolAllowlist, if non-empty, restricts registration to only these tools.
+	// Used with WHATSAPP_MCP_ENABLED_TOOLS for granular access control beyond
+	// read-only mode.
+	toolAllowlist map[string]struct{}
 }
 
 // Option configures a Server at construction time.
@@ -35,6 +40,18 @@ type Option func(*Server)
 // status changes. Use this when granting an AI agent access to an account
 // where outbound actions must be impossible even under prompt injection.
 func WithReadOnly(ro bool) Option { return func(s *Server) { s.readOnly = ro } }
+
+// WithAllowedTools restricts the server to only register the given tool names.
+// If empty, all tools are registered (subject to read-only mode). Use this
+// for granular access control beyond read-only mode.
+func WithAllowedTools(names []string) Option {
+	return func(s *Server) {
+		s.toolAllowlist = make(map[string]struct{}, len(names))
+		for _, n := range names {
+			s.toolAllowlist[n] = struct{}{}
+		}
+	}
+}
 
 // NewServer constructs an MCP server with all tools registered against the
 // provided WhatsApp client. cache may be nil (smoke/tests); pairing_status is
@@ -61,6 +78,31 @@ func NewServer(c *client.Client, cache pairingCache, opts ...Option) *Server {
 
 // ReadOnly reports whether the server was constructed in read-only mode.
 func (s *Server) ReadOnly() bool { return s.readOnly }
+
+// auditLog records an agent-initiated action in the append-only audit log.
+func (s *Server) auditLog(toolName, chatJID, messageID, action, result, details string) {
+	if s.client == nil || s.client.Store() == nil {
+		return
+	}
+	_ = s.client.Store().AuditLog(toolName, chatJID, messageID, action, result, details)
+}
+
+// addTool registers a tool only if it passes the allowlist filter.
+func (s *Server) addTool(tool mcp.Tool, handler server.ToolHandlerFunc) {
+	if s.shouldRegister(tool.Name) {
+		s.mcp.AddTool(tool, handler)
+	}
+}
+
+// shouldRegister reports whether a tool with the given name should be
+// registered. If no allowlist is configured, all tools are registered.
+func (s *Server) shouldRegister(toolName string) bool {
+	if len(s.toolAllowlist) == 0 {
+		return true
+	}
+	_, ok := s.toolAllowlist[toolName]
+	return ok
+}
 
 // MCP returns the underlying mcp-go server (tests only).
 func (s *Server) MCP() *server.MCPServer { return s.mcp }

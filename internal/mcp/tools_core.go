@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sealjay/mcp-whatsapp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
 // -- helpers shared across domain files -------------------------------------

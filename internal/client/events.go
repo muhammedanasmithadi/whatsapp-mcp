@@ -15,8 +15,8 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
-	"github.com/sealjay/mcp-whatsapp/internal/security"
-	"github.com/sealjay/mcp-whatsapp/internal/store"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
 // StartEventHandler registers the event handler on the underlying whatsmeow
@@ -227,6 +227,33 @@ func (c *Client) handleMessage(msg *events.Message) {
 			if perr := c.store.StorePollMetadata(context.Background(), msg.Info.ID, nm.chatJID, pollOptions); perr != nil {
 				c.log.Warnf("Failed to store poll metadata for %s: %v", msg.Info.ID, perr)
 			}
+		}
+
+		// Auto-transcribe incoming voice notes in the background.
+		if nm.msg.MediaType == "audio" && c.sttClient != nil {
+			msgID := msg.Info.ID
+			chatJID := nm.chatJID
+			go func() {
+				text, err := c.TranscribeVoiceNote(context.Background(), msgID, chatJID)
+				if err != nil {
+					c.log.Warnf("stt: auto-transcribe voice note %s: %v", c.redactor.MsgID(msgID), err)
+					return
+				}
+				if text == "" {
+					return
+				}
+				// Append the transcript to the stored message content.
+				updated := nm.msg.Content
+				if updated != "" {
+					updated += "\n"
+				}
+				updated += "[voice note transcript: " + text + "]"
+				if uerr := c.store.UpdateMessage(context.Background(), msgID, chatJID, updated); uerr != nil {
+					c.log.Warnf("stt: store transcript for %s: %v", c.redactor.MsgID(msgID), uerr)
+				} else {
+					c.log.Infof("stt: transcribed voice note %s: %s", c.redactor.MsgID(msgID), c.redactor.Body(text))
+				}
+			}()
 		}
 	}
 

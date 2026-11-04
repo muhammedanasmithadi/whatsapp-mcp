@@ -15,7 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sealjay/mcp-whatsapp/internal/security"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/media"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
 	"go.mau.fi/whatsmeow"
 )
 
@@ -367,4 +368,43 @@ func extractDirectPathFromURL(url string) string {
 		return url
 	}
 	return "/" + parts[1]
+}
+
+// TranscribeVoiceNote downloads the media for a voice-note message, converts
+// it to 16kHz mono WAV, and sends it to the configured STT endpoint.
+// Returns the transcribed text. Requires WHATSAPP_MCP_STT_ENDPOINT to be set
+// and the message must be an audio message.
+func (c *Client) TranscribeVoiceNote(ctx context.Context, messageID, chatJID string) (string, error) {
+	if c.sttClient == nil {
+		return "", fmt.Errorf("voice-note transcription not configured: set WHATSAPP_MCP_STT_ENDPOINT")
+	}
+
+	// Download the media.
+	r := c.Download(ctx, messageID, chatJID, "")
+	if !r.Success {
+		return "", fmt.Errorf("stt: download failed: %s", r.Message)
+	}
+	if r.MediaType != "audio" {
+		return "", fmt.Errorf("stt: message %s is not an audio message (type: %s)", messageID, r.MediaType)
+	}
+
+	// Read the downloaded file.
+	audioData, err := os.ReadFile(r.Path)
+	if err != nil {
+		return "", fmt.Errorf("stt: read downloaded file: %w", err)
+	}
+
+	// Convert to WAV for the STT endpoint.
+	wavData, err := media.ConvertToWAV(ctx, audioData, "ogg")
+	if err != nil {
+		return "", fmt.Errorf("stt: convert to WAV: %w", err)
+	}
+
+	// Transcribe.
+	text, err := c.sttClient.Transcribe(ctx, wavData, "voice.ogg")
+	if err != nil {
+		return "", fmt.Errorf("stt: transcribe: %w", err)
+	}
+
+	return text, nil
 }
