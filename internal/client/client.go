@@ -367,3 +367,19 @@ func (c *Client) WA() *whatsmeow.Client { return c.wa }
 
 // Store returns the message cache.
 func (c *Client) Store() *store.Store { return c.store }
+
+// GetPendingScheduledMessages returns all pending scheduled messages whose
+// scheduled_at is <= now.
+func (c *Client) GetPendingScheduledMessages(ctx context.Context) ([]store.ScheduledMessage, error) {
+	return c.store.GetPendingScheduledMessages(ctx)
+}
+
+// MarkMessageSent marks a scheduled message as sent.
+func (c *Client) MarkMessageSent(id, messageID string, sentAt time.Time) error {
+	return c.store.MarkMessageSent(id, messageID, sentAt)
+}
+
+// MarkMessageFailed marks a scheduled message as failed.
+func (c *Client) MarkMessageFailed(id, reason string) error {
+	return c.store.MarkMessageFailed(id, reason)
+}

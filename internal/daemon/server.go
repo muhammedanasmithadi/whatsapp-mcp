@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
 // requestIDMiddleware wraps the handler with a unique request ID for each
@@ -70,10 +73,18 @@ type pairDriver interface {
 	Disconnect()
 	// RequestHistorySync asks WhatsApp to backfill messages for a chat.
 	RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor string, count int, useLID bool) (string, error)
-	// ListChatJIDs returns all cached chat JIDs (used for full history sync opt-in).
+// ListChatJIDs returns all cached chat JIDs (used for full history sync opt-in).
 	ListChatJIDs() ([]string, error)
+	// GetPendingScheduledMessages returns all pending scheduled messages whose
+	// scheduled_at is <= now.
+	GetPendingScheduledMessages(ctx context.Context) ([]store.ScheduledMessage, error)
+	// MarkMessageSent marks a scheduled message as sent.
+	MarkMessageSent(id, messageID string, sentAt time.Time) error
+	// MarkMessageFailed marks a scheduled message as failed.
+	MarkMessageFailed(id, reason string) error
+	// SendMessage sends a WhatsApp message.
+	SendMessage(ctx context.Context, chatJID string, content string) (*client.SendResult, error)
 }
-
 // Config configures a daemon Server. Addr may be "host:port" or "host:0"
 // (the latter only for tests). MCPMount, if non-nil, is called once the
 // mux is being built so the caller can attach additional handlers (in
@@ -308,6 +319,9 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("boot driver: %w", err)
 	}
 
+	// Start the scheduled message scheduler goroutine.
+	go s.runScheduler(ctx)
+
 	// Wait for cancellation or a listener failure.
 	select {
 	case <-ctx.Done():
@@ -370,6 +384,76 @@ func (s *Server) requestFullHistorySync(ctx context.Context) {
 		}
 	}
 	s.log.Printf("[INFO] full history sync: requested backfill for %d chats", len(jids))
+}
+
+// runScheduler runs in a goroutine and sends scheduled messages at their
+// scheduled time. It uses a timer-based approach (not polling): when there
+// are pending messages, it waits until the next one is due; when there are
+// none, it waits briefly and checks again.
+func (s *Server) runScheduler(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		msgs, err := s.cfg.Driver.GetPendingScheduledMessages(ctx)
+		if err != nil {
+			s.log.Printf("[WARN] scheduled messages: failed to query: %v", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
+			continue
+		}
+
+		if len(msgs) == 0 {
+			// No pending messages. Wait a bit before checking again.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
+			continue
+		}
+
+		// Process all messages that are due now.
+		now := time.Now()
+		for _, m := range msgs {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			if m.ScheduledAt.After(now) {
+				// Wait until this message is due.
+				d := m.ScheduledAt.Sub(now)
+				select {
+				case <-time.After(d):
+				case <-ctx.Done():
+					return
+				}
+			}
+
+			// Send the message.
+			r, err := s.cfg.Driver.SendMessage(ctx, m.ChatJID, m.Content)
+			if err != nil {
+				s.cfg.Driver.MarkMessageFailed(m.ID, err.Error())
+				s.log.Printf("[WARN] scheduled message %s failed: %v", m.ID, err)
+				continue
+			}
+			if !r.Success {
+				s.cfg.Driver.MarkMessageFailed(m.ID, r.Message)
+				s.log.Printf("[WARN] scheduled message %s failed: %s", m.ID, r.Message)
+			} else {
+				s.cfg.Driver.MarkMessageSent(m.ID, r.ID, time.Now())
+				s.log.Printf("[INFO] scheduled message %s sent to %s", m.ID, m.ChatJID)
+			}
+		}
+	}
 }
 
 // onLoggedOut returns a callback the driver invokes when the remote device

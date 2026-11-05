@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
 // fakePairDriver lets us drive the Server state machine without a real
@@ -79,6 +82,22 @@ func (f *fakePairDriver) RequestHistorySync(ctx context.Context, chatJID string,
 
 func (f *fakePairDriver) ListChatJIDs() ([]string, error) {
 	return []string{"12345@s.whatsapp.net", "67890@g.us"}, nil
+}
+
+func (f *fakePairDriver) GetPendingScheduledMessages(ctx context.Context) ([]store.ScheduledMessage, error) {
+	return nil, nil
+}
+
+func (f *fakePairDriver) MarkMessageSent(id, messageID string, sentAt time.Time) error {
+	return nil
+}
+
+func (f *fakePairDriver) MarkMessageFailed(id, reason string) error {
+	return nil
+}
+
+func (p *fakePairDriver) SendMessage(ctx context.Context, chatJID string, content string) (*client.SendResult, error) {
+	return &client.SendResult{Success: true, Message: "ok", ID: "fake-id"}, nil
 }
 
 func waitFor(t *testing.T, pred func() bool, msg string) {

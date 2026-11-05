@@ -8,6 +8,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
 // productionDriver adapts *client.Client to the daemon.pairDriver interface.
@@ -136,6 +137,27 @@ func (p *productionDriver) RequestHistorySync(ctx context.Context, chatJID strin
 // ListChatJIDs returns all cached chat JIDs.
 func (p *productionDriver) ListChatJIDs() ([]string, error) {
 	return p.c.Store().ListChatJIDs()
+}
+
+// GetPendingScheduledMessages returns all pending scheduled messages.
+func (p *productionDriver) GetPendingScheduledMessages(ctx context.Context) ([]store.ScheduledMessage, error) {
+	return p.c.Store().GetPendingScheduledMessages(ctx)
+}
+
+// MarkMessageSent marks a scheduled message as sent.
+func (p *productionDriver) MarkMessageSent(id, messageID string, sentAt time.Time) error {
+	return p.c.Store().MarkMessageSent(id, messageID, sentAt)
+}
+
+// MarkMessageFailed marks a scheduled message as failed.
+func (p *productionDriver) MarkMessageFailed(id, reason string) error {
+	return p.c.Store().MarkMessageFailed(id, reason)
+}
+
+// SendMessage sends a WhatsApp message.
+func (p *productionDriver) SendMessage(ctx context.Context, chatJID string, content string) (*client.SendResult, error) {
+	r := p.c.Send(ctx, chatJID, content)
+	return &r, nil
 }
 
 func (p *productionDriver) Disconnect() { p.c.Disconnect() }

@@ -96,6 +96,17 @@ type MessageReadPosition struct {
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
 
+// ScheduledMessage is a message scheduled to be sent at a future time.
+type ScheduledMessage struct {
+	ID         string    `json:"id"`
+	ChatJID    string    `json:"chat_jid"`
+	Content    string    `json:"content"`
+	ScheduledAt time.Time `json:"scheduled_at"`
+	Status     string    `json:"status"` // pending, sent, failed
+	SentAt     time.Time `json:"sent_at,omitempty"`
+	SentMessageID string   `json:"sent_message_id,omitempty"`
+}
+
 // stmtCache caches prepared SQL statements to avoid the overhead of
 // re-preparing the same statement on every call. SQLite is a single-writer
 // database, so with MaxOpenConns(1) there is no risk of concurrent
@@ -540,6 +551,126 @@ func (s *Store) ListAuditLog(limit int) ([]AuditLogEntry, error) {
 	return entries, rows.Err()
 }
 
+// StoreContact upserts a contact row.
+func (s *Store) StoreContact(jid, name, phoneNumber string) error {
+	_, err := s.db.Exec(
+		"INSERT OR REPLACE INTO contacts (jid, name, phone_number, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+		jid, name, phoneNumber,
+	)
+	return err
+}
+
+// GetContact returns a contact by JID.
+func (s *Store) GetContact(jid string) (*Contact, error) {
+	row := s.db.QueryRow("SELECT jid, name, phone_number FROM contacts WHERE jid = ?", jid)
+	var c Contact
+	if err := row.Scan(&c.JID, &c.Name, &c.PhoneNumber); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
+// ListContacts returns all saved contacts ordered by name.
+func (s *Store) ListContacts() ([]Contact, error) {
+	rows, err := s.db.Query("SELECT jid, name, phone_number FROM contacts ORDER BY name")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var contacts []Contact
+	for rows.Next() {
+		var c Contact
+		if err := rows.Scan(&c.JID, &c.Name, &c.PhoneNumber); err != nil {
+			return nil, err
+		}
+		contacts = append(contacts, c)
+	}
+	return contacts, rows.Err()
+}
+
+// DeleteContact deletes a contact by JID.
+func (s *Store) DeleteContact(jid string) error {
+	_, err := s.db.Exec("DELETE FROM contacts WHERE jid = ?", jid)
+	return err
+}
+
+// StoreScheduledMessage inserts a scheduled message.
+func (s *Store) StoreScheduledMessage(id, chatJID, content string, scheduledAt time.Time) error {
+	_, err := s.db.Exec(
+		"INSERT OR REPLACE INTO scheduled_messages (id, chat_jid, content, scheduled_at) VALUES (?, ?, ?, ?)",
+		id, chatJID, content, scheduledAt,
+	)
+	return err
+}
+
+// GetPendingScheduledMessages returns all scheduled messages with status 'pending'
+// whose scheduled_at is <= now.
+func (s *Store) GetPendingScheduledMessages(ctx context.Context) ([]ScheduledMessage, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, chat_jid, content, scheduled_at FROM scheduled_messages
+		WHERE status = 'pending' AND scheduled_at <= ?
+		ORDER BY scheduled_at ASC
+	`, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var msgs []ScheduledMessage
+	for rows.Next() {
+		var m ScheduledMessage
+		if err := rows.Scan(&m.ID, &m.ChatJID, &m.Content, &m.ScheduledAt); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// MarkMessageSent marks a scheduled message as sent.
+func (s *Store) MarkMessageSent(id, messageID string, sentAt time.Time) error {
+	_, err := s.db.Exec(
+		"UPDATE scheduled_messages SET status = 'sent', sent_at = ?, sent_message_id = ? WHERE id = ?",
+		sentAt, messageID, id,
+	)
+	return err
+}
+
+// MarkMessageFailed marks a scheduled message as failed.
+func (s *Store) MarkMessageFailed(id, reason string) error {
+	_, err := s.db.Exec(
+		"UPDATE scheduled_messages SET status = 'failed', error = ? WHERE id = ?",
+		reason, id,
+	)
+	return err
+}
+
+// ListScheduledMessages returns all scheduled messages.
+func (s *Store) ListScheduledMessages() ([]ScheduledMessage, error) {
+	rows, err := s.db.Query("SELECT id, chat_jid, content, scheduled_at, status FROM scheduled_messages ORDER BY scheduled_at")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var msgs []ScheduledMessage
+	for rows.Next() {
+		var m ScheduledMessage
+		if err := rows.Scan(&m.ID, &m.ChatJID, &m.Content, &m.ScheduledAt, &m.Status); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// CancelScheduledMessage deletes a pending scheduled message.
+func (s *Store) CancelScheduledMessage(id string) error {
+	_, err := s.db.Exec("DELETE FROM scheduled_messages WHERE id = ? AND status = 'pending'", id)
+	return err
+}
+
 // FindChatName returns the name stored for a chat JID, empty if none.
 func (s *Store) FindChatName(jid string) string {
 	var name string
@@ -698,7 +829,27 @@ CREATE TABLE IF NOT EXISTS message_read_positions (
 	FOREIGN KEY (chat_jid) REFERENCES chats(jid)
 );
 
--- Indexes for common query patterns.
+CREATE TABLE IF NOT EXISTS contacts (
+	jid TEXT PRIMARY KEY,
+	name TEXT,
+	phone_number TEXT,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS scheduled_messages (
+	id TEXT PRIMARY KEY,
+	chat_jid TEXT NOT NULL,
+	content TEXT NOT NULL,
+	scheduled_at TIMESTAMP NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending',
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	sent_at TIMESTAMP,
+	sent_message_id TEXT,
+	FOREIGN KEY (chat_jid) REFERENCES chats(jid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_messages_scheduled_at ON scheduled_messages(scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_timestamp ON messages(chat_jid, timestamp DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_sender_timestamp ON messages(sender, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_media_type ON messages(media_type, timestamp DESC) WHERE media_type != '';
