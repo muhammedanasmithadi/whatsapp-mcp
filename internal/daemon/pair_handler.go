@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -81,10 +83,14 @@ type pairHandlers struct {
 	csrfMu    sync.Mutex
 	csrfToken string
 	publishWS func(evType, data string)
+
+	// Webhook HMAC secret for verifying incoming webhook signatures.
+	// If non-empty, the X-Hub-Signature-256 header is required on POST /webhook/.
+	webhookSecret []byte
 }
 
 // newPairHandlers constructs handlers with default rate limiters.
-func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishWS func(evType, data string)) *pairHandlers {
+func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishWS func(evType, data string), webhookSecret []byte) *pairHandlers {
 	return &pairHandlers{
 		cache: cache,
 		reset: reset,
@@ -102,6 +108,7 @@ func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishW
 		pairEventLimiter: NewLimiter(30.0/60.0, 3), // 30/min, burst 3
 		startedAt:        time.Now(),
 		publishWS:        publishWS,
+		webhookSecret:    webhookSecret,
 	}
 }
 
@@ -303,6 +310,24 @@ func (h *pairHandlers) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
+
+	// Verify HMAC signature if a webhook secret is configured.
+	// WhatsApp sends the signature as "sha256=<hex>" in X-Hub-Signature-256.
+	if len(h.webhookSecret) > 0 {
+		sig := r.Header.Get("X-Hub-Signature-256")
+		if sig == "" {
+			http.Error(w, "missing X-Hub-Signature-256 header", http.StatusUnauthorized)
+			return
+		}
+		mac := hmac.New(sha256.New, h.webhookSecret)
+		mac.Write(body)
+		expectedMAC := mac.Sum(nil)
+		sigHex := strings.TrimPrefix(sig, "sha256=")
+		if !hmac.Equal([]byte(sigHex), expectedMAC) {
+			http.Error(w, "invalid X-Hub-Signature-256", http.StatusUnauthorized)
+			return
+		}
+	}
 
 	var payload struct {
 		Type      string `json:"type"`

@@ -170,6 +170,7 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 		Driver:          drv,
 		AuthToken:       authToken,
 		FullHistorySync: fullHistorySync,
+		WebhookSecret:   []byte(os.Getenv("WHATSAPP_WEBHOOK_SECRET")),
 		Logger:          log.New(os.Stderr, "Daemon ", log.LstdFlags),
 	})
 	if err != nil {

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,28 @@ import (
 
 	"github.com/coder/websocket"
 )
+
+// requestIDMiddleware wraps the handler with a unique request ID for each
+// request. The ID is generated from crypto/rand and returned in the
+// X-Request-ID response header so callers can correlate logs across the
+// daemon and upstream services.
+func requestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var rid [16]byte
+		if _, err := rand.Read(rid[:]); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		requestID := fmt.Sprintf("%x", rid[:])
+		w.Header().Set("X-Request-ID", requestID)
+		r = r.WithContext(context.WithValue(r.Context(), requestIDKey{}, requestID))
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requestIDKey is the context key for the request ID. Unexported so only this
+// package can access it.
+type requestIDKey struct{}
 
 // pairDriver is the minimal surface the Server needs from the underlying
 // WhatsApp client. Production wiring (cmd/whatsapp-mcp/production_driver.go)
@@ -51,6 +74,7 @@ type Config struct {
 	MCPMount        func(mux *http.ServeMux)
 	AuthToken       string
 	FullHistorySync bool // after pairing, request full history sync for all cached chats
+	WebhookSecret   []byte // HMAC secret for verifying /webhook/ signatures
 	Logger          *log.Logger
 }
 
@@ -224,7 +248,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if pc, ok := s.cfg.Driver.(pairCoder); ok {
 		coder = pc
 	}
-	handlers := newPairHandlers(s.cache, s.cfg.Driver, coder, s.PublishWS)
+	handlers := newPairHandlers(s.cache, s.cfg.Driver, coder, s.PublishWS, s.cfg.WebhookSecret)
 	s.handlers = handlers
 	handlers.mount(mux)
 
@@ -242,7 +266,7 @@ func (s *Server) Run(ctx context.Context) error {
 		})
 	}
 
-	rootHandler := authMiddleware(mux, s.cfg.AuthToken)
+	rootHandler := requestIDMiddleware(authMiddleware(mux, s.cfg.AuthToken))
 
 	ln, err := net.Listen("tcp", s.cfg.Addr)
 	if err != nil {

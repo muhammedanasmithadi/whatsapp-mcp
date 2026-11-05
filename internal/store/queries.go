@@ -696,16 +696,19 @@ func chatSelectSQL(alias string, includeLastMessage bool) string {
 		%s.jid,
 		%s.name,
 		%s.last_message_time,
-		latest_msg.content,
-		latest_msg.sender,
-		latest_msg.is_from_me
+		lm.content,
+		lm.sender,
+		lm.is_from_me
 	FROM %s
-		LEFT JOIN messages AS latest_msg ON %s.jid = latest_msg.chat_jid
-		AND latest_msg.rowid = (
-			SELECT rowid FROM messages
-			WHERE chat_jid = %s.jid
-			ORDER BY timestamp DESC LIMIT 1
-		)`, alias, alias, alias, from, alias, alias)
+		LEFT JOIN (
+			SELECT m.chat_jid, m.content, m.sender, m.is_from_me
+			FROM messages m
+			INNER JOIN (
+				SELECT chat_jid, MAX(timestamp) AS max_ts, MAX(id) AS max_id
+				FROM messages
+				GROUP BY chat_jid
+			) m2 ON m.chat_jid = m2.chat_jid AND m.timestamp = m2.max_ts AND m.id = m2.max_id
+		) lm ON %s.jid = lm.chat_jid`, alias, alias, alias, from, alias)
 }
 
 // scanChatRow scans the 6-column projection used by ListChats and GetChat.

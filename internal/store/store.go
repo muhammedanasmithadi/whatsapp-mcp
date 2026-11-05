@@ -116,10 +116,16 @@ func Open(dir string) (*Store, error) {
 	msgPath := filepath.Join(dir, "messages.db")
 	waPath := filepath.Join(dir, "whatsapp.db")
 
-	db, err := sql.Open("sqlite3", "file:"+msgPath+"?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite3", "file:"+msgPath+"?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_cache_size=-64000&_mmap_size=268435456")
 	if err != nil {
 		return nil, fmt.Errorf("open messages db: %w", err)
 	}
+	// SQLite is a single-writer, multi-reader database. Limit open connections
+	// to 1 to avoid "database is locked" errors under concurrent access from
+	// the MCP HTTP handler, the history-sync goroutine, and the media downloader.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
@@ -601,6 +607,14 @@ CREATE TABLE IF NOT EXISTS message_read_positions (
 	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (chat_jid) REFERENCES chats(jid)
 );
+
+-- Indexes for common query patterns.
+CREATE INDEX IF NOT EXISTS idx_messages_chat_timestamp ON messages(chat_jid, timestamp DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_sender_timestamp ON messages(sender, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_media_type ON messages(media_type, timestamp DESC) WHERE media_type != '';
+CREATE INDEX IF NOT EXISTS idx_messages_is_from_me ON messages(is_from_me, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp DESC);
+
 `
 
 // migrateSchema brings legacy databases up to the current layout. SQLite lacks
