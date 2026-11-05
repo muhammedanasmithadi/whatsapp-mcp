@@ -17,6 +17,7 @@ import (
 // send_typing.
 func (s *Server) registerSendTools() {
 	s.registerSendMessage()
+	s.registerBatchSendMessages()
 	s.registerSendFile()
 	s.registerSendAudioMessage()
 	s.registerSendReaction()
@@ -59,6 +60,52 @@ func (s *Server) registerSendMessage() {
 			s.auditLog("send_message", a.Recipient, r.ID, "send", "success", r.Message)
 		}
 		return result, err
+	}))
+}
+
+// -- batch_send_messages ----------------------------------------------------
+
+type batchSendMessageArgs struct {
+	Messages []sendMessageArgs `json:"messages"`
+}
+
+func (s *Server) registerBatchSendMessages() {
+	tool := mcp.NewTool("batch_send_messages",
+		mcp.WithDescription("Send multiple WhatsApp text messages in a single call. Each message is sent independently; results are returned per-message. Rate limiting applies per message as with send_message. Returns a JSON array of results, one per input message, each with {success, message, id or error}."),
+		mcp.WithArray("messages", mcp.Required(), mcp.Items(map[string]any{"type": "object"}), mcp.Description("array of message objects, each with `recipient` and `message` fields, and optional `mark_chat_read` boolean.")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a batchSendMessageArgs) (*mcp.CallToolResult, error) {
+		if len(a.Messages) == 0 {
+			return mcp.NewToolResultError("messages: must not be empty"), nil
+		}
+		if len(a.Messages) > 50 {
+			return mcp.NewToolResultError("messages: maximum 50 per batch"), nil
+		}
+
+		results := make([]map[string]any, len(a.Messages))
+		for i, m := range a.Messages {
+			r := s.client.Send(ctx, m.Recipient, m.Message)
+			if m.MarkChatRead {
+				s.maybeMarkChatRead(ctx, r, m.Recipient, true)
+			}
+			result := map[string]any{"index": i}
+			if !r.Success {
+				result["success"] = false
+				result["error"] = r.Message
+				s.auditLog("send_message", m.Recipient, "", "send", "error", r.Message)
+			} else {
+				result["success"] = true
+				result["message"] = r.Message
+				result["id"] = r.ID
+				s.auditLog("send_message", m.Recipient, r.ID, "send", "success", r.Message)
+			}
+			results[i] = result
+		}
+		return resultJSON(results)
 	}))
 }
 

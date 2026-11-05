@@ -87,6 +87,9 @@ type pairHandlers struct {
 	// Webhook HMAC secret for verifying incoming webhook signatures.
 	// If non-empty, the X-Hub-Signature-256 header is required on POST /webhook/.
 	webhookSecret []byte
+
+	// Webhook rate limiter - limits webhook POSTs per second.
+	webhookLimiter *Limiter
 }
 
 // newPairHandlers constructs handlers with default rate limiters.
@@ -106,6 +109,8 @@ func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishW
 		// SSE connections are long-lived, so allow a modest burst for the
 		// initial handshake and let the TCP keep-alive carry the stream.
 		pairEventLimiter: NewLimiter(30.0/60.0, 3), // 30/min, burst 3
+		// Webhook requests: allow 10 per second with burst of 20.
+		webhookLimiter: NewLimiter(10.0, 20),
 		startedAt:        time.Now(),
 		publishWS:        publishWS,
 		webhookSecret:    webhookSecret,
@@ -302,6 +307,11 @@ func (h *pairHandlers) handleMetrics(w http.ResponseWriter, r *http.Request) {
 func (h *pairHandlers) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	if !h.webhookLimiter.Allow() {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "webhook rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 	body, err := io.ReadAll(r.Body)

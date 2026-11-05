@@ -39,6 +39,20 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 // package can access it.
 type requestIDKey struct{}
 
+// maxBodySizeMiddleware limits request body size to prevent abuse via large
+// POST payloads. The default limit is 1MB which is sufficient for all
+// legitimate MCP tool calls and webhook payloads.
+func maxBodySizeMiddleware(next http.Handler, maxBytes int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+		next.ServeHTTP(w, r)
+	})
+}
+
 // pairDriver is the minimal surface the Server needs from the underlying
 // WhatsApp client. Production wiring (cmd/whatsapp-mcp/production_driver.go)
 // satisfies this via *client.Client. Tests substitute a fake.
@@ -266,7 +280,7 @@ func (s *Server) Run(ctx context.Context) error {
 		})
 	}
 
-	rootHandler := requestIDMiddleware(authMiddleware(mux, s.cfg.AuthToken))
+	rootHandler := requestIDMiddleware(maxBodySizeMiddleware(authMiddleware(mux, s.cfg.AuthToken), 1<<20))
 
 	ln, err := net.Listen("tcp", s.cfg.Addr)
 	if err != nil {

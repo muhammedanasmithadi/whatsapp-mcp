@@ -9,6 +9,7 @@ import (
 // Keeping it as a sorted slice makes diff output easy to read when registration
 // drifts.
 var expectedToolNames = []string{
+	"batch_send_messages",
 	"block_contact",
 	"create_group",
 	"delete_message",
@@ -57,7 +58,9 @@ var expectedToolNames = []string{
 	"set_group_topic",
 	"set_privacy_setting",
 	"set_status_message",
+	"unarchive_chat",
 	"unblock_contact",
+	"archive_chat",
 	"update_group_participants",
 }
 
@@ -124,7 +127,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 
 func TestNewServer_ToolCount(t *testing.T) {
 	s := NewServer(nil, nil)
-	const want = 50
+	const want = 53
 	if got := len(s.MCP().ListTools()); got != want {
 		t.Errorf("tool count = %d, want %d", got, want)
 	}

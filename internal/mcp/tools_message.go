@@ -14,7 +14,8 @@ import (
 
 // registerMessageTools wires message-mutation and history tools:
 // edit_message, delete_message, mark_read, mark_chat_read, request_sync,
-// download_media, recover_media, transcribe_voice_note.
+// download_media, recover_media, transcribe_voice_note, archive_chat,
+// unarchive_chat.
 func (s *Server) registerMessageTools() {
 	s.registerEditMessage()
 	s.registerDeleteMessage()
@@ -24,6 +25,8 @@ func (s *Server) registerMessageTools() {
 	s.registerDownloadMedia()
 	s.registerRecoverMedia()
 	s.registerTranscribeVoiceNote()
+	s.registerArchiveChat()
+	s.registerUnarchiveChat()
 }
 
 // -- edit_message -----------------------------------------------------------
@@ -320,5 +323,59 @@ func (s *Server) registerTranscribeVoiceNote() {
 			return mcp.NewToolResultText("(no transcript returned by STT service)"), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Voice note transcript: %s", text)), nil
+	}))
+}
+
+// -- archive_chat -------------------------------------------------------------
+
+type archiveChatArgs struct {
+	ChatJID string `json:"chat_jid"`
+}
+
+func (s *Server) registerArchiveChat() {
+	tool := mcp.NewTool("archive_chat",
+		mcp.WithDescription("Archive a chat so it no longer appears in normal chat listings. Archived chats are hidden from list_chats but all messages are preserved. Use unarchive_chat to restore visibility. Read-only by WhatsApp (no message is modified locally). Returns the plain-text string `Archived chat <chat_jid>`."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a archiveChatArgs) (*mcp.CallToolResult, error) {
+		if a.ChatJID == "" {
+			return mcp.NewToolResultError("chat_jid is required"), nil
+		}
+		if err := s.client.Store().ArchiveChat(a.ChatJID); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		s.auditLog("archive_chat", a.ChatJID, "", "archive", "success", "archived")
+		return mcp.NewToolResultText(fmt.Sprintf("Archived chat %s", a.ChatJID)), nil
+	}))
+}
+
+// -- unarchive_chat -----------------------------------------------------------
+
+type unarchiveChatArgs struct {
+	ChatJID string `json:"chat_jid"`
+}
+
+func (s *Server) registerUnarchiveChat() {
+	tool := mcp.NewTool("unarchive_chat",
+		mcp.WithDescription("Unarchive a previously archived chat so it reappears in normal chat listings. Read-only by WhatsApp (no message is modified locally). Returns the plain-text string `Unarchived chat <chat_jid>`."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a unarchiveChatArgs) (*mcp.CallToolResult, error) {
+		if a.ChatJID == "" {
+			return mcp.NewToolResultError("chat_jid is required"), nil
+		}
+		if err := s.client.Store().UnarchiveChat(a.ChatJID); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		s.auditLog("unarchive_chat", a.ChatJID, "", "unarchive", "success", "unarchived")
+		return mcp.NewToolResultText(fmt.Sprintf("Unarchived chat %s", a.ChatJID)), nil
 	}))
 }
