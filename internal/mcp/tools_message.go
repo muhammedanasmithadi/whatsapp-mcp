@@ -51,7 +51,7 @@ func (s *Server) registerEditMessage() {
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a editMessageArgs) (*mcp.CallToolResult, error) {
 		if err := s.client.EditMessage(ctx, a.ChatJID, a.MessageID, a.NewBody); err != nil {
 			s.auditLog("edit_message", a.ChatJID, a.MessageID, "edit", "error", err.Error())
-			return mcp.NewToolResultError(err.Error()), nil
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error editing message", true)), nil
 		}
 		s.auditLog("edit_message", a.ChatJID, a.MessageID, "edit", "success", "edited")
 		return mcp.NewToolResultText("Message edited"), nil
@@ -80,7 +80,7 @@ func (s *Server) registerDeleteMessage() {
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a deleteMessageArgs) (*mcp.CallToolResult, error) {
 		if err := s.client.DeleteMessage(ctx, a.ChatJID, a.MessageID, a.SenderJID); err != nil {
 			s.auditLog("delete_message", a.ChatJID, a.MessageID, "delete", "error", err.Error())
-			return mcp.NewToolResultError(err.Error()), nil
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error deleting message", true)), nil
 		}
 		s.auditLog("delete_message", a.ChatJID, a.MessageID, "delete", "success", "deleted")
 		return mcp.NewToolResultText("Message deleted"), nil
@@ -108,11 +108,13 @@ func (s *Server) registerMarkRead() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a markReadArgs) (*mcp.CallToolResult, error) {
 		if len(a.MessageIDs) == 0 {
-			return mcp.NewToolResultError("message_ids must not be empty"), nil
+			return errorResult(ErrInvalidParameter("message_ids", "non-empty array", "empty array")), nil
 		}
 		if err := s.client.MarkRead(ctx, a.ChatJID, a.MessageIDs, a.SenderJID); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("mark_read", a.ChatJID, "", "mark_read", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error marking messages as read", true)), nil
 		}
+		s.auditLog("mark_read", a.ChatJID, "", "mark_read", "success", fmt.Sprintf("marked %d messages read", len(a.MessageIDs)))
 		return mcp.NewToolResultText(fmt.Sprintf("Marked %d message(s) read in %s", len(a.MessageIDs), a.ChatJID)), nil
 	}))
 }
@@ -136,12 +138,14 @@ func (s *Server) registerMarkChatRead() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a markChatReadArgs) (*mcp.CallToolResult, error) {
 		if a.ChatJID == "" {
-			return mcp.NewToolResultError("chat_jid is required"), nil
+			return errorResult(ErrInvalidParameter("chat_jid", "non-empty string", "empty string")), nil
 		}
 		count, err := s.client.MarkChatRead(ctx, a.ChatJID, a.Limit)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("mark_chat_read", a.ChatJID, "", "mark_chat_read", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error marking chat as read", true)), nil
 		}
+		s.auditLog("mark_chat_read", a.ChatJID, "", "mark_chat_read", "success", fmt.Sprintf("acked %d messages", count))
 		return mcp.NewToolResultText(fmt.Sprintf("Acked %d message(s) in %s", count, a.ChatJID)), nil
 	}))
 }
@@ -207,15 +211,15 @@ func (s *Server) registerRequestSync() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a requestSyncArgs) (*mcp.CallToolResult, error) {
 		if a.ChatJID == "" {
-			return mcp.NewToolResultError("chat_jid: required"), nil
+			return errorResult(ErrInvalidParameter("chat_jid", "non-empty string", "empty string")), nil
 		}
 		switch a.Anchor {
 		case "", client.AnchorNewest, client.AnchorOldest:
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("anchor: must be %q or %q", client.AnchorNewest, client.AnchorOldest)), nil
+			return errorResult(ErrInvalidParameter("anchor", fmt.Sprintf("one of %q, %q, or empty", client.AnchorNewest, client.AnchorOldest), a.Anchor)), nil
 		}
 		if a.Count < 0 {
-			return mcp.NewToolResultError("count: must not be negative"), nil
+			return errorResult(ErrInvalidParameter("count", "non-negative integer", fmt.Sprintf("%d", a.Count))), nil
 		}
 		useLID := true
 		if a.UseLID != nil {
@@ -225,14 +229,16 @@ func (s *Server) registerRequestSync() {
 		if a.FromTimestamp != "" {
 			t, err := parseTimestamp(a.FromTimestamp)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("invalid from_timestamp: %v", err)), nil
+				return errorResult(ErrInvalidParameter("from_timestamp", "valid ISO-8601 UTC timestamp", a.FromTimestamp)), nil
 			}
 			ts = t
 		}
 		msg, err := s.client.RequestHistorySync(ctx, a.ChatJID, ts, a.Anchor, int(a.Count), useLID)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("request_sync", a.ChatJID, "", "request_sync", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error requesting history sync", true)), nil
 		}
+		s.auditLog("request_sync", a.ChatJID, "", "request_sync", "success", fmt.Sprintf("requested %d messages", int(a.Count)))
 		return mcp.NewToolResultText(msg), nil
 	}))
 }
@@ -258,9 +264,14 @@ func (s *Server) registerDownloadMedia() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a downloadMediaArgs) (*mcp.CallToolResult, error) {
 		if a.MessageID == "" || a.ChatJID == "" {
-			return mcp.NewToolResultError("message_id and chat_jid are required"), nil
+			return errorResult(ErrInvalidParameter("message_id and chat_jid", "non-empty strings", "empty string(s)")), nil
 		}
 		r := s.client.Download(ctx, a.MessageID, a.ChatJID, a.OutputPath)
+		if !r.Success {
+			s.auditLog("download_media", a.ChatJID, a.MessageID, "download", "error", r.Message)
+			return errorResult(ErrWhatsAppAPI(r.Message, "Failed to download media from WhatsApp", true)), nil
+		}
+		s.auditLog("download_media", a.ChatJID, a.MessageID, "download", "success", r.Message)
 		return downloadMediaResult(r)
 	}))
 }
@@ -284,12 +295,14 @@ func (s *Server) registerRecoverMedia() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a recoverMediaArgs) (*mcp.CallToolResult, error) {
 		if a.MessageID == "" || a.ChatJID == "" {
-			return mcp.NewToolResultError("message_id and chat_jid are required"), nil
+			return errorResult(ErrInvalidParameter("message_id and chat_jid", "non-empty strings", "empty string(s)")), nil
 		}
 		msg, err := s.client.RecoverMedia(ctx, a.MessageID, a.ChatJID)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to recover media: %v", err)), nil
+			s.auditLog("recover_media", a.ChatJID, a.MessageID, "recover_media", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "Failed to request history sync for media recovery", true)), nil
 		}
+		s.auditLog("recover_media", a.ChatJID, a.MessageID, "recover_media", "success", "recovery requested")
 		return mcp.NewToolResultText(fmt.Sprintf("Media recovery requested for message %s in chat %s. WhatsApp is re-sending the message with a fresh media URL. Retry download_media shortly.\n%s", a.MessageID, a.ChatJID, msg)), nil
 	}))
 }
@@ -313,15 +326,17 @@ func (s *Server) registerTranscribeVoiceNote() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a transcribeVoiceNoteArgs) (*mcp.CallToolResult, error) {
 		if a.MessageID == "" || a.ChatJID == "" {
-			return mcp.NewToolResultError("message_id and chat_jid are required"), nil
+			return errorResult(ErrInvalidParameter("message_id and chat_jid", "non-empty strings", "empty string(s)")), nil
 		}
 		text, err := s.client.TranscribeVoiceNote(ctx, a.MessageID, a.ChatJID)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to transcribe voice note: %v", err)), nil
+			s.auditLog("transcribe_voice_note", a.ChatJID, a.MessageID, "transcribe", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "Failed to transcribe voice note", true)), nil
 		}
 		if text == "" {
 			return mcp.NewToolResultText("(no transcript returned by STT service)"), nil
 		}
+		s.auditLog("transcribe_voice_note", a.ChatJID, a.MessageID, "transcribe", "success", "transcribed")
 		return mcp.NewToolResultText(fmt.Sprintf("Voice note transcript: %s", text)), nil
 	}))
 }
@@ -343,10 +358,11 @@ func (s *Server) registerArchiveChat() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a archiveChatArgs) (*mcp.CallToolResult, error) {
 		if a.ChatJID == "" {
-			return mcp.NewToolResultError("chat_jid is required"), nil
+			return errorResult(ErrInvalidParameter("chat_jid", "non-empty string", "empty string")), nil
 		}
 		if err := s.client.Store().ArchiveChat(a.ChatJID); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("archive_chat", a.ChatJID, "", "archive", "error", err.Error())
+			return errorResult(ErrInternal(err.Error())), nil
 		}
 		s.auditLog("archive_chat", a.ChatJID, "", "archive", "success", "archived")
 		return mcp.NewToolResultText(fmt.Sprintf("Archived chat %s", a.ChatJID)), nil
@@ -370,10 +386,11 @@ func (s *Server) registerUnarchiveChat() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a unarchiveChatArgs) (*mcp.CallToolResult, error) {
 		if a.ChatJID == "" {
-			return mcp.NewToolResultError("chat_jid is required"), nil
+			return errorResult(ErrInvalidParameter("chat_jid", "non-empty string", "empty string")), nil
 		}
 		if err := s.client.Store().UnarchiveChat(a.ChatJID); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("unarchive_chat", a.ChatJID, "", "unarchive", "error", err.Error())
+			return errorResult(ErrInternal(err.Error())), nil
 		}
 		s.auditLog("unarchive_chat", a.ChatJID, "", "unarchive", "success", "unarchived")
 		return mcp.NewToolResultText(fmt.Sprintf("Unarchived chat %s", a.ChatJID)), nil

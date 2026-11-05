@@ -45,12 +45,14 @@ func (s *Server) registerCreateGroup() {
 			return r, nil
 		}
 		if len(a.Participants) == 0 {
-			return mcp.NewToolResultError("participants: required"), nil
+			return errorResult(ErrInvalidParameter("participants", "non-empty array", "empty array")), nil
 		}
 		jid, info, err := s.client.CreateGroup(ctx, a.Name, a.Participants)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("create_group", "", "", "create_group", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error creating group", true)), nil
 		}
+		s.auditLog("create_group", jid, "", "create_group", "success", "created group")
 		return resultJSON(map[string]any{"jid": jid, "info": json.RawMessage(info)})
 	}))
 }
@@ -73,8 +75,10 @@ func (s *Server) registerLeaveGroup() {
 			return r, nil
 		}
 		if err := s.client.LeaveGroup(ctx, a.ChatJID); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("leave_group", a.ChatJID, "", "leave_group", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error leaving group", true)), nil
 		}
+		s.auditLog("leave_group", a.ChatJID, "", "leave_group", "success", "left group")
 		return mcp.NewToolResultText(fmt.Sprintf("Left group %s", a.ChatJID)), nil
 	}))
 }
@@ -115,7 +119,8 @@ func (s *Server) registerGetGroupInfo() {
 		}
 		js, err := s.client.GetGroupInfoJSON(ctx, a.ChatJID)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("get_group_info", a.ChatJID, "", "get_group_info", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error fetching group info", true)), nil
 		}
 		return mcp.NewToolResultText(js), nil
 	}))
@@ -149,12 +154,16 @@ func (s *Server) registerUpdateGroupParticipants() {
 			return r, nil
 		}
 		if len(a.Participants) == 0 {
-			return mcp.NewToolResultError("participants: required"), nil
+			return errorResult(ErrInvalidParameter("participants", "non-empty array", "empty array")), nil
 		}
 		report, err := s.client.UpdateGroupParticipants(ctx, a.ChatJID, a.Participants, a.Action, client.ParticipantUpdateOptions{
 			SendInvite:    a.SendInvite == nil || *a.SendInvite,
 			InviteMessage: a.InviteMessage,
 		})
+		if err != nil {
+			s.auditLog("update_group_participants", a.ChatJID, "", "update_group_participants", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error updating group participants", true)), nil
+		}
 		return toolResult(report, err)
 	}))
 }
@@ -182,7 +191,8 @@ func (s *Server) registerSetGroupName() {
 			return r, nil
 		}
 		if err := s.client.SetGroupName(ctx, a.ChatJID, a.Name); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("set_group_name", a.ChatJID, "", "set_group_name", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error setting group name", true)), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Group %s renamed to %q", a.ChatJID, a.Name)), nil
 	}))
@@ -208,7 +218,8 @@ func (s *Server) registerSetGroupTopic() {
 			return r, nil
 		}
 		if err := s.client.SetGroupTopic(ctx, a.ChatJID, a.Topic); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("set_group_topic", a.ChatJID, "", "set_group_topic", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error setting group topic", true)), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Group %s topic updated", a.ChatJID)), nil
 	}))
@@ -234,7 +245,8 @@ func (s *Server) registerSetGroupAnnounce() {
 			return r, nil
 		}
 		if err := s.client.SetGroupAnnounce(ctx, a.ChatJID, a.AnnounceOnly); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("set_group_announce", a.ChatJID, "", "set_group_announce", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error setting group announce mode", true)), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Group %s announce_only=%t", a.ChatJID, a.AnnounceOnly)), nil
 	}))
@@ -260,7 +272,8 @@ func (s *Server) registerSetGroupLocked() {
 			return r, nil
 		}
 		if err := s.client.SetGroupLocked(ctx, a.ChatJID, a.Locked); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("set_group_locked", a.ChatJID, "", "set_group_locked", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error setting group locked mode", true)), nil
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Group %s locked=%t", a.ChatJID, a.Locked)), nil
 	}))
@@ -288,7 +301,11 @@ func (s *Server) registerGetGroupInviteLink() {
 			return r, nil
 		}
 		link, err := s.client.GetGroupInviteLink(ctx, a.ChatJID, a.Reset)
-		return toolResult(map[string]string{"link": link}, err)
+		if err != nil {
+			s.auditLog("get_group_invite_link", a.ChatJID, "", "get_group_invite_link", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error getting group invite link", true)), nil
+		}
+		return toolResult(map[string]string{"link": link}, nil)
 	}))
 }
 
@@ -310,6 +327,10 @@ func (s *Server) registerJoinGroupWithLink() {
 			return r, nil
 		}
 		jid, err := s.client.JoinGroupWithLink(ctx, a.LinkOrCode)
-		return toolResult(map[string]string{"jid": jid}, err)
+		if err != nil {
+			s.auditLog("join_group_with_link", "", "", "join_group_with_link", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error joining group", true)), nil
+		}
+		return toolResult(map[string]string{"jid": jid}, nil)
 	}))
 }

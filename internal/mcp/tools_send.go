@@ -46,20 +46,22 @@ func (s *Server) registerSendMessage() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a sendMessageArgs) (*mcp.CallToolResult, error) {
 		if a.Recipient == "" {
-			return mcp.NewToolResultError("recipient must be provided"), nil
+			return errorResult(ErrInvalidParameter("recipient", "non-empty string", "empty string")), nil
 		}
 		ctx = withRateLimitOverride(ctx, req)
 		r := s.client.Send(ctx, a.Recipient, a.Message)
 		s.maybeMarkChatRead(ctx, r, a.Recipient, a.MarkChatRead)
+		if !r.Success {
+			s.auditLog("send_message", a.Recipient, "", "send", "error", r.Message)
+			return errorResult(ErrWhatsAppAPI(r.Message, "WhatsApp API returned an error sending the message", true)), nil
+		}
 		result, err := resultJSON(r)
 		if err != nil {
-			s.auditLog("send_message", a.Recipient, "", "send", "error", err.Error())
-		} else if !r.Success {
-			s.auditLog("send_message", a.Recipient, "", "send", "error", r.Message)
-		} else {
-			s.auditLog("send_message", a.Recipient, r.ID, "send", "success", r.Message)
+			s.auditLog("send_message", a.Recipient, r.ID, "send", "error", err.Error())
+			return errorResult(ErrInternal(err.Error())), nil
 		}
-		return result, err
+		s.auditLog("send_message", a.Recipient, r.ID, "send", "success", r.Message)
+		return result, nil
 	}))
 }
 
@@ -80,14 +82,22 @@ func (s *Server) registerBatchSendMessages() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a batchSendMessageArgs) (*mcp.CallToolResult, error) {
 		if len(a.Messages) == 0 {
-			return mcp.NewToolResultError("messages: must not be empty"), nil
+			return errorResult(ErrInvalidParameter("messages", "non-empty array", "empty array")), nil
 		}
 		if len(a.Messages) > 50 {
-			return mcp.NewToolResultError("messages: maximum 50 per batch"), nil
+			return errorResult(ErrInvalidParameter("messages", "at most 50 messages", fmt.Sprintf("%d messages", len(a.Messages)))), nil
 		}
 
 		results := make([]map[string]any, len(a.Messages))
 		for i, m := range a.Messages {
+			if m.Recipient == "" {
+				results[i] = map[string]any{
+					"index":   i,
+					"success": false,
+					"error":   "recipient must be provided",
+				}
+				continue
+			}
 			r := s.client.Send(ctx, m.Recipient, m.Message)
 			if m.MarkChatRead {
 				s.maybeMarkChatRead(ctx, r, m.Recipient, true)
@@ -134,11 +144,11 @@ func (s *Server) registerSendFile() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a sendFileArgs) (*mcp.CallToolResult, error) {
 		if a.Recipient == "" || a.MediaPath == "" {
-			return mcp.NewToolResultError("recipient and media_path are required"), nil
+			return errorResult(ErrInvalidParameter("recipient and media_path", "non-empty strings", "empty string(s)")), nil
 		}
 		safePath, err := s.client.ValidateMediaPath(a.MediaPath)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return errorResult(ErrInvalidParameter("media_path", "valid file path under media root", err.Error())), nil
 		}
 		ctx = withRateLimitOverride(ctx, req)
 		r := s.client.SendMediaWithOptions(ctx, client.SendMediaOptions{
@@ -148,7 +158,16 @@ func (s *Server) registerSendFile() {
 			ViewOnce:  a.ViewOnce,
 		})
 		s.maybeMarkChatRead(ctx, r, a.Recipient, a.MarkChatRead)
-		return resultJSON(r)
+		if !r.Success {
+			s.auditLog("send_file", a.Recipient, "", "send", "error", r.Message)
+			return errorResult(ErrWhatsAppAPI(r.Message, "WhatsApp API returned an error sending media", true)), nil
+		}
+		s.auditLog("send_file", a.Recipient, r.ID, "send", "success", r.Message)
+		result, err := resultJSON(r)
+		if err != nil {
+			return errorResult(ErrInternal(err.Error())), nil
+		}
+		return result, nil
 	}))
 }
 
@@ -175,18 +194,18 @@ func (s *Server) registerSendAudioMessage() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a sendAudioArgs) (*mcp.CallToolResult, error) {
 		if a.Recipient == "" || a.MediaPath == "" {
-			return mcp.NewToolResultError("recipient and media_path are required"), nil
+			return errorResult(ErrInvalidParameter("recipient and media_path", "non-empty strings", "empty string(s)")), nil
 		}
 		ctx = withRateLimitOverride(ctx, req)
 		safePath, err := s.client.ValidateMediaPath(a.MediaPath)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return errorResult(ErrInvalidParameter("media_path", "valid file path under media root", err.Error())), nil
 		}
 		path := safePath
 		if !strings.HasSuffix(strings.ToLower(path), ".ogg") {
 			converted, err := media.ConvertToOpusOgg(ctx, path)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("audio conversion failed: %v (install ffmpeg, or call send_file for raw audio)", err)), nil
+				return errorResult(ErrInvalidParameter("media_path", "valid .ogg audio file", err.Error())), nil
 			}
 			defer os.Remove(converted)
 			path = converted
@@ -197,7 +216,16 @@ func (s *Server) registerSendAudioMessage() {
 			ViewOnce:  a.ViewOnce,
 		})
 		s.maybeMarkChatRead(ctx, r, a.Recipient, a.MarkChatRead)
-		return resultJSON(r)
+		if !r.Success {
+			s.auditLog("send_audio_message", a.Recipient, "", "send", "error", r.Message)
+			return errorResult(ErrWhatsAppAPI(r.Message, "WhatsApp API returned an error sending audio message", true)), nil
+		}
+		s.auditLog("send_audio_message", a.Recipient, r.ID, "send", "success", r.Message)
+		result, err := resultJSON(r)
+		if err != nil {
+			return errorResult(ErrInternal(err.Error())), nil
+		}
+		return result, nil
 	}))
 }
 
@@ -224,8 +252,10 @@ func (s *Server) registerSendReaction() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a sendReactionArgs) (*mcp.CallToolResult, error) {
 		if err := s.client.SendReaction(ctx, a.ChatJID, a.MessageID, a.SenderJID, a.Emoji); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("send_reaction", a.ChatJID, a.MessageID, "reaction", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error sending reaction", true)), nil
 		}
+		s.auditLog("send_reaction", a.ChatJID, a.MessageID, "reaction", "success", "reaction sent")
 		return mcp.NewToolResultText("Reaction sent"), nil
 	}))
 }
@@ -253,8 +283,10 @@ func (s *Server) registerSendReply() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a sendReplyArgs) (*mcp.CallToolResult, error) {
 		if err := s.client.SendReply(ctx, a.ChatJID, a.TargetMessageID, a.TargetSenderJID, a.Body); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("send_reply", a.ChatJID, a.TargetMessageID, "reply", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error sending reply", true)), nil
 		}
+		s.auditLog("send_reply", a.ChatJID, a.TargetMessageID, "reply", "success", "reply sent")
 		return mcp.NewToolResultText("Reply sent"), nil
 	}))
 }
@@ -280,8 +312,10 @@ func (s *Server) registerSendTyping() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a sendTypingArgs) (*mcp.CallToolResult, error) {
 		if err := s.client.SendTyping(ctx, a.ChatJID, a.Active, a.Kind); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("send_typing", a.ChatJID, "", "presence", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error setting presence", true)), nil
 		}
+		s.auditLog("send_typing", a.ChatJID, "", "presence", "success", fmt.Sprintf("presence %s", map[bool]string{true: "active", false: "paused"}[a.Active]))
 		state := "paused"
 		if a.Active {
 			state = "active"

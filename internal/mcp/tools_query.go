@@ -46,9 +46,13 @@ func (s *Server) registerSearchContacts() {
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a searchContactsArgs) (*mcp.CallToolResult, error) {
+		if a.Query == "" {
+			return errorResult(ErrInvalidParameter("query", "non-empty string", "empty string")), nil
+		}
 		contacts, err := s.client.Store().SearchContacts(ctx, a.Query)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("search_contacts", "", "", "search_contacts", "error", err.Error())
+			return errorResult(ErrInternal(err.Error())), nil
 		}
 		return resultJSON(contacts)
 	}))
@@ -124,20 +128,21 @@ func (s *Server) registerListMessages() {
 			if a.After != "" {
 				t, err := parseTimestamp(a.After)
 				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("invalid 'after': %v", err)), nil
+					return errorResult(ErrInvalidParameter("after", "valid ISO-8601 UTC timestamp", a.After)), nil
 				}
 				params.After = t
 			}
 			if a.Before != "" {
 				t, err := parseTimestamp(a.Before)
 				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("invalid 'before': %v", err)), nil
+					return errorResult(ErrInvalidParameter("before", "valid ISO-8601 UTC timestamp", a.Before)), nil
 				}
 				params.Before = t
 			}
 			result, err := s.client.Store().ListMessagesCursor(ctx, params)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				s.auditLog("list_messages", "", "", "list_messages", "error", err.Error())
+				return errorResult(ErrInternal(err.Error())), nil
 			}
 			if useJSON {
 				return resultJSON(result)
@@ -162,20 +167,21 @@ func (s *Server) registerListMessages() {
 		if a.After != "" {
 			t, err := parseTimestamp(a.After)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("invalid 'after': %v", err)), nil
+				return errorResult(ErrInvalidParameter("after", "valid ISO-8601 UTC timestamp", a.After)), nil
 			}
 			params.After = t
 		}
 		if a.Before != "" {
 			t, err := parseTimestamp(a.Before)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("invalid 'before': %v", err)), nil
+				return errorResult(ErrInvalidParameter("before", "valid ISO-8601 UTC timestamp", a.Before)), nil
 			}
 			params.Before = t
 		}
 		msgs, err := s.client.Store().ListMessages(ctx, params)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("list_messages", "", "", "list_messages", "error", err.Error())
+			return errorResult(ErrInternal(err.Error())), nil
 		}
 		return mcp.NewToolResultText(s.client.Store().FormatMessagesList(ctx, msgs, true)), nil
 	}))
@@ -354,10 +360,14 @@ func (s *Server) registerGetChat() {
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a getChatArgs) (*mcp.CallToolResult, error) {
+		if a.ChatJID == "" {
+			return errorResult(ErrInvalidParameter("chat_jid", "non-empty string", "empty string")), nil
+		}
 		include := a.IncludeLastMessage == nil || *a.IncludeLastMessage
 		chat, err := s.client.Store().GetChat(ctx, a.ChatJID, include)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("get_chat", a.ChatJID, "", "get_chat", "error", err.Error())
+			return errorResult(ErrInternal(err.Error())), nil
 		}
 		if chat == nil {
 			return mcp.NewToolResultText("null"), nil
@@ -395,7 +405,8 @@ func (s *Server) registerGetMessageContext() {
 		}
 		ctxResult, err := s.client.Store().GetMessageContext(ctx, a.MessageID, before, after)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("get_message_context", "", a.MessageID, "get_message_context", "error", err.Error())
+			return errorResult(ErrInternal(err.Error())), nil
 		}
 		return resultJSON(ctxResult)
 	}))
@@ -418,12 +429,13 @@ func (s *Server) registerIsOnWhatsApp() {
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a isOnWhatsAppArgs) (*mcp.CallToolResult, error) {
 		if len(a.Phones) == 0 {
-			return mcp.NewToolResultError("phones must not be empty"), nil
+			return errorResult(ErrInvalidParameter("phones", "non-empty array", "empty array")), nil
 		}
 		ctx = withRateLimitOverride(ctx, req)
 		m, err := s.client.IsOnWhatsApp(ctx, a.Phones)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			s.auditLog("is_on_whatsapp", "", "", "is_on_whatsapp", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error checking WhatsApp registration", true)), nil
 		}
 		return resultJSON(m)
 	}))
