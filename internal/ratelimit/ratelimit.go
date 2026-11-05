@@ -40,16 +40,16 @@ type Config struct {
 	MaxUsyncPerMinute int
 }
 
-// DefaultConfig returns the limits derived from the incident that motivated
-// this package: 51 sends in 5 minutes → restriction. A 45s floor caps the
-// theoretical rate near 80/hr, and the 30/hr cap is the second-order guard.
+// DefaultConfig returns the limits for normal personal use. A 10s floor caps
+// the theoretical rate near 360/hr, and the 200/hr cap is the second-order
+// guard — generous for personal use while still preventing runaway sends.
 func DefaultConfig() Config {
 	return Config{
-		MinSendInterval:       45 * time.Second,
-		MaxSendsPerHour:       30,
-		NonContactMinInterval: 90 * time.Second,
-		NonContactMaxPerHour:  15,
-		MaxUsyncPerMinute:     3,
+		MinSendInterval:       10 * time.Second,
+		MaxSendsPerHour:       200,
+		NonContactMinInterval: 10 * time.Second,
+		NonContactMaxPerHour:  60,
+		MaxUsyncPerMinute:     30,
 	}
 }
 
