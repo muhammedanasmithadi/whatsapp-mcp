@@ -31,10 +31,10 @@ func canonicalContactJID(raw string) (string, error) {
 	if jid == "" {
 		return "", fmt.Errorf("must be a phone number or user JID")
 	}
-	if !strings.HasSuffix(jid, "@s.client.net") {
-		return "", fmt.Errorf("must be a personal phone JID (@s.client.net), got %q", jid)
+	if !strings.HasSuffix(jid, "@s.whatsapp.net") {
+		return "", fmt.Errorf("must be a personal phone JID (@s.whatsapp.net), got %q", jid)
 	}
-	user := strings.TrimSuffix(jid, "@s.client.net")
+	user := strings.TrimSuffix(jid, "@s.whatsapp.net")
 	if user == "" || strings.IndexFunc(user, func(r rune) bool { return r < '0' || r > '9' }) != -1 {
 		return "", fmt.Errorf("phone JID must contain digits only, got %q", jid)
 	}
@@ -105,7 +105,7 @@ func (s *Server) registerCreateContact() {
 		}
 		jid, err := canonicalContactJID(a.JID)
 		if err != nil {
-			return errorResult(ErrInvalidParameter("jid", "a phone number or @s.client.net JID", err.Error())), nil
+			return errorResult(ErrInvalidParameter("jid", "a phone number or @s.whatsapp.net JID", err.Error())), nil
 		}
 		existing, err := s.contacts.GetContact(jid)
 		if err != nil {
@@ -116,7 +116,7 @@ func (s *Server) registerCreateContact() {
 		}
 		phone := strings.TrimSpace(a.PhoneNumber)
 		if phone == "" {
-			phone = strings.TrimSuffix(jid, "@s.client.net")
+			phone = strings.TrimSuffix(jid, "@s.whatsapp.net")
 		}
 		if err := s.contacts.StoreContact(jid, strings.TrimSpace(a.Name), phone); err != nil {
 			return s.toolErr("create_contact", jid, "", "create_contact", err), nil
@@ -153,7 +153,7 @@ func (s *Server) registerUpdateContact() {
 		}
 		jid, err := canonicalContactJID(a.JID)
 		if err != nil {
-			return errorResult(ErrInvalidParameter("jid", "a phone number or @s.client.net JID", err.Error())), nil
+			return errorResult(ErrInvalidParameter("jid", "a phone number or @s.whatsapp.net JID", err.Error())), nil
 		}
 		existing, err := s.contacts.GetContact(jid)
 		if err != nil {
@@ -204,7 +204,7 @@ func (s *Server) registerDeleteContact() {
 		}
 		jid, err := canonicalContactJID(a.JID)
 		if err != nil {
-			return errorResult(ErrInvalidParameter("jid", "a phone number or @s.client.net JID", err.Error())), nil
+			return errorResult(ErrInvalidParameter("jid", "a phone number or @s.whatsapp.net JID", err.Error())), nil
 		}
 		existing, err := s.contacts.GetContact(jid)
 		if err != nil {
