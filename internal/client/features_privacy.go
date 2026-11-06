@@ -86,7 +86,10 @@ func (c *Client) GetPrivacySettings(ctx context.Context) (string, error) {
 	if !c.wa.IsConnected() {
 		return "", errors.New("not connected to WhatsApp")
 	}
-	settings := c.wa.GetPrivacySettings(ctx)
+	settings, err := c.wa.GetPrivacySettings(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get privacy settings: %w", err)
+	}
 	b, err := json.Marshal(settings)
 	if err != nil {
 		return "", fmt.Errorf("marshal privacy settings: %w", err)

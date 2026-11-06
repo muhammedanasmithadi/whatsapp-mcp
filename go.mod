@@ -3,6 +3,7 @@ module github.com/muhammedanasmithadi/whatsapp-mcp
 go 1.27.0
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/mark3labs/mcp-go v1.4.0
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/mdp/qrterminal v1.0.1
@@ -12,10 +13,11 @@ require (
 	google.golang.org/protobuf v1.36.12
 )
 
+replace go.mau.fi/whatsmeow => ./vendor-whatsmeow/go.mau.fi/whatsmeow
+
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/beeper/argo-go v1.1.2 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/elliotchance/orderedmap/v3 v3.1.1 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
