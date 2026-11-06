@@ -44,15 +44,12 @@ func (s *Server) registerSendLocation() {
 		r := s.client.SendLocation(ctx, a.Recipient, a.Latitude, a.Longitude, a.Name, a.Address)
 		s.maybeMarkChatRead(ctx, r, a.Recipient, a.MarkChatRead)
 		if !r.Success {
-			s.auditLog("send_location", a.Recipient, "", "send", "error", r.Message)
-			return errorResult(ErrWhatsAppAPI(r.Message, "WhatsApp API returned an error sending the location", true)), nil
+			return s.toolErr("send_location", a.Recipient, "", "send", fmt.Errorf("%s", r.Message)), nil
 		}
 		result, err := resultJSON(r)
 		if err != nil {
-			s.auditLog("send_location", a.Recipient, r.ID, "send", "error", err.Error())
-			return errorResult(ErrInternal(err.Error())), nil
+			return s.toolErr("send_location", a.Recipient, r.ID, "send", err), nil
 		}
-		s.auditLog("send_location", a.Recipient, r.ID, "send", "success", r.Message)
-		return result, nil
+		return s.toolOK("send_location", a.Recipient, r.ID, "send", r.Message, result)
 	}))
 }

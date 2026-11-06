@@ -149,11 +149,6 @@ func (p *productionDriver) NextScheduledMessageTime() (time.Time, bool, error) {
 	return p.c.Store().NextScheduledMessageTime()
 }
 
-// ScheduleChanged wakes the scheduler when the pending queue changes.
-func (p *productionDriver) ScheduleChanged() <-chan struct{} {
-	return p.c.Store().ScheduleChanged()
-}
-
 // MarkMessageSent marks a scheduled message as sent.
 func (p *productionDriver) MarkMessageSent(id, messageID string, sentAt time.Time) error {
 	return p.c.Store().MarkMessageSent(id, messageID, sentAt)

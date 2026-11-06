@@ -102,21 +102,18 @@ func (s *Server) registerScheduleMessage() {
 		// scheduled_messages has a foreign key to chats. Ensure a brand-new
 		// recipient gets a row without clobbering an existing chat's name,
 		// timestamp, or archive flag.
-		if err := s.client.Store().EnsureChat(chatJID, s.client.Store().FindChatName(chatJID)); err != nil {
-			return errorResult(ErrInternal(err.Error())), nil
+		if err := s.scheduling.EnsureChat(chatJID, s.messages.FindChatName(chatJID)); err != nil {
+			return s.toolErr("schedule_message", chatJID, "", "schedule", err), nil
 		}
 
 		id, err := newScheduledID()
 		if err != nil {
-			return errorResult(ErrInternal(fmt.Sprintf("generate id: %v", err))), nil
+			return s.toolErr("schedule_message", chatJID, "", "schedule", fmt.Errorf("generate id: %w", err)), nil
 		}
-		if err := s.client.Store().StoreScheduledMessage(id, chatJID, a.Message, when); err != nil {
-			s.auditLog("schedule_message", chatJID, id, "schedule", "error", err.Error())
-			return errorResult(ErrInternal(err.Error())), nil
+		if err := s.scheduling.StoreScheduledMessage(id, chatJID, a.Message, when); err != nil {
+			return s.toolErr("schedule_message", chatJID, id, "schedule", err), nil
 		}
-
-		s.auditLog("schedule_message", chatJID, id, "schedule", "success", when.Format(time.RFC3339))
-		return resultJSON(store.ScheduledMessage{
+		return s.toolOK("schedule_message", chatJID, id, "schedule", when.Format(time.RFC3339), store.ScheduledMessage{
 			ID:          id,
 			ChatJID:     chatJID,
 			Content:     a.Message,
@@ -152,9 +149,9 @@ func (s *Server) registerListScheduledMessages() {
 		default:
 			return errorResult(ErrInvalidParameter("status", "pending, sent, failed, or all", a.Status)), nil
 		}
-		msgs, err := s.client.Store().ListScheduledMessages(status)
+		msgs, err := s.scheduling.ListScheduledMessages(status)
 		if err != nil {
-			return errorResult(ErrInternal(err.Error())), nil
+			return s.toolErr("list_scheduled_messages", "", "", "list_scheduled_messages", err), nil
 		}
 		out := make([]map[string]any, 0, len(msgs))
 		for _, m := range msgs {
@@ -176,7 +173,7 @@ func (s *Server) registerListScheduledMessages() {
 			}
 			out = append(out, item)
 		}
-		return resultJSON(out)
+		return s.toolOK("list_scheduled_messages", "", "", "list_scheduled_messages", "", out)
 	}))
 }
 
@@ -199,15 +196,13 @@ func (s *Server) registerCancelScheduledMessage() {
 		if r := requireNonEmpty("id", a.ID); r != nil {
 			return r, nil
 		}
-		ok, err := s.client.Store().CancelScheduledMessage(a.ID)
+		ok, err := s.scheduling.CancelScheduledMessage(a.ID)
 		if err != nil {
-			s.auditLog("cancel_scheduled_message", "", a.ID, "cancel_schedule", "error", err.Error())
-			return errorResult(ErrInternal(err.Error())), nil
+			return s.toolErr("cancel_scheduled_message", "", a.ID, "cancel_schedule", err), nil
 		}
 		if !ok {
 			return errorResult(ErrNotFound("pending scheduled message", a.ID)), nil
 		}
-		s.auditLog("cancel_scheduled_message", "", a.ID, "cancel_schedule", "success", "")
-		return resultJSON(map[string]any{"cancelled": true, "id": a.ID})
+		return s.toolOK("cancel_scheduled_message", "", a.ID, "cancel_schedule", "", map[string]any{"cancelled": true, "id": a.ID})
 	}))
 }

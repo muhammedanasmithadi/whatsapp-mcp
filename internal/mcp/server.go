@@ -9,6 +9,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
 // pairingCache is the minimal pairing-state surface pairing_status needs.
@@ -19,8 +20,9 @@ type pairingCache interface {
 	QR() string
 }
 
-// Server holds the MCP server, its bound WhatsApp client, and an optional
-// pairing cache (used only by pairing_status).
+// Server holds the MCP server, its bound WhatsApp client, store interfaces
+// for data access (Dependency Inversion), and an optional pairing cache (used
+// only by pairing_status).
 type Server struct {
 	client   *client.Client
 	mcp      *server.MCPServer
@@ -30,6 +32,16 @@ type Server struct {
 	// Used with WHATSAPP_MCP_ENABLED_TOOLS for granular access control beyond
 	// read-only mode.
 	toolAllowlist map[string]struct{}
+
+	// Store interfaces — all satisfied by *store.Store. Keeping them as
+	// interfaces decouples MCP tools from the concrete store type for data
+	// access operations.
+	contacts   store.ContactStore
+	scheduling store.SchedulingStore
+	status     store.StatusStore
+	presence   store.PresenceStore
+	audit      store.AuditStore
+	messages   store.MessageReader
 }
 
 // Option configures a Server at construction time.
@@ -54,20 +66,31 @@ func WithAllowedTools(names []string) Option {
 }
 
 // NewServer constructs an MCP server with all tools registered against the
-// provided WhatsApp client. cache may be nil (smoke/tests); pairing_status is
-// the only tool that consults it. Pass options (e.g. WithReadOnly) to tune
-// the tool surface.
+// provided WhatsApp client and store. cache may be nil (smoke/tests);
+// pairing_status is the only tool that consults it. Pass options (e.g.
+// WithReadOnly) to tune the tool surface.
+//
 // Version is reported as serverInfo.version. cmd/whatsapp-mcp sets it from its
 // -ldflags build version so the two cannot drift.
 var Version = "dev"
 
-func NewServer(c *client.Client, cache pairingCache, opts ...Option) *Server {
+func NewServer(c *client.Client, st *store.Store, cache pairingCache, opts ...Option) *Server {
 	mcpSrv := server.NewMCPServer(
 		"whatsapp",
 		Version,
 		server.WithToolCapabilities(true),
 	)
-	s := &Server{client: c, mcp: mcpSrv, cache: cache}
+	s := &Server{
+		client:     c,
+		mcp:        mcpSrv,
+		cache:      cache,
+		contacts:   st,
+		scheduling: st,
+		status:     st,
+		presence:   st,
+		audit:      st,
+		messages:   st,
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -81,10 +104,10 @@ func (s *Server) ReadOnly() bool { return s.readOnly }
 
 // auditLog records an agent-initiated action in the append-only audit log.
 func (s *Server) auditLog(toolName, chatJID, messageID, action, result, details string) {
-	if s.client == nil || s.client.Store() == nil {
+	if s.audit == nil {
 		return
 	}
-	_ = s.client.Store().AuditLog(toolName, chatJID, messageID, action, result, details)
+	_ = s.audit.AuditLog(toolName, chatJID, messageID, action, result, details)
 }
 
 // addTool registers a tool only if it passes the allowlist filter.
@@ -114,4 +137,12 @@ func (s *Server) AttachHTTP(mux *http.ServeMux) {
 	// device state), so legacy clients get no Mcp-Session-Id either.
 	httpHandler := server.NewStreamableHTTPServer(s.mcp, server.WithStateLess(true))
 	mux.Handle("/mcp", httpHandler)
+}
+
+// Store returns the underlying message store.
+func (s *Server) Store() *store.Store {
+	if st, ok := s.contacts.(*store.Store); ok {
+		return st
+	}
+	return nil
 }

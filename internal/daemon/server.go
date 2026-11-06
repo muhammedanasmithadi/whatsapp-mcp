@@ -80,8 +80,6 @@ type pairDriver interface {
 	GetPendingScheduledMessages(ctx context.Context) ([]store.ScheduledMessage, error)
 	// NextScheduledMessageTime returns the earliest pending scheduled time.
 	NextScheduledMessageTime() (time.Time, bool, error)
-	// ScheduleChanged wakes the scheduler when pending messages change.
-	ScheduleChanged() <-chan struct{}
 	// MarkMessageSent marks a scheduled message as sent.
 	MarkMessageSent(id, messageID string, sentAt time.Time) error
 	// MarkMessageFailed marks a scheduled message as failed.
@@ -412,9 +410,12 @@ func (s *Server) requestFullHistorySync(ctx context.Context) {
 }
 
 // runScheduler runs in a goroutine and sends scheduled messages at their
-// scheduled time. It sleeps on a timer until the next due message and wakes
-// immediately when the queue changes, so an empty queue costs no polling.
+// scheduled time. It sleeps on a timer until the next due message; when the
+// queue is empty it re-checks after a short idle interval. Sends are
+// timer-driven (no per-message polling); the idle re-check only detects newly
+// queued messages whose due time is earlier than the current sleep.
 func (s *Server) runScheduler(ctx context.Context) {
+	const idleInterval = 30 * time.Second
 	for {
 		select {
 		case <-ctx.Done():
@@ -428,7 +429,7 @@ func (s *Server) runScheduler(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(10 * time.Second):
+			case <-time.After(idleInterval):
 			}
 			continue
 		}
@@ -471,42 +472,37 @@ func (s *Server) runScheduler(ctx context.Context) {
 			}
 		}
 
-		// Sleep until the next pending message is due. A notification wakes
-		// this immediately when a message is queued or cancelled, so there is
-		// no periodic poll when the queue is empty.
+		// Sleep until the next pending message is due. When nothing is
+		// pending, re-check after the idle interval so newly queued messages
+		// are picked up without a per-message poll.
 		next, ok, err := s.cfg.Driver.NextScheduledMessageTime()
 		if err != nil {
 			s.log.Printf("[WARN] scheduled messages: failed to read next: %v", err)
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(10 * time.Second):
+			case <-time.After(idleInterval):
 			}
 			continue
 		}
 
-		var timerC <-chan time.Time
-		var timer *time.Timer
+		d := idleInterval
 		if ok {
-			d := time.Until(next)
+			d = time.Until(next)
 			if d < 0 {
 				d = 0
 			}
-			timer = time.NewTimer(d)
-			timerC = timer.C
+			if d > idleInterval {
+				d = idleInterval
+			}
 		}
 
+		timer := time.NewTimer(d)
 		select {
 		case <-ctx.Done():
-			if timer != nil {
-				timer.Stop()
-			}
+			timer.Stop()
 			return
-		case <-s.cfg.Driver.ScheduleChanged():
-			if timer != nil {
-				timer.Stop()
-			}
-		case <-timerC:
+		case <-timer.C:
 		}
 	}
 }

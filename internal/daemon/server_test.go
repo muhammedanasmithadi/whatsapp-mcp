@@ -92,10 +92,6 @@ func (f *fakePairDriver) NextScheduledMessageTime() (time.Time, bool, error) {
 	return time.Time{}, false, nil
 }
 
-func (f *fakePairDriver) ScheduleChanged() <-chan struct{} {
-	return nil
-}
-
 func (f *fakePairDriver) MarkMessageSent(id, messageID string, sentAt time.Time) error {
 	return nil
 }

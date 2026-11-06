@@ -12,8 +12,8 @@ import (
 	"html/template"
 	"io"
 	"net/http"
-	"strings"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,11 +72,11 @@ type pairHandlers struct {
 
 	// Metrics counters (Prometheus text format at /metrics).
 	metrics struct {
-		messagesIn   int64
-		messagesOut  int64
-		sendsTotal   int64
-		errorsTotal  int64
-		rateLimited  int64
+		messagesIn  int64
+		messagesOut int64
+		sendsTotal  int64
+		errorsTotal int64
+		rateLimited int64
 	}
 
 	// CSRF protection for the reset endpoint.
@@ -111,9 +111,9 @@ func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishW
 		pairEventLimiter: NewLimiter(30.0/60.0, 3), // 30/min, burst 3
 		// Webhook requests: allow 10 per second with burst of 20.
 		webhookLimiter: NewLimiter(10.0, 20),
-		startedAt:        time.Now(),
-		publishWS:        publishWS,
-		webhookSecret:    webhookSecret,
+		startedAt:      time.Now(),
+		publishWS:      publishWS,
+		webhookSecret:  webhookSecret,
 	}
 }
 

@@ -175,10 +175,6 @@ type Store struct {
 	whatsmeowDB *sql.DB
 	dir         string
 	stmtCache   *stmtCache
-	// scheduleWake wakes the daemon scheduler when a scheduled message is
-	// added or cancelled. Buffered (capacity 1) so a notification is never
-	// lost while the scheduler is busy, and never blocks the writer.
-	scheduleWake chan struct{}
 }
 
 // Open creates (if necessary) the store directory and opens both databases.
@@ -233,7 +229,7 @@ func Open(dir string) (*Store, error) {
 		return nil, fmt.Errorf("chmod whatsapp.db: %w", err)
 	}
 
-	return &Store{db: db, whatsmeowDB: waDB, dir: dir, stmtCache: newStmtCache(db), scheduleWake: make(chan struct{}, 1)}, nil
+	return &Store{db: db, whatsmeowDB: waDB, dir: dir, stmtCache: newStmtCache(db)}, nil
 }
 
 // DB returns the underlying message database handle (tests only).
@@ -631,34 +627,13 @@ func (s *Store) DeleteContact(jid string) error {
 	return err
 }
 
-// StoreScheduledMessage inserts a scheduled message and wakes the scheduler.
+// StoreScheduledMessage inserts a scheduled message.
 func (s *Store) StoreScheduledMessage(id, chatJID, content string, scheduledAt time.Time) error {
 	_, err := s.db.Exec(
 		"INSERT OR REPLACE INTO scheduled_messages (id, chat_jid, content, scheduled_at) VALUES (?, ?, ?, ?)",
 		id, chatJID, content, scheduledAt,
 	)
-	if err == nil {
-		s.NotifyScheduleChanged()
-	}
 	return err
-}
-
-// ScheduleChanged returns a channel that receives a value when the set of
-// pending scheduled messages changes. The scheduler selects on it so a newly
-// queued message is picked up immediately instead of waiting for a poll tick.
-func (s *Store) ScheduleChanged() <-chan struct{} {
-	return s.scheduleWake
-}
-
-// NotifyScheduleChanged wakes the scheduler without blocking.
-func (s *Store) NotifyScheduleChanged() {
-	if s.scheduleWake == nil {
-		return
-	}
-	select {
-	case s.scheduleWake <- struct{}{}:
-	default:
-	}
 }
 
 // NextScheduledMessageTime returns the scheduled time of the earliest pending
@@ -767,9 +742,6 @@ func (s *Store) CancelScheduledMessage(id string) (bool, error) {
 	n, err := res.RowsAffected()
 	if err != nil {
 		return false, err
-	}
-	if n > 0 {
-		s.NotifyScheduleChanged()
 	}
 	return n > 0, nil
 }

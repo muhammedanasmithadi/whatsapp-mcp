@@ -168,12 +168,12 @@ func (c *Client) persistReaction(ctx context.Context, chat types.JID, msgID, tar
 	}
 
 	if err := c.store.StoreMessage(ctx, store.Message{
-		ID:         msgID,
-		ChatJID:    chatJID,
-		Sender:     ourJID,
-		Content:    content,
-		Timestamp:  now,
-		IsFromMe:   true,
+		ID:        msgID,
+		ChatJID:   chatJID,
+		Sender:    ourJID,
+		Content:   content,
+		Timestamp: now,
+		IsFromMe:  true,
 	}, nil, nil, nil, 0); err != nil {
 		c.log.Warnf("Failed to store reaction: %v", err)
 		return

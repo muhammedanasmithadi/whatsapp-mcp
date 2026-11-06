@@ -46,11 +46,9 @@ func (s *Server) registerMuteChat() {
 			duration = time.Duration(a.DurationSeconds) * time.Second
 		}
 		if err := s.client.SetChatMuted(ctx, a.ChatJID, a.Muted, duration); err != nil {
-			s.auditLog("mute_chat", a.ChatJID, "", "mute_chat", "error", err.Error())
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("mute_chat", a.ChatJID, "", "mute_chat", err), nil
 		}
-		s.auditLog("mute_chat", a.ChatJID, "", "mute_chat", "success", fmt.Sprintf("muted=%v duration=%s", a.Muted, duration))
-		return resultJSON(map[string]any{
+		return s.toolOK("mute_chat", a.ChatJID, "", "mute_chat", fmt.Sprintf("muted=%v duration=%s", a.Muted, duration), map[string]any{
 			"success":          true,
 			"chat_jid":         a.ChatJID,
 			"muted":            a.Muted,
@@ -81,11 +79,9 @@ func (s *Server) registerPinChat() {
 			return r, nil
 		}
 		if err := s.client.SetChatPinned(ctx, a.ChatJID, a.Pinned); err != nil {
-			s.auditLog("pin_chat", a.ChatJID, "", "pin_chat", "error", err.Error())
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("pin_chat", a.ChatJID, "", "pin_chat", err), nil
 		}
-		s.auditLog("pin_chat", a.ChatJID, "", "pin_chat", "success", fmt.Sprintf("pinned=%v", a.Pinned))
-		return resultJSON(map[string]any{"success": true, "chat_jid": a.ChatJID, "pinned": a.Pinned})
+		return s.toolOK("pin_chat", a.ChatJID, "", "pin_chat", fmt.Sprintf("pinned=%v", a.Pinned), map[string]any{"success": true, "chat_jid": a.ChatJID, "pinned": a.Pinned})
 	}))
 }
 
@@ -120,11 +116,9 @@ func (s *Server) registerStarMessage() {
 			starred = *a.Starred
 		}
 		if err := s.client.StarMessage(ctx, a.ChatJID, a.MessageID, starred); err != nil {
-			s.auditLog("star_message", a.ChatJID, a.MessageID, "star_message", "error", err.Error())
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("star_message", a.ChatJID, a.MessageID, "star_message", err), nil
 		}
-		s.auditLog("star_message", a.ChatJID, a.MessageID, "star_message", "success", fmt.Sprintf("starred=%v", starred))
-		return resultJSON(map[string]any{"success": true, "chat_jid": a.ChatJID, "message_id": a.MessageID, "starred": starred})
+		return s.toolOK("star_message", a.ChatJID, a.MessageID, "star_message", fmt.Sprintf("starred=%v", starred), map[string]any{"success": true, "chat_jid": a.ChatJID, "message_id": a.MessageID, "starred": starred})
 	}))
 }
 
@@ -153,10 +147,8 @@ func (s *Server) registerSetDisappearingTimer() {
 			return errorResult(ErrInvalidParameter("seconds", "0 or greater", fmt.Sprintf("%d", a.Seconds))), nil
 		}
 		if err := s.client.SetDisappearingTimer(ctx, a.ChatJID, time.Duration(a.Seconds)*time.Second); err != nil {
-			s.auditLog("set_disappearing_timer", a.ChatJID, "", "set_disappearing_timer", "error", err.Error())
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("set_disappearing_timer", a.ChatJID, "", "set_disappearing_timer", err), nil
 		}
-		s.auditLog("set_disappearing_timer", a.ChatJID, "", "set_disappearing_timer", "success", fmt.Sprintf("%ds", a.Seconds))
-		return resultJSON(map[string]any{"success": true, "chat_jid": a.ChatJID, "seconds": a.Seconds})
+		return s.toolOK("set_disappearing_timer", a.ChatJID, "", "set_disappearing_timer", fmt.Sprintf("%ds", a.Seconds), map[string]any{"success": true, "chat_jid": a.ChatJID, "seconds": a.Seconds})
 	}))
 }

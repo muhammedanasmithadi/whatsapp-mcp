@@ -35,12 +35,12 @@ func (s *Server) registerListChannels() {
 	s.addTool(tool, func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		channels, err := s.client.ListChannels(ctx)
 		if err != nil {
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("list_channels", "", "", "list_channels", err), nil
 		}
 		if channels == nil {
 			channels = []*client.ChannelInfo{}
 		}
-		return resultJSON(channels)
+		return s.toolOK("list_channels", "", "", "list_channels", "", channels)
 	})
 }
 
@@ -65,9 +65,9 @@ func (s *Server) registerGetChannelInfo() {
 		}
 		info, err := s.client.GetChannelInfo(ctx, a.Channel)
 		if err != nil {
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("get_channel_info", a.Channel, "", "get_channel_info", err), nil
 		}
-		return resultJSON(info)
+		return s.toolOK("get_channel_info", a.Channel, "", "get_channel_info", "", info)
 	}))
 }
 
@@ -96,12 +96,12 @@ func (s *Server) registerListChannelMessages() {
 		}
 		msgs, err := s.client.ListChannelMessages(ctx, a.Channel, a.Limit, a.BeforeServerID)
 		if err != nil {
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("list_channel_messages", a.Channel, "", "list_channel_messages", err), nil
 		}
 		if msgs == nil {
 			msgs = []client.ChannelMessage{}
 		}
-		return resultJSON(msgs)
+		return s.toolOK("list_channel_messages", a.Channel, "", "list_channel_messages", "", msgs)
 	}))
 }
 
@@ -126,11 +126,9 @@ func (s *Server) registerFollowChannel() {
 		}
 		info, err := s.client.FollowChannel(ctx, a.Channel)
 		if err != nil {
-			s.auditLog("follow_channel", a.Channel, "", "follow_channel", "error", err.Error())
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("follow_channel", a.Channel, "", "follow_channel", err), nil
 		}
-		s.auditLog("follow_channel", a.Channel, "", "follow_channel", "success", "")
-		return resultJSON(info)
+		return s.toolOK("follow_channel", a.Channel, "", "follow_channel", "", info)
 	}))
 }
 
@@ -148,11 +146,9 @@ func (s *Server) registerUnfollowChannel() {
 			return r, nil
 		}
 		if err := s.client.UnfollowChannel(ctx, a.Channel); err != nil {
-			s.auditLog("unfollow_channel", a.Channel, "", "unfollow_channel", "error", err.Error())
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("unfollow_channel", a.Channel, "", "unfollow_channel", err), nil
 		}
-		s.auditLog("unfollow_channel", a.Channel, "", "unfollow_channel", "success", "")
-		return resultJSON(map[string]any{"success": true, "channel": a.Channel})
+		return s.toolOK("unfollow_channel", a.Channel, "", "unfollow_channel", "", map[string]any{"success": true, "channel": a.Channel})
 	}))
 }
 
@@ -178,10 +174,8 @@ func (s *Server) registerMuteChannel() {
 			return r, nil
 		}
 		if err := s.client.SetChannelMuted(ctx, a.Channel, a.Muted); err != nil {
-			s.auditLog("mute_channel", a.Channel, "", "mute_channel", "error", err.Error())
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("mute_channel", a.Channel, "", "mute_channel", err), nil
 		}
-		s.auditLog("mute_channel", a.Channel, "", "mute_channel", "success", "")
-		return resultJSON(map[string]any{"success": true, "channel": a.Channel, "muted": a.Muted})
+		return s.toolOK("mute_channel", a.Channel, "", "mute_channel", "", map[string]any{"success": true, "channel": a.Channel, "muted": a.Muted})
 	}))
 }

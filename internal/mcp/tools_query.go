@@ -218,9 +218,9 @@ func (s *Server) registerGetReadPosition() {
 // -- mark_read_position -----------------------------------------------------
 
 type markReadPositionArgs struct {
-	ChatJID    string `json:"chat_jid"`
-	MessageID  string `json:"message_id"`
-	Timestamp  string `json:"timestamp,omitempty"`
+	ChatJID   string `json:"chat_jid"`
+	MessageID string `json:"message_id"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 func (s *Server) registerMarkReadPosition() {

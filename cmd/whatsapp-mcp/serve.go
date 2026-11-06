@@ -10,27 +10,27 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/daemon"
 	mcpsrv "github.com/muhammedanasmithadi/whatsapp-mcp/internal/mcp"
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
-	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/stt"
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/stt"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	var (
-		addr           string
-		allowRemote    bool
-		readOnly       bool
-		logFormat      string
+		addr            string
+		allowRemote     bool
+		readOnly        bool
+		logFormat       string
 		fullHistorySync bool
-		enabledTools   string
+		enabledTools    string
 	)
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -196,7 +196,7 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 		mcpOpts = append(mcpOpts, mcpsrv.WithAllowedTools(toolNames))
 		fmt.Fprintf(os.Stderr, "allow-list mode: only %d tools enabled\n", len(toolNames))
 	}
-	mcpServer := mcpsrv.NewServer(c, d.Cache(), mcpOpts...)
+	mcpServer := mcpsrv.NewServer(c, st, d.Cache(), mcpOpts...)
 	d.SetMCPMount(mcpServer.AttachHTTP)
 
 	fmt.Fprintf(os.Stderr, "whatsapp-mcp listening on http://%s (MCP at /mcp, pairing at /pair)\n", addr)

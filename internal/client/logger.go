@@ -90,9 +90,9 @@ func (s *stderrLogger) Sub(mod string) waLog.Logger {
 // jsonLogger emits structured JSON log entries to stderr. Each line is a
 // self-contained JSON object suitable for ingestion by log collectors.
 type jsonLogger struct {
-	mod  string
-	min  int
-	enc  *json.Encoder
+	mod string
+	min int
+	enc *json.Encoder
 }
 
 func newJSONLogger(module string, level string) waLog.Logger {
@@ -115,16 +115,24 @@ func (j *jsonLogger) output(level, msg string) {
 	})
 }
 
-func (j *jsonLogger) Errorf(msg string, args ...interface{}) { j.output("ERROR", fmt.Sprintf(msg, args...)) }
-func (j *jsonLogger) Warnf(msg string, args ...interface{})  { j.output("WARN", fmt.Sprintf(msg, args...)) }
-func (j *jsonLogger) Infof(msg string, args ...interface{})  { j.output("INFO", fmt.Sprintf(msg, args...)) }
-func (j *jsonLogger) Debugf(msg string, args ...interface{}) { j.output("DEBUG", fmt.Sprintf(msg, args...)) }
+func (j *jsonLogger) Errorf(msg string, args ...interface{}) {
+	j.output("ERROR", fmt.Sprintf(msg, args...))
+}
+func (j *jsonLogger) Warnf(msg string, args ...interface{}) {
+	j.output("WARN", fmt.Sprintf(msg, args...))
+}
+func (j *jsonLogger) Infof(msg string, args ...interface{}) {
+	j.output("INFO", fmt.Sprintf(msg, args...))
+}
+func (j *jsonLogger) Debugf(msg string, args ...interface{}) {
+	j.output("DEBUG", fmt.Sprintf(msg, args...))
+}
 
 func (j *jsonLogger) Sub(mod string) waLog.Logger {
 	return &jsonLogger{
-		mod:  fmt.Sprintf("%s/%s", j.mod, mod),
-		min:  j.min,
-		enc:  j.enc,
+		mod: fmt.Sprintf("%s/%s", j.mod, mod),
+		min: j.min,
+		enc: j.enc,
 	}
 }
 

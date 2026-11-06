@@ -60,8 +60,7 @@ func (s *Server) registerListStatusUpdates() {
 			Limit:          a.Limit,
 		})
 		if err != nil {
-			s.auditLog("list_status_updates", "", "", "read_statuses", "error", err.Error())
-			return errorResult(ErrInternal(err.Error())), nil
+			return s.toolErr("list_status_updates", "", "", "read_statuses", err), nil
 		}
 		if groups == nil {
 			groups = []client.StatusGroup{}
@@ -80,7 +79,7 @@ func (s *Server) registerListStatusUpdates() {
 		if total == 0 {
 			payload["note"] = "No cached status updates in this window. Statuses arrive live while the bridge is connected; WhatsApp expires them after 24 hours."
 		}
-		return resultJSON(payload)
+		return s.toolOK("list_status_updates", "", "", "read_statuses", "", payload)
 	}))
 }
 
@@ -107,11 +106,9 @@ func (s *Server) registerMarkStatusViewed() {
 		}
 		count, err := s.client.MarkStatusViewed(ctx, a.Sender, a.MessageIDs)
 		if err != nil {
-			s.auditLog("mark_status_viewed", a.Sender, "", "mark_status_viewed", "error", err.Error())
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", false)), nil
+			return s.toolErr("mark_status_viewed", a.Sender, "", "mark_status_viewed", err), nil
 		}
-		s.auditLog("mark_status_viewed", a.Sender, "", "mark_status_viewed", "success", fmt.Sprintf("%d receipts", count))
-		return resultJSON(map[string]any{"success": true, "sender": a.Sender, "viewed": count})
+		return s.toolOK("mark_status_viewed", a.Sender, "", "mark_status_viewed", fmt.Sprintf("%d receipts", count), map[string]any{"success": true, "sender": a.Sender, "viewed": count})
 	}))
 }
 
@@ -144,13 +141,13 @@ func (s *Server) registerGetProfilePicture() {
 			case errors.Is(err, client.ErrProfilePictureHidden):
 				return errorResult(ErrUnauthorized("profile picture is hidden by the contact's privacy settings")), nil
 			default:
-				return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+				return s.toolErr("get_profile_picture", a.JID, "", "get_profile_picture", err), nil
 			}
 		}
 
 		b, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
-			return errorResult(ErrInternal(fmt.Sprintf("marshal: %v", err))), nil
+			return s.toolErr("get_profile_picture", a.JID, "", "get_profile_picture", fmt.Errorf("marshal: %w", err)), nil
 		}
 		contents := []mcp.Content{mcp.NewTextContent(string(b))}
 		if inlined, ok := readInlineMedia(result.Path, "image"); ok {
@@ -181,9 +178,9 @@ func (s *Server) registerGetContactInfo() {
 		}
 		info, err := s.client.GetContactInfo(ctx, a.JID)
 		if err != nil {
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("get_contact_info", a.JID, "", "get_contact_info", err), nil
 		}
-		return resultJSON(info)
+		return s.toolOK("get_contact_info", a.JID, "", "get_contact_info", "", info)
 	}))
 }
 
@@ -217,8 +214,8 @@ func (s *Server) registerGetPresence() {
 		}
 		result, err := s.client.GetPresence(ctx, a.JID, wait)
 		if err != nil {
-			return errorResult(ErrWhatsAppAPI(err.Error(), "", true)), nil
+			return s.toolErr("get_presence", a.JID, "", "get_presence", err), nil
 		}
-		return resultJSON(result)
+		return s.toolOK("get_presence", a.JID, "", "get_presence", "", result)
 	}))
 }

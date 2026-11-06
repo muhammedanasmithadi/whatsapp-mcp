@@ -56,16 +56,16 @@ func newTestServerWithStore(t *testing.T) (*Server, *store.Store, string) {
 	insertMsg("n2", bob, "me", "hey", now.Add(-4*time.Hour), true, "")
 
 	c, err := client.New(ctx, client.Config{
-		Store:     s,
-		StoreDir:  dir,
-		Logger:    nil, // default stderr logger
+		Store:    s,
+		StoreDir: dir,
+		Logger:   nil, // default stderr logger
 	})
 	if err != nil {
 		s.Close()
 		t.Fatalf("new client: %v", err)
 	}
 
-	return NewServer(c, nil), s, dir
+	return NewServer(c, s, nil), s, dir
 }
 
 func callListMessagesJSON(t *testing.T, s *Server, args map[string]any) map[string]any {
@@ -495,7 +495,7 @@ func callPairingStatus(t *testing.T, s *Server) map[string]any {
 // A nil pairing cache (smoke/tests) yields the error envelope without touching
 // the WhatsApp client — so passing a nil client here must not panic.
 func TestPairingStatus_NilCache(t *testing.T) {
-	env := callPairingStatus(t, NewServer(nil, nil))
+	env := callPairingStatus(t, NewServer(nil, nil, nil))
 	if env["state"] != "error" {
 		t.Errorf("state = %v, want error", env["state"])
 	}
@@ -506,7 +506,7 @@ func TestPairingStatus_NilCache(t *testing.T) {
 
 // An unpaired cache with a pending QR yields awaiting_qr carrying the payload.
 func TestPairingStatus_AwaitingQRWithPayload(t *testing.T) {
-	env := callPairingStatus(t, NewServer(nil, fakePairCache{qr: "2@QRPAYLOAD"}))
+	env := callPairingStatus(t, NewServer(nil, nil, fakePairCache{qr: "2@QRPAYLOAD"}))
 	if env["state"] != "awaiting_qr" {
 		t.Fatalf("state = %v, want awaiting_qr", env["state"])
 	}
@@ -521,7 +521,7 @@ func TestPairingStatus_AwaitingQRWithPayload(t *testing.T) {
 // An unpaired cache with no QR yet yields the generating-code envelope and
 // omits qr_payload.
 func TestPairingStatus_AwaitingQRGenerating(t *testing.T) {
-	env := callPairingStatus(t, NewServer(nil, fakePairCache{}))
+	env := callPairingStatus(t, NewServer(nil, nil, fakePairCache{}))
 	if env["state"] != "awaiting_qr" {
 		t.Fatalf("state = %v, want awaiting_qr", env["state"])
 	}

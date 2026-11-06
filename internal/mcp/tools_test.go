@@ -91,7 +91,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 	// The client is only used inside handler closures — none of those run at
 	// registration time. Passing nil keeps the test hermetic (no whatsmeow,
 	// no sqlite, no network).
-	s := NewServer(nil, nil)
+	s := NewServer(nil, nil, nil)
 	if s == nil {
 		t.Fatal("NewServer returned nil")
 	}
@@ -149,7 +149,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 }
 
 func TestNewServer_ToolCount(t *testing.T) {
-	s := NewServer(nil, nil)
+	s := NewServer(nil, nil, nil)
 	const want = 76
 	if got := len(s.MCP().ListTools()); got != want {
 		t.Errorf("tool count = %d, want %d", got, want)
@@ -164,7 +164,7 @@ func TestNewServer_ToolCount(t *testing.T) {
 // is maintained manually — if a domain file is added or a tool is renamed the
 // test must be updated.
 func TestToolsByDomain(t *testing.T) {
-	s := NewServer(nil, nil)
+	s := NewServer(nil, nil, nil)
 	got := s.MCP().ListTools()
 
 	// domain file → representative tool name(s) that MUST be present.
