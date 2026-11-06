@@ -75,6 +75,9 @@ func (c *Client) SendPresence(ctx context.Context, state string) error {
 	if err := c.wa.SendPresence(ctx, p); err != nil {
 		return fmt.Errorf("send presence: %w", err)
 	}
+	c.ownPresenceMu.Lock()
+	c.ownPresence = p
+	c.ownPresenceMu.Unlock()
 	return nil
 }
 

@@ -16,6 +16,8 @@ const (
 	ErrCodeInvalidParameter ErrorCode = "invalid_parameter"
 	// ErrCodeNotFound - The requested resource (chat, message, contact) was not found.
 	ErrCodeNotFound ErrorCode = "not_found"
+	// ErrCodeConflict - The resource already exists or is in a conflicting state.
+	ErrCodeConflict ErrorCode = "conflict"
 	// ErrCodeRateLimited - The client has exceeded rate limits.
 	ErrCodeRateLimited ErrorCode = "rate_limited"
 	// ErrCodeWhatsAppAPI - WhatsApp returned an error (network, auth, banned, etc.).
@@ -32,24 +34,24 @@ const (
 type ErrorCategory string
 
 const (
-	ErrorCategoryClient    ErrorCategory = "client_error"   // Client did something wrong (can retry after fixing)
-	ErrorCategoryServer    ErrorCategory = "server_error"   // Server-side problem (retry may help)
-	ErrorCategoryNetwork   ErrorCategory = "network_error"  // Network/transport problem (retry may help)
-	ErrorCategoryRateLimit ErrorCategory = "rate_limit"     // Rate limit hit (retry after wait)
-	ErrorCategoryAuth      ErrorCategory = "auth_error"     // Authentication/authorization failure
+	ErrorCategoryClient    ErrorCategory = "client_error"  // Client did something wrong (can retry after fixing)
+	ErrorCategoryServer    ErrorCategory = "server_error"  // Server-side problem (retry may help)
+	ErrorCategoryNetwork   ErrorCategory = "network_error" // Network/transport problem (retry may help)
+	ErrorCategoryRateLimit ErrorCategory = "rate_limit"    // Rate limit hit (retry after wait)
+	ErrorCategoryAuth      ErrorCategory = "auth_error"    // Authentication/authorization failure
 )
 
 // ErrorDetail is a structured error detail for MCP tool responses.
 type ErrorDetail struct {
-	Code       ErrorCode   `json:"code"`
+	Code       ErrorCode     `json:"code"`
 	Category   ErrorCategory `json:"category"`
-	Message    string      `json:"message"`
-	Detail     string      `json:"detail,omitempty"`   // Human-readable explanation
-	Retryable  bool        `json:"retryable"`          // Whether retrying may succeed
-	RetryAfter int         `json:"retry_after,omitempty"` // Seconds to wait before retrying (0 = no specific time)
-	Field      string      `json:"field,omitempty"`    // For invalid_parameter: which field caused the error
-	Expected   string      `json:"expected,omitempty"` // For invalid_parameter: what was expected
-	Got        string      `json:"got,omitempty"`      // For invalid_parameter: what was actually provided
+	Message    string        `json:"message"`
+	Detail     string        `json:"detail,omitempty"`      // Human-readable explanation
+	Retryable  bool          `json:"retryable"`             // Whether retrying may succeed
+	RetryAfter int           `json:"retry_after,omitempty"` // Seconds to wait before retrying (0 = no specific time)
+	Field      string        `json:"field,omitempty"`       // For invalid_parameter: which field caused the error
+	Expected   string        `json:"expected,omitempty"`    // For invalid_parameter: what was expected
+	Got        string        `json:"got,omitempty"`         // For invalid_parameter: what was actually provided
 }
 
 // MCPError is a structured error that can be converted to an MCP tool result.
@@ -102,6 +104,12 @@ func ErrNotFound(resourceType, resourceID string) *MCPError {
 		fmt.Sprintf("%s not found: %s", resourceType, resourceID),
 		fmt.Sprintf("the requested %s '%s' does not exist", resourceType, resourceID),
 		false, 0)
+}
+
+// ErrConflict creates a conflict error.
+func ErrConflict(message string) *MCPError {
+	return NewMPCError(ErrCodeConflict, ErrorCategoryClient, message,
+		"the resource already exists or is in a conflicting state", false, 0)
 }
 
 // ErrRateLimited creates a rate_limited error.

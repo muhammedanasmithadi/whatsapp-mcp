@@ -9,6 +9,11 @@ package mcp
 //   - tools_groups.go  — group management (create, leave, participants, settings, …)
 //   - tools_media.go   — polls + contact cards
 //   - tools_privacy.go — blocklist, presence, privacy settings, status message
+//   - tools_social.go  — statuses, profile photos, contact metadata, presence
+//   - tools_contacts.go — local address book (not synced to the phone)
+//   - tools_scheduling.go — queued messages and the timer-driven outbox
+//   - tools_channels.go — WhatsApp Channels (newsletters)
+//   - tools_chatstate.go — mute, pin, star, disappearing messages
 //
 // Shared helpers live in tools_core.go (parseTimestamp, normalizeRecipientToChatJID,
 // maybeMarkChatRead). Common result helpers live in result.go.
@@ -42,4 +47,15 @@ func (s *Server) registerTools() {
 
 	// Phase 2 — polls + contact cards.
 	s.registerMediaTools()
+
+	// Status read receipts + live presence queries are side-effecting.
+	s.registerSocialActionTools()
+
+	// Local contact book and the message scheduler queue.
+	s.registerContactActionTools()
+	s.registerSchedulingActionTools()
+
+	// Channels and chat-level settings backed by WhatsApp app state.
+	s.registerChannelActionTools()
+	s.registerChatStateTools()
 }

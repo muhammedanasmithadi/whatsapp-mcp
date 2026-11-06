@@ -41,6 +41,8 @@ func (c *Client) StartEventHandler() {
 			c.log.Infof("Offline sync completed - %d messages synced", v.Count)
 		case *events.Receipt:
 			c.log.Debugf("Receipt for %d messages: %s", len(v.MessageIDs), v.Type)
+		case *events.Presence:
+			c.handlePresence(v)
 		case *events.UndecryptableMessage:
 			c.log.Warnf("Undecryptable message from %s", v.Info.Sender)
 		case *events.LabelEdit:

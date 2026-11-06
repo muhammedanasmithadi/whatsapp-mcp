@@ -14,7 +14,7 @@ import (
 
 // registerSendTools wires outbound-message tools: send_message, send_file,
 // send_audio_message, send_reaction, send_reply, send_contact_card,
-// send_typing.
+// send_typing, send_location.
 func (s *Server) registerSendTools() {
 	s.registerSendMessage()
 	s.registerBatchSendMessages()
@@ -23,6 +23,7 @@ func (s *Server) registerSendTools() {
 	s.registerSendReaction()
 	s.registerSendReply()
 	s.registerSendTyping()
+	s.registerSendLocation()
 }
 
 // -- send_message -----------------------------------------------------------

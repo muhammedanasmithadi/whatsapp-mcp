@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/mdp/qrterminal"
@@ -15,15 +16,16 @@ import (
 	"go.mau.fi/whatsmeow"
 	wmstore "go.mau.fi/whatsmeow/store"
 
-	"google.golang.org/protobuf/proto"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/ratelimit"
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
-	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/stt"
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/stt"
 )
 
 // Config configures a new Client.
@@ -76,6 +78,16 @@ type Client struct {
 	metricSink       MetricSink
 	onIncomingMsg    func(data string)
 	sttClient        stt.Client
+
+	// presenceWaiters fans out live presence events to callers waiting in
+	// GetPresence. Keyed by canonical JID string.
+	presenceMu      sync.Mutex
+	presenceWaiters map[string][]chan PresenceResult
+
+	// ownPresence tracks the last availability this client broadcast so a
+	// presence query can restore the previous state afterwards.
+	ownPresenceMu sync.Mutex
+	ownPresence   types.Presence
 }
 
 // New constructs a Client. It sets the latest WhatsApp version best-effort,

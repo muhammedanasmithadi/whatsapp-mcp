@@ -73,11 +73,15 @@ type pairDriver interface {
 	Disconnect()
 	// RequestHistorySync asks WhatsApp to backfill messages for a chat.
 	RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor string, count int, useLID bool) (string, error)
-// ListChatJIDs returns all cached chat JIDs (used for full history sync opt-in).
+	// ListChatJIDs returns all cached chat JIDs (used for full history sync opt-in).
 	ListChatJIDs() ([]string, error)
 	// GetPendingScheduledMessages returns all pending scheduled messages whose
 	// scheduled_at is <= now.
 	GetPendingScheduledMessages(ctx context.Context) ([]store.ScheduledMessage, error)
+	// NextScheduledMessageTime returns the earliest pending scheduled time.
+	NextScheduledMessageTime() (time.Time, bool, error)
+	// ScheduleChanged wakes the scheduler when pending messages change.
+	ScheduleChanged() <-chan struct{}
 	// MarkMessageSent marks a scheduled message as sent.
 	MarkMessageSent(id, messageID string, sentAt time.Time) error
 	// MarkMessageFailed marks a scheduled message as failed.
@@ -85,6 +89,7 @@ type pairDriver interface {
 	// SendMessage sends a WhatsApp message.
 	SendMessage(ctx context.Context, chatJID string, content string) (*client.SendResult, error)
 }
+
 // Config configures a daemon Server. Addr may be "host:port" or "host:0"
 // (the latter only for tests). MCPMount, if non-nil, is called once the
 // mux is being built so the caller can attach additional handlers (in
@@ -98,7 +103,7 @@ type Config struct {
 	Driver          pairDriver
 	MCPMount        func(mux *http.ServeMux)
 	AuthToken       string
-	FullHistorySync bool // after pairing, request full history sync for all cached chats
+	FullHistorySync bool   // after pairing, request full history sync for all cached chats
 	WebhookSecret   []byte // HMAC secret for verifying /webhook/ signatures
 	Logger          *log.Logger
 }
@@ -112,9 +117,9 @@ type Server struct {
 	handlers *pairHandlers
 
 	// WebSocket broadcast hub for real-time message push notifications.
-	wsMu       sync.Mutex
-	wsSubs     map[chan wsEvent]struct{}
-	wsRegister chan chan wsEvent
+	wsMu         sync.Mutex
+	wsSubs       map[chan wsEvent]struct{}
+	wsRegister   chan chan wsEvent
 	wsUnregister chan chan wsEvent
 	wsBroadcast  chan wsEvent
 
@@ -171,11 +176,31 @@ func (s *Server) BoundAddr() string {
 
 // MetricSink implementation — delegates to the internal pairHandlers.
 // These are no-ops if handlers haven't been created yet (e.g. before Run).
-func (s *Server) IncMessagesIn()   { if s.handlers != nil { s.handlers.incMessagesIn() } }
-func (s *Server) IncMessagesOut()  { if s.handlers != nil { s.handlers.incMessagesOut() } }
-func (s *Server) IncSends()        { if s.handlers != nil { s.handlers.incSends() } }
-func (s *Server) IncErrors()       { if s.handlers != nil { s.handlers.incErrors() } }
-func (s *Server) IncRateLimited()  { if s.handlers != nil { s.handlers.incRateLimited() } }
+func (s *Server) IncMessagesIn() {
+	if s.handlers != nil {
+		s.handlers.incMessagesIn()
+	}
+}
+func (s *Server) IncMessagesOut() {
+	if s.handlers != nil {
+		s.handlers.incMessagesOut()
+	}
+}
+func (s *Server) IncSends() {
+	if s.handlers != nil {
+		s.handlers.incSends()
+	}
+}
+func (s *Server) IncErrors() {
+	if s.handlers != nil {
+		s.handlers.incErrors()
+	}
+}
+func (s *Server) IncRateLimited() {
+	if s.handlers != nil {
+		s.handlers.incRateLimited()
+	}
+}
 
 // PublishWS publishes a real-time event to all WebSocket subscribers. Safe to
 // call from any goroutine; non-blocking if the broadcast channel is full.
@@ -387,9 +412,8 @@ func (s *Server) requestFullHistorySync(ctx context.Context) {
 }
 
 // runScheduler runs in a goroutine and sends scheduled messages at their
-// scheduled time. It uses a timer-based approach (not polling): when there
-// are pending messages, it waits until the next one is due; when there are
-// none, it waits briefly and checks again.
+// scheduled time. It sleeps on a timer until the next due message and wakes
+// immediately when the queue changes, so an empty queue costs no polling.
 func (s *Server) runScheduler(ctx context.Context) {
 	for {
 		select {
@@ -409,8 +433,50 @@ func (s *Server) runScheduler(ctx context.Context) {
 			continue
 		}
 
-		if len(msgs) == 0 {
-			// No pending messages. Wait a bit before checking again.
+		for _, m := range msgs {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			if d := time.Until(m.ScheduledAt); d > 0 {
+				timer := time.NewTimer(d)
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				}
+			}
+
+			r, err := s.cfg.Driver.SendMessage(ctx, m.ChatJID, m.Content)
+			if err != nil {
+				if markErr := s.cfg.Driver.MarkMessageFailed(m.ID, err.Error()); markErr != nil {
+					s.log.Printf("[WARN] scheduled message %s: mark failed: %v", m.ID, markErr)
+				}
+				s.log.Printf("[WARN] scheduled message %s failed: %v", m.ID, err)
+				continue
+			}
+			if !r.Success {
+				if markErr := s.cfg.Driver.MarkMessageFailed(m.ID, r.Message); markErr != nil {
+					s.log.Printf("[WARN] scheduled message %s: mark failed: %v", m.ID, markErr)
+				}
+				s.log.Printf("[WARN] scheduled message %s failed: %s", m.ID, r.Message)
+			} else {
+				if markErr := s.cfg.Driver.MarkMessageSent(m.ID, r.ID, time.Now()); markErr != nil {
+					s.log.Printf("[WARN] scheduled message %s: mark sent: %v", m.ID, markErr)
+				}
+				s.log.Printf("[INFO] scheduled message %s sent to %s", m.ID, m.ChatJID)
+			}
+		}
+
+		// Sleep until the next pending message is due. A notification wakes
+		// this immediately when a message is queued or cancelled, so there is
+		// no periodic poll when the queue is empty.
+		next, ok, err := s.cfg.Driver.NextScheduledMessageTime()
+		if err != nil {
+			s.log.Printf("[WARN] scheduled messages: failed to read next: %v", err)
 			select {
 			case <-ctx.Done():
 				return
@@ -419,39 +485,28 @@ func (s *Server) runScheduler(ctx context.Context) {
 			continue
 		}
 
-		// Process all messages that are due now.
-		now := time.Now()
-		for _, m := range msgs {
-			select {
-			case <-ctx.Done():
-				return
-			default:
+		var timerC <-chan time.Time
+		var timer *time.Timer
+		if ok {
+			d := time.Until(next)
+			if d < 0 {
+				d = 0
 			}
+			timer = time.NewTimer(d)
+			timerC = timer.C
+		}
 
-			if m.ScheduledAt.After(now) {
-				// Wait until this message is due.
-				d := m.ScheduledAt.Sub(now)
-				select {
-				case <-time.After(d):
-				case <-ctx.Done():
-					return
-				}
+		select {
+		case <-ctx.Done():
+			if timer != nil {
+				timer.Stop()
 			}
-
-			// Send the message.
-			r, err := s.cfg.Driver.SendMessage(ctx, m.ChatJID, m.Content)
-			if err != nil {
-				s.cfg.Driver.MarkMessageFailed(m.ID, err.Error())
-				s.log.Printf("[WARN] scheduled message %s failed: %v", m.ID, err)
-				continue
+			return
+		case <-s.cfg.Driver.ScheduleChanged():
+			if timer != nil {
+				timer.Stop()
 			}
-			if !r.Success {
-				s.cfg.Driver.MarkMessageFailed(m.ID, r.Message)
-				s.log.Printf("[WARN] scheduled message %s failed: %s", m.ID, r.Message)
-			} else {
-				s.cfg.Driver.MarkMessageSent(m.ID, r.ID, time.Now())
-				s.log.Printf("[INFO] scheduled message %s sent to %s", m.ID, m.ChatJID)
-			}
+		case <-timerC:
 		}
 	}
 }

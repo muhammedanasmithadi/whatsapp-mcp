@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -98,13 +99,14 @@ type MessageReadPosition struct {
 
 // ScheduledMessage is a message scheduled to be sent at a future time.
 type ScheduledMessage struct {
-	ID         string    `json:"id"`
-	ChatJID    string    `json:"chat_jid"`
-	Content    string    `json:"content"`
-	ScheduledAt time.Time `json:"scheduled_at"`
-	Status     string    `json:"status"` // pending, sent, failed
-	SentAt     time.Time `json:"sent_at,omitempty"`
-	SentMessageID string   `json:"sent_message_id,omitempty"`
+	ID            string    `json:"id"`
+	ChatJID       string    `json:"chat_jid"`
+	Content       string    `json:"content"`
+	ScheduledAt   time.Time `json:"scheduled_at"`
+	Status        string    `json:"status"` // pending, sent, failed
+	SentAt        time.Time `json:"sent_at,omitempty"`
+	SentMessageID string    `json:"sent_message_id,omitempty"`
+	Error         string    `json:"error,omitempty"`
 }
 
 // stmtCache caches prepared SQL statements to avoid the overhead of
@@ -112,15 +114,15 @@ type ScheduledMessage struct {
 // database, so with MaxOpenConns(1) there is no risk of concurrent
 // preparation of the same statement by multiple connections.
 type stmtCache struct {
-	mu   sync.RWMutex
-	db   *sql.DB
+	mu    sync.RWMutex
+	db    *sql.DB
 	stmts map[string]*sql.Stmt
 }
 
 // newStmtCache creates a statement cache bound to the given database.
 func newStmtCache(db *sql.DB) *stmtCache {
 	return &stmtCache{
-		db:   db,
+		db:    db,
 		stmts: make(map[string]*sql.Stmt),
 	}
 }
@@ -173,6 +175,10 @@ type Store struct {
 	whatsmeowDB *sql.DB
 	dir         string
 	stmtCache   *stmtCache
+	// scheduleWake wakes the daemon scheduler when a scheduled message is
+	// added or cancelled. Buffered (capacity 1) so a notification is never
+	// lost while the scheduler is busy, and never blocks the writer.
+	scheduleWake chan struct{}
 }
 
 // Open creates (if necessary) the store directory and opens both databases.
@@ -227,7 +233,7 @@ func Open(dir string) (*Store, error) {
 		return nil, fmt.Errorf("chmod whatsapp.db: %w", err)
 	}
 
-	return &Store{db: db, whatsmeowDB: waDB, dir: dir, stmtCache: newStmtCache(db)}, nil
+	return &Store{db: db, whatsmeowDB: waDB, dir: dir, stmtCache: newStmtCache(db), scheduleWake: make(chan struct{}, 1)}, nil
 }
 
 // DB returns the underlying message database handle (tests only).
@@ -285,6 +291,17 @@ func (s *Store) StoreChat(jid, name string, lastMessageTime time.Time) error {
 	_, err := s.db.Exec(
 		"INSERT OR REPLACE INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)",
 		jid, name, lastMessageTime,
+	)
+	return err
+}
+
+// EnsureChat creates a chat row if the JID is not cached yet, preserving any
+// existing row (name, last message time, archive flag). Scheduled messages
+// reference chats, so scheduling to a brand-new recipient needs this first.
+func (s *Store) EnsureChat(jid, name string) error {
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)",
+		jid, name, time.Time{},
 	)
 	return err
 }
@@ -384,6 +401,23 @@ func (s *Store) GetMediaInfo(id, chatJID string) (mediaType, filename, url, dire
 	).Scan(&mediaType, &filename, &url, &dp, &mediaKey, &fileSHA256, &fileEncSHA256, &fileLength)
 	directPath = dp.String
 	return
+}
+
+// GetMessage returns one cached message by ID and chat JID, or nil when it is
+// not cached.
+func (s *Store) GetMessage(ctx context.Context, id, chatJID string) (*Message, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, chat_jid, sender, COALESCE(content, ''), timestamp, is_from_me
+		FROM messages WHERE id = ? AND chat_jid = ?`, id, chatJID)
+	var m Message
+	if err := row.Scan(&m.ID, &m.ChatJID, &m.Sender, &m.Content, &m.Timestamp, &m.IsFromMe); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	m.IsGroup = strings.HasSuffix(m.ChatJID, "@g.us")
+	return &m, nil
 }
 
 // GetNewestMessage returns the latest message row for a chat, used by the
@@ -597,13 +631,52 @@ func (s *Store) DeleteContact(jid string) error {
 	return err
 }
 
-// StoreScheduledMessage inserts a scheduled message.
+// StoreScheduledMessage inserts a scheduled message and wakes the scheduler.
 func (s *Store) StoreScheduledMessage(id, chatJID, content string, scheduledAt time.Time) error {
 	_, err := s.db.Exec(
 		"INSERT OR REPLACE INTO scheduled_messages (id, chat_jid, content, scheduled_at) VALUES (?, ?, ?, ?)",
 		id, chatJID, content, scheduledAt,
 	)
+	if err == nil {
+		s.NotifyScheduleChanged()
+	}
 	return err
+}
+
+// ScheduleChanged returns a channel that receives a value when the set of
+// pending scheduled messages changes. The scheduler selects on it so a newly
+// queued message is picked up immediately instead of waiting for a poll tick.
+func (s *Store) ScheduleChanged() <-chan struct{} {
+	return s.scheduleWake
+}
+
+// NotifyScheduleChanged wakes the scheduler without blocking.
+func (s *Store) NotifyScheduleChanged() {
+	if s.scheduleWake == nil {
+		return
+	}
+	select {
+	case s.scheduleWake <- struct{}{}:
+	default:
+	}
+}
+
+// NextScheduledMessageTime returns the scheduled time of the earliest pending
+// scheduled message. ok is false when nothing is pending.
+func (s *Store) NextScheduledMessageTime() (time.Time, bool, error) {
+	var next time.Time
+	err := s.db.QueryRow(`
+		SELECT scheduled_at FROM scheduled_messages
+		WHERE status = 'pending'
+		ORDER BY scheduled_at ASC LIMIT 1
+	`).Scan(&next)
+	if err == sql.ErrNoRows {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return next, true, nil
 }
 
 // GetPendingScheduledMessages returns all scheduled messages with status 'pending'
@@ -647,28 +720,58 @@ func (s *Store) MarkMessageFailed(id, reason string) error {
 	return err
 }
 
-// ListScheduledMessages returns all scheduled messages.
-func (s *Store) ListScheduledMessages() ([]ScheduledMessage, error) {
-	rows, err := s.db.Query("SELECT id, chat_jid, content, scheduled_at, status FROM scheduled_messages ORDER BY scheduled_at")
+// ListScheduledMessages returns scheduled messages, newest scheduled time
+// first. status filters to pending, sent, or failed; an empty string returns
+// every state.
+func (s *Store) ListScheduledMessages(status string) ([]ScheduledMessage, error) {
+	query := `SELECT id, chat_jid, content, scheduled_at, status,
+		sent_at, COALESCE(sent_message_id, ''), COALESCE(error, '')
+		FROM scheduled_messages`
+	args := []any{}
+	if status != "" {
+		query += " WHERE status = ?"
+		args = append(args, status)
+	}
+	query += " ORDER BY scheduled_at DESC"
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var msgs []ScheduledMessage
 	for rows.Next() {
-		var m ScheduledMessage
-		if err := rows.Scan(&m.ID, &m.ChatJID, &m.Content, &m.ScheduledAt, &m.Status); err != nil {
+		var (
+			m      ScheduledMessage
+			sentAt sql.NullTime
+		)
+		if err := rows.Scan(&m.ID, &m.ChatJID, &m.Content, &m.ScheduledAt, &m.Status, &sentAt, &m.SentMessageID, &m.Error); err != nil {
 			return nil, err
+		}
+		if sentAt.Valid {
+			m.SentAt = sentAt.Time
 		}
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()
 }
 
-// CancelScheduledMessage deletes a pending scheduled message.
-func (s *Store) CancelScheduledMessage(id string) error {
-	_, err := s.db.Exec("DELETE FROM scheduled_messages WHERE id = ? AND status = 'pending'", id)
-	return err
+// CancelScheduledMessage deletes a pending scheduled message. It reports
+// whether a pending row was removed (false means the ID was unknown or the
+// message had already been sent or failed).
+func (s *Store) CancelScheduledMessage(id string) (bool, error) {
+	res, err := s.db.Exec("DELETE FROM scheduled_messages WHERE id = ? AND status = 'pending'", id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if n > 0 {
+		s.NotifyScheduleChanged()
+	}
+	return n > 0, nil
 }
 
 // FindChatName returns the name stored for a chat JID, empty if none.
@@ -846,7 +949,16 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
 	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	sent_at TIMESTAMP,
 	sent_message_id TEXT,
+	error TEXT,
 	FOREIGN KEY (chat_jid) REFERENCES chats(jid)
+);
+
+CREATE TABLE IF NOT EXISTS presence (
+	jid TEXT PRIMARY KEY,
+	online BOOLEAN NOT NULL DEFAULT 0,
+	last_seen TIMESTAMP,
+	subscribed_at TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_messages_scheduled_at ON scheduled_messages(scheduled_at);
@@ -931,6 +1043,50 @@ func migrateSchema(db *sql.DB) error {
 	if !hasArchived {
 		if _, err := db.Exec("ALTER TABLE chats ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0"); err != nil {
 			return fmt.Errorf("add column archived: %w", err)
+		}
+	}
+	// scheduled_messages table: add the error column used to record send
+	// failures (missing from the first release of the scheduler schema).
+	if err := chatRows.Close(); err != nil {
+		return fmt.Errorf("close table_info(chats): %w", err)
+	}
+	schedRows, err := db.Query("PRAGMA table_info(scheduled_messages)")
+	if err != nil {
+		return fmt.Errorf("pragma table_info(scheduled_messages): %w", err)
+	}
+	hasScheduleError := false
+	for schedRows.Next() {
+		var (
+			cid        int
+			name       string
+			ctype      string
+			notnull    int
+			dfltValue  sql.NullString
+			primaryKey int
+		)
+		if err := schedRows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &primaryKey); err != nil {
+			schedRows.Close()
+			return fmt.Errorf("scan table_info(scheduled_messages): %w", err)
+		}
+		if name == "error" {
+			hasScheduleError = true
+		}
+	}
+	if err := schedRows.Err(); err != nil {
+		schedRows.Close()
+		return fmt.Errorf("iterate table_info(scheduled_messages): %w", err)
+	}
+	if err := schedRows.Close(); err != nil {
+		return fmt.Errorf("close table_info(scheduled_messages): %w", err)
+	}
+	// A legacy database in tests may predate the scheduler table entirely.
+	// Open() applies the full schema afterwards, so only migrate when present.
+	var schedTable string
+	if err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_messages'").Scan(&schedTable); err == nil {
+		if !hasScheduleError {
+			if _, err := db.Exec("ALTER TABLE scheduled_messages ADD COLUMN error TEXT"); err != nil {
+				return fmt.Errorf("add column error: %w", err)
+			}
 		}
 	}
 	return nil

@@ -9,9 +9,14 @@ This is an independent, community project. It is not affiliated with, endorsed b
 Once paired with your phone (the same way you link WhatsApp Web), the daemon:
 
 - Reads and searches your message history, contacts, and groups from local SQLite
-- Sends text messages, media, polls, reactions, replies, and contact cards
+- Sends text messages, media, polls, reactions, replies, contact cards, and map locations
+- Reads Status (Stories), profile photos, contact metadata (About, verified name, LID), and online/last-seen presence
+- Follows and reads WhatsApp Channels; mutes/unmutes channels
 - Manages groups, blocklist, and privacy settings
-- Exposes 45 MCP tools over Streamable HTTP
+- Controls chats: mute, pin, star messages, disappearing-message timer
+- Schedules messages for later delivery (timer-driven, survives restarts)
+- Keeps a local address book (bridge-only; not synced to the phone)
+- Exposes 76 MCP tools over Streamable HTTP
 - Serves health (`/healthz`) and Prometheus metrics (`/metrics`) endpoints
 - Pushes new messages to connected clients over WebSocket (`/ws/events`)
 

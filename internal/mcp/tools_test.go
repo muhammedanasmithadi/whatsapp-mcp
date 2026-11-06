@@ -9,42 +9,61 @@ import (
 // Keeping it as a sorted slice makes diff output easy to read when registration
 // drifts.
 var expectedToolNames = []string{
+	"archive_chat",
 	"batch_send_messages",
 	"block_contact",
+	"cancel_scheduled_message",
+	"create_contact",
 	"create_group",
+	"delete_contact",
 	"delete_message",
 	"download_media",
 	"edit_message",
+	"follow_channel",
+	"get_audit_log",
 	"get_blocklist",
+	"get_channel_info",
 	"get_chat",
+	"get_contact_info",
 	"get_group_info",
 	"get_group_invite_link",
 	"get_message_context",
 	"get_poll_results",
+	"get_presence",
 	"get_privacy_settings",
+	"get_profile_picture",
 	"get_read_position",
 	"get_status",
 	"is_on_whatsapp",
 	"join_group_with_link",
 	"leave_group",
+	"list_channel_messages",
+	"list_channels",
 	"list_chats",
 	"list_chats_by_label",
+	"list_contacts",
 	"list_groups",
 	"list_labels",
 	"list_media_messages",
 	"list_messages",
+	"list_scheduled_messages",
+	"list_status_updates",
 	"mark_chat_read",
 	"mark_read",
 	"mark_read_position",
+	"mark_status_viewed",
+	"mute_channel",
+	"mute_chat",
 	"pairing_status",
-	"get_audit_log",
+	"pin_chat",
 	"recover_media",
 	"request_sync",
+	"schedule_message",
 	"search_contacts",
-	"transcribe_voice_note",
 	"send_audio_message",
 	"send_contact_card",
 	"send_file",
+	"send_location",
 	"send_message",
 	"send_poll",
 	"send_poll_vote",
@@ -52,15 +71,19 @@ var expectedToolNames = []string{
 	"send_reaction",
 	"send_reply",
 	"send_typing",
+	"set_disappearing_timer",
 	"set_group_announce",
 	"set_group_locked",
 	"set_group_name",
 	"set_group_topic",
 	"set_privacy_setting",
 	"set_status_message",
+	"star_message",
+	"transcribe_voice_note",
 	"unarchive_chat",
 	"unblock_contact",
-	"archive_chat",
+	"unfollow_channel",
+	"update_contact",
 	"update_group_participants",
 }
 
@@ -127,7 +150,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 
 func TestNewServer_ToolCount(t *testing.T) {
 	s := NewServer(nil, nil)
-	const want = 53
+	const want = 76
 	if got := len(s.MCP().ListTools()); got != want {
 		t.Errorf("tool count = %d, want %d", got, want)
 	}
@@ -146,12 +169,18 @@ func TestToolsByDomain(t *testing.T) {
 
 	// domain file → representative tool name(s) that MUST be present.
 	domains := map[string][]string{
-		"tools_query.go":   {"list_chats", "search_contacts"},
-		"tools_send.go":    {"send_message", "send_file"},
-		"tools_message.go": {"edit_message", "mark_read"},
-		"tools_groups.go":  {"create_group", "leave_group"},
-		"tools_media.go":   {"send_poll", "send_contact_card"},
-		"tools_privacy.go": {"get_blocklist", "send_presence"},
+		"tools_query.go":      {"list_chats", "search_contacts"},
+		"tools_send.go":       {"send_message", "send_file"},
+		"tools_message.go":    {"edit_message", "mark_read"},
+		"tools_groups.go":     {"create_group", "leave_group"},
+		"tools_media.go":      {"send_poll", "send_contact_card"},
+		"tools_privacy.go":    {"get_blocklist", "send_presence"},
+		"tools_social.go":     {"list_status_updates", "get_presence"},
+		"tools_contacts.go":   {"list_contacts", "create_contact"},
+		"tools_scheduling.go": {"list_scheduled_messages", "schedule_message"},
+		"tools_channels.go":   {"list_channels", "get_channel_info"},
+		"tools_chatstate.go":  {"mute_chat", "star_message"},
+		"tools_location.go":   {"send_location"},
 	}
 
 	for file, names := range domains {

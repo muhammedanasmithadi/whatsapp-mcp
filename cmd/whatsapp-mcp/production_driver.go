@@ -18,9 +18,9 @@ type productionDriver struct {
 	c *client.Client
 
 	// pairingMu guards pairingActive and pairingAttempts.
-	pairingMu        sync.Mutex
-	pairingActive    bool
-	pairingAttempts  int
+	pairingMu       sync.Mutex
+	pairingActive   bool
+	pairingAttempts int
 
 	// handlerInstalled ensures the logged-out event handler is installed only once.
 	handlerInstalled bool
@@ -142,6 +142,16 @@ func (p *productionDriver) ListChatJIDs() ([]string, error) {
 // GetPendingScheduledMessages returns all pending scheduled messages.
 func (p *productionDriver) GetPendingScheduledMessages(ctx context.Context) ([]store.ScheduledMessage, error) {
 	return p.c.Store().GetPendingScheduledMessages(ctx)
+}
+
+// NextScheduledMessageTime returns the earliest pending scheduled time.
+func (p *productionDriver) NextScheduledMessageTime() (time.Time, bool, error) {
+	return p.c.Store().NextScheduledMessageTime()
+}
+
+// ScheduleChanged wakes the scheduler when the pending queue changes.
+func (p *productionDriver) ScheduleChanged() <-chan struct{} {
+	return p.c.Store().ScheduleChanged()
 }
 
 // MarkMessageSent marks a scheduled message as sent.

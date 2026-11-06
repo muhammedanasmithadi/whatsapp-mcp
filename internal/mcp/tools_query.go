@@ -28,6 +28,10 @@ func (s *Server) registerQueryTools() {
 	s.registerListLabels()
 	s.registerListChatsByLabel()
 	s.registerGetAuditLog()
+	s.registerSocialReadTools()
+	s.registerContactsReadTools()
+	s.registerSchedulingReadTools()
+	s.registerChannelReadTools()
 }
 
 // -- search_contacts --------------------------------------------------------
