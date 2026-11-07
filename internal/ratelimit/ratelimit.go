@@ -53,11 +53,19 @@ func DefaultConfig() Config {
 	}
 }
 
+// AllowDecision is the explicit outcome of an Allow* check.
+type AllowDecision bool
+
+const (
+	AllowDenied  AllowDecision = false
+	AllowAllowed AllowDecision = true
+)
+
 // Decision is the result of an Allow* check. When Allowed is false, Reason is
 // a short human string and RetryAfter is how long until the same call would
 // be admitted (best-effort; assumes no other calls arrive meanwhile).
 type Decision struct {
-	Allowed    bool
+	Allowed    AllowDecision
 	RetryAfter time.Duration
 	Reason     string
 }
@@ -100,17 +108,17 @@ func (l *Limiter) AllowSend(isContact bool) Decision {
 	}
 	if !l.lastSend.IsZero() {
 		if elapsed := now.Sub(l.lastSend); elapsed < minInterval {
-			return Decision{Allowed: false, RetryAfter: minInterval - elapsed, Reason: intervalReason(isContact)}
+			return Decision{Allowed: AllowDenied, RetryAfter: minInterval - elapsed, Reason: intervalReason(isContact)}
 		}
 	}
 
 	// Global hourly cap.
 	if l.cfg.MaxSendsPerHour > 0 && len(l.sends) >= l.cfg.MaxSendsPerHour {
-		return Decision{Allowed: false, RetryAfter: untilOldestExpires(l.sends, now, time.Hour), Reason: "hourly send cap reached"}
+		return Decision{Allowed: AllowDenied, RetryAfter: untilOldestExpires(l.sends, now, time.Hour), Reason: "hourly send cap reached"}
 	}
 	// Non-contact hourly cap (only for non-contacts).
 	if !isContact && l.cfg.NonContactMaxPerHour > 0 && len(l.nonContactSends) >= l.cfg.NonContactMaxPerHour {
-		return Decision{Allowed: false, RetryAfter: untilOldestExpires(l.nonContactSends, now, time.Hour), Reason: "hourly non-contact send cap reached"}
+		return Decision{Allowed: AllowDenied, RetryAfter: untilOldestExpires(l.nonContactSends, now, time.Hour), Reason: "hourly non-contact send cap reached"}
 	}
 
 	// Admitted — record.
@@ -131,7 +139,7 @@ func (l *Limiter) AllowUsync() Decision {
 
 	l.usyncs = pruneBefore(l.usyncs, now.Add(-time.Minute))
 	if l.cfg.MaxUsyncPerMinute > 0 && len(l.usyncs) >= l.cfg.MaxUsyncPerMinute {
-		return Decision{Allowed: false, RetryAfter: untilOldestExpires(l.usyncs, now, time.Minute), Reason: "usync burst guard (is_on_whatsapp) reached"}
+		return Decision{Allowed: AllowDenied, RetryAfter: untilOldestExpires(l.usyncs, now, time.Minute), Reason: "usync burst guard (is_on_whatsapp) reached"}
 	}
 	l.usyncs = append(l.usyncs, now)
 	return Decision{Allowed: true}

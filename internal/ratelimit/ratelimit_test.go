@@ -224,7 +224,7 @@ func TestConcurrentSends(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func() {
 			<-start
-			results <- l.AllowSend(true).Allowed
+			results <- bool(l.AllowSend(true).Allowed)
 		}()
 	}
 	close(start)
