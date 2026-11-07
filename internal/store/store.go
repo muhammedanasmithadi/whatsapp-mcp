@@ -312,17 +312,29 @@ func (s *Store) EnsureChat(jid, name string) error {
 	return err
 }
 
+// ArchivedState is the explicit archive lifecycle of a chat.
+type ArchivedState bool
+
+const (
+	ChatActive   ArchivedState = false
+	ChatArchived ArchivedState = true
+)
+
+// SetArchived sets the archive state of a chat explicitly.
+func (s *Store) SetArchived(chatJID string, state ArchivedState) error {
+	_, err := s.db.Exec("UPDATE chats SET archived = ? WHERE jid = ?", bool(state), chatJID)
+	return err
+}
+
 // ArchiveChat archives a chat so it no longer appears in normal chat listings.
 // Read-only chats remain in the database and can be unarchived later.
 func (s *Store) ArchiveChat(chatJID string) error {
-	_, err := s.db.Exec("UPDATE chats SET archived = 1 WHERE jid = ?", chatJID)
-	return err
+	return s.SetArchived(chatJID, ChatArchived)
 }
 
 // UnarchiveChat unarchives a previously archived chat.
 func (s *Store) UnarchiveChat(chatJID string) error {
-	_, err := s.db.Exec("UPDATE chats SET archived = 0 WHERE jid = ?", chatJID)
-	return err
+	return s.SetArchived(chatJID, ChatActive)
 }
 
 // StoreMessage inserts or replaces a message row. Messages with no content and
