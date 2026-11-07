@@ -33,9 +33,16 @@ type StatusUpdate struct {
 }
 
 // PresenceEntry is the last known presence state for a contact.
+type PresenceState bool
+
+const (
+	PresenceOffline PresenceState = false
+	PresenceOnline  PresenceState = true
+)
+
 type PresenceEntry struct {
-	JID          string    `json:"jid"`
-	Online       bool      `json:"online"`
+	JID          string        `json:"jid"`
+	Online       PresenceState `json:"online"`
 	LastSeen     time.Time `json:"last_seen,omitempty"`
 	LastSeenSeen bool      `json:"last_seen_known"`
 	SubscribedAt time.Time `json:"subscribed_at,omitempty"`
@@ -169,7 +176,7 @@ func isDigitsOnly(s string) bool {
 
 // UpsertPresence records the latest presence event for a JID. A zero lastSeen
 // leaves any previously known last-seen timestamp intact.
-func (s *Store) UpsertPresence(ctx context.Context, jid string, online bool, lastSeen time.Time) error {
+func (s *Store) UpsertPresence(ctx context.Context, jid string, online PresenceState, lastSeen time.Time) error {
 	var lastSeenArg any
 	if !lastSeen.IsZero() {
 		lastSeenArg = lastSeen
@@ -181,7 +188,7 @@ func (s *Store) UpsertPresence(ctx context.Context, jid string, online bool, las
 			online = excluded.online,
 			last_seen = COALESCE(excluded.last_seen, presence.last_seen),
 			updated_at = CURRENT_TIMESTAMP`,
-		jid, online, lastSeenArg)
+		jid, bool(online), lastSeenArg)
 	return err
 }
 

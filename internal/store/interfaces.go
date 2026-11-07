@@ -38,7 +38,7 @@ type StatusStore interface {
 // PresenceStore is the cached online/last-seen surface used by MCP presence
 // tools.
 type PresenceStore interface {
-	UpsertPresence(ctx context.Context, jid string, online bool, lastSeen time.Time) error
+	UpsertPresence(ctx context.Context, jid string, online PresenceState, lastSeen time.Time) error
 	MarkPresenceSubscribed(ctx context.Context, jid string) error
 	GetPresence(ctx context.Context, jid string) (*PresenceEntry, error)
 	ListPresence(ctx context.Context) ([]PresenceEntry, error)

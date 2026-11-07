@@ -446,7 +446,11 @@ func (c *Client) handlePresence(evt *events.Presence) {
 	jid := c.store.ResolveLIDToJID(rawJID)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := c.store.UpsertPresence(ctx, jid, !evt.Unavailable, evt.LastSeen); err != nil {
+	online := store.PresenceOffline
+	if !evt.Unavailable {
+		online = store.PresenceOnline
+	}
+	if err := c.store.UpsertPresence(ctx, jid, online, evt.LastSeen); err != nil {
 		c.log.Warnf("Store presence for %s: %v", c.redactor.JID(jid), err)
 	}
 
@@ -495,7 +499,7 @@ func (c *Client) cachedPresence(jid types.JID) (*PresenceResult, error) {
 	out := &PresenceResult{
 		JID:           entry.JID,
 		ContactName:   c.store.FindChatName(entry.JID),
-		Online:        entry.Online,
+		Online:        bool(entry.Online),
 		LastSeenKnown: entry.LastSeenSeen,
 		State:         PresenceResultCached,
 		UpdatedAt:     entry.UpdatedAt,
