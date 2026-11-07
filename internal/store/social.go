@@ -404,18 +404,29 @@ func (s *Store) SetAutoResponderWithConfig(ctx context.Context, enabled bool, me
 	return tx.Commit()
 }
 
+// AutoRespondDecision is the explicit state of an auto-responder eligibility
+// check.
+type AutoRespondDecision string
+
+const (
+	AutoRespondAllowed       AutoRespondDecision = "allowed"
+	AutoRespondDisabled     AutoRespondDecision = "disabled"
+	AutoRespondOutsideWindow AutoRespondDecision = "outside_window"
+	AutoRespondInCooldown   AutoRespondDecision = "in_cooldown"
+)
+
 // CanAutoRespond checks whether the auto-responder should reply to a message
 // from the given JID at the current time. It checks:
 //   - auto-responder is enabled
 //   - current time is within the configured start/end window (if set)
 //   - cooldown period has elapsed since the last reply to this JID (if set)
-func (s *Store) CanAutoRespond(ctx context.Context, jid string) (bool, error) {
+func (s *Store) CanAutoRespond(ctx context.Context, jid string) (AutoRespondDecision, error) {
 	enabled, _, startTime, endTime, cooldownMinutes, err := s.GetAutoResponderWithConfig(ctx)
 	if err != nil {
-		return false, err
+		return AutoRespondDisabled, err
 	}
 	if !enabled {
-		return false, nil
+		return AutoRespondDisabled, nil
 	}
 	now := time.Now()
 	// Check time window
@@ -424,7 +435,7 @@ func (s *Store) CanAutoRespond(ctx context.Context, jid string) (bool, error) {
 		if err == nil {
 			start = time.Date(now.Year(), now.Month(), now.Day(), start.Hour(), start.Minute(), 0, 0, now.Location())
 			if now.Before(start) {
-				return false, nil
+				return AutoRespondOutsideWindow, nil
 			}
 		}
 	}
@@ -433,7 +444,7 @@ func (s *Store) CanAutoRespond(ctx context.Context, jid string) (bool, error) {
 		if err == nil {
 			end = time.Date(now.Year(), now.Month(), now.Day(), end.Hour(), end.Minute(), 0, 0, now.Location())
 			if now.After(end) {
-				return false, nil
+				return AutoRespondOutsideWindow, nil
 			}
 		}
 	}
@@ -444,11 +455,11 @@ func (s *Store) CanAutoRespond(ctx context.Context, jid string) (bool, error) {
 		if err == nil && lastReply.Valid {
 			elapsed := now.Sub(lastReply.Time)
 			if elapsed < time.Duration(cooldownMinutes)*time.Minute {
-				return false, nil
+				return AutoRespondInCooldown, nil
 			}
 		}
 	}
-	return true, nil
+	return AutoRespondAllowed, nil
 }
 
 // RecordAutoRespond records that an auto-response was sent to the given JID

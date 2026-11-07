@@ -65,6 +65,8 @@ type MessageReader interface {
 type AutoResponderStore interface {
 	GetAutoResponder(ctx context.Context) (enabled bool, message string, err error)
 	SetAutoResponder(ctx context.Context, enabled bool, message string) error
+	CanAutoRespond(ctx context.Context, jid string) (AutoRespondDecision, error)
+	RecordAutoRespond(ctx context.Context, jid string) error
 }
 
 // Store satisfies ContactStore, SchedulingStore, StatusStore, PresenceStore,

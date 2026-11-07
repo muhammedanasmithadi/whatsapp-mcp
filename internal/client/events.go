@@ -277,12 +277,12 @@ func (c *Client) handleMessage(msg *events.Message) {
 			content := nm.msg.Content
 			isFromMe := msg.Info.IsFromMe
 			go func() {
-				can, err := c.store.CanAutoRespond(context.Background(), chatJID)
+				decision, err := c.store.CanAutoRespond(context.Background(), chatJID)
 				if err != nil {
 					c.log.Warnf("auto-responder: config check failed: %v", err)
 					return
 				}
-				if !can {
+				if decision != store.AutoRespondAllowed {
 					return
 				}
 				if isFromMe {
