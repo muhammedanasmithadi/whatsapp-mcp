@@ -20,6 +20,14 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
+// messageKind is the explicit classification of an incoming message.
+type messageKind int
+
+const (
+	messageKindNormal messageKind = iota
+	messageKindEdit
+)
+
 // StartEventHandler registers the event handler on the underlying whatsmeow
 // client. Must be called before Connect().
 func (c *Client) StartEventHandler() {
@@ -185,9 +193,16 @@ func (c *Client) handleMessage(msg *events.Message) {
 		}
 	}
 
+	// Classify the incoming message kind explicitly instead of branching
+	// on the raw IsEdit flag inline.
+	messageKind := messageKindNormal
+	if msg.IsEdit {
+		messageKind = messageKindEdit
+	}
+
 	// WhatsApp wraps edited messages in EditedMessage and sets IsEdit. When
 	// we see one, update the stored row instead of inserting a duplicate.
-	if msg.IsEdit {
+	if messageKind == messageKindEdit {
 		if err := c.store.UpdateMessage(context.Background(), msg.Info.ID, nm.chatJID, nm.msg.Content); err != nil {
 			if err == sql.ErrNoRows {
 				// No cached row to update — fall through and insert fresh.
