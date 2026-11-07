@@ -117,10 +117,9 @@ Protocol fixes are also contributed upstream where applicable: https://github.co
 
 ## Statuses (Stories) — push-only delivery, recoverable via re-pair
 
-Status updates are cached as `status@broadcast` messages and arrive via push
-while the daemon is online and paired. WhatsApp Web's `WAWebApiStatus.getAllStatuses`
-is a local DB query — there is no on-demand server fetch for statuses on an
-already-paired device.
+Status updates arrive as push broadcasts while the daemon is online and paired.
+There is no on-demand server fetch for statuses on an already-paired device —
+`WAWebApiStatus.getAllStatuses` reads from local cache only.
 
 **Missing statuses can be recovered by re-pairing.** When a linked device pairs
 for the first time, WhatsApp sends `INITIAL_STATUS_V3` (history sync type 1)
@@ -137,7 +136,7 @@ To recover statuses posted while the daemon was offline:
 4. During pairing bootstrap, WhatsApp sends `INITIAL_STATUS_V3` and the daemon
    caches recent statuses automatically
 
-(while the machine was suspended) were recovered after re-pairing.
+machine was suspended) were recovered after re-pairing, bringing the cached
 
 Profile photos and online/last-seen presence work independently of status delivery.
 
