@@ -124,21 +124,24 @@ func parseParticipantAction(action string) (whatsmeow.ParticipantChange, error) 
 	}
 }
 
+// participantStatus is the explicit per-participant outcome state.
+type participantStatus string
+
 // Per-participant outcomes reported by UpdateGroupParticipants.
 const (
-	statusAdded          = "added"
-	statusRemoved        = "removed"
-	statusPromoted       = "promoted"
-	statusDemoted        = "demoted"
-	statusAlreadyMember  = "already_member"
-	statusNotMember      = "not_member"
-	statusInviteRequired = "invite_required"
-	statusInviteSent     = "invite_sent"
-	statusInviteFailed   = "invite_failed"
-	statusFailed         = "failed"
+	statusAdded          participantStatus = "added"
+	statusRemoved        participantStatus = "removed"
+	statusPromoted       participantStatus = "promoted"
+	statusDemoted        participantStatus = "demoted"
+	statusAlreadyMember  participantStatus = "already_member"
+	statusNotMember      participantStatus = "not_member"
+	statusInviteRequired participantStatus = "invite_required"
+	statusInviteSent     participantStatus = "invite_sent"
+	statusInviteFailed   participantStatus = "invite_failed"
+	statusFailed         participantStatus = "failed"
 )
 
-var participantSuccessStatus = map[whatsmeow.ParticipantChange]string{
+var participantSuccessStatus = map[whatsmeow.ParticipantChange]participantStatus{
 	whatsmeow.ParticipantChangeAdd:     statusAdded,
 	whatsmeow.ParticipantChangeRemove:  statusRemoved,
 	whatsmeow.ParticipantChangePromote: statusPromoted,
@@ -163,7 +166,7 @@ type ParticipantUpdateOptions struct {
 type ParticipantOutcome struct {
 	Input           string    `json:"input"`
 	JID             string    `json:"jid,omitempty"`
-	Status          string    `json:"status"`
+	Status          participantStatus `json:"status"`
 	ErrorCode       int       `json:"error_code,omitempty"`
 	Error           string    `json:"error,omitempty"`
 	InviteMessageID string    `json:"invite_message_id,omitempty"`

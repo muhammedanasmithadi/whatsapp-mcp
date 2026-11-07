@@ -329,7 +329,7 @@ func TestApplyResult(t *testing.T) {
 		name       string
 		action     whatsmeow.ParticipantChange
 		res        types.GroupParticipant
-		wantStatus string
+		wantStatus participantStatus
 	}{
 		{"added", whatsmeow.ParticipantChangeAdd, types.GroupParticipant{JID: testOutsider}, statusAdded},
 		{"removed", whatsmeow.ParticipantChangeRemove, types.GroupParticipant{JID: testOutsider}, statusRemoved},
