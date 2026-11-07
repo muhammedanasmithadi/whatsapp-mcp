@@ -412,3 +412,41 @@ func TestOpen_StorePermissions(t *testing.T) {
 		t.Errorf("messages.db mode: want 0600, got %o", got)
 	}
 }
+
+func TestClaimScheduledMessage(t *testing.T) {
+	s := openTestStore(t)
+	chat := "447700000001@s.whatsapp.net"
+	if err := s.StoreScheduledMessage("m1", chat, "hi", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// First claim wins.
+	ok, err := s.ClaimScheduledMessage("m1")
+	if err != nil || !ok {
+		t.Fatalf("first claim: ok=%v err=%v", ok, err)
+	}
+	// Second claim on a 'sending' row still succeeds (reclaim).
+	ok, err = s.ClaimScheduledMessage("m1")
+	if err != nil || !ok {
+		t.Fatalf("reclaim: ok=%v err=%v", ok, err)
+	}
+	// Terminal row cannot be claimed.
+	if err := s.MarkMessageSent("m1", "wa-id", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = s.ClaimScheduledMessage("m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("claimed a sent row")
+	}
+	// Unknown row.
+	ok, err = s.ClaimScheduledMessage("nope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("claimed unknown row")
+	}
+}
+

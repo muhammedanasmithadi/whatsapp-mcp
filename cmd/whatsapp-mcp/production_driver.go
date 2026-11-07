@@ -11,16 +11,24 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
+// pairingState is the explicit pairing lifecycle state for productionDriver.
+type pairingState int
+
+const (
+	pairingStateIdle pairingState = iota
+	pairingStatePairing
+)
+
 // productionDriver adapts *client.Client to the daemon.pairDriver interface.
 // It does not install any internal state — the Client itself owns all
 // whatsmeow-facing state.
 type productionDriver struct {
 	c *client.Client
 
-	// pairingMu guards pairingActive and pairingAttempts.
-	pairingMu       sync.Mutex
-	pairingActive   bool
-	pairingAttempts int
+	// pairingMu guards pairingState and pairingAttempts.
+	pairingMu        sync.Mutex
+	pairing          pairingState
+	pairingAttempts  int
 
 	// handlerInstalled ensures the logged-out event handler is installed only once.
 	handlerInstalled bool
@@ -34,19 +42,19 @@ func (p *productionDriver) IsLoggedIn() bool { return p.c.IsLoggedIn() }
 
 func (p *productionDriver) StartPairing(ctx context.Context, onQR func(string), onSuccess func()) error {
 	p.pairingMu.Lock()
-	if p.pairingActive {
+	if p.pairing == pairingStatePairing {
 		p.pairingMu.Unlock()
 		// A pairing flow is already in progress; don't start a second one.
 		return nil
 	}
-	p.pairingActive = true
+	p.pairing = pairingStatePairing
 	p.pairingAttempts++
 	attempts := p.pairingAttempts
 	p.pairingMu.Unlock()
 
 	defer func() {
 		p.pairingMu.Lock()
-		p.pairingActive = false
+		p.pairing = pairingStateIdle
 		p.pairingMu.Unlock()
 	}()
 
@@ -147,6 +155,11 @@ func (p *productionDriver) GetPendingScheduledMessages(ctx context.Context) ([]s
 // NextScheduledMessageTime returns the earliest pending scheduled time.
 func (p *productionDriver) NextScheduledMessageTime() (time.Time, bool, error) {
 	return p.c.Store().NextScheduledMessageTime()
+}
+
+// ClaimScheduledMessage atomically moves a row to 'sending'.
+func (p *productionDriver) ClaimScheduledMessage(id string) (bool, error) {
+	return p.c.Store().ClaimScheduledMessage(id)
 }
 
 // MarkMessageSent marks a scheduled message as sent.

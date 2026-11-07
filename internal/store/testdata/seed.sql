@@ -101,3 +101,16 @@ INSERT INTO whatsmeow_lid_map (lid, pn) VALUES
 -- lookups must reach whatsmeow_contacts, not just chats).
 INSERT INTO whatsmeow_contacts (our_jid, their_jid, first_name, full_name, push_name, business_name) VALUES
     ('me@s.whatsapp.net', '919900000000@s.whatsapp.net', 'Jane', 'Jane Smith Delhi', 'Jane S', '');
+
+CREATE TABLE IF NOT EXISTS scheduled_messages (
+    id TEXT PRIMARY KEY,
+    chat_jid TEXT NOT NULL,
+    content TEXT NOT NULL,
+    scheduled_at TIMESTAMP NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sent_at TIMESTAMP,
+    sent_message_id TEXT,
+    error TEXT,
+    FOREIGN KEY (chat_jid) REFERENCES chats(jid)
+);

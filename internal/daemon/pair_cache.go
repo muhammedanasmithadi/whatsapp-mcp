@@ -1,6 +1,3 @@
-// Package daemon runs the long-lived whatsapp-mcp process: it owns the
-// HTTP listener, mounts the MCP endpoint, serves the /pair UI, and drives
-// the pairing state machine against a whatsmeow client.
 package daemon
 
 import (
@@ -11,10 +8,10 @@ import (
 type PairState string
 
 const (
-	PairStateUnpaired   PairState = "unpaired"    // no session yet
-	PairStateAwaitingQR PairState = "awaiting_qr" // QR (or phone code) available
-	PairStatePaired     PairState = "paired"      // device linked
-	PairStateError      PairState = "error"       // pairing failed
+	PairStateUnpaired   PairState = "unpaired"
+	PairStateAwaitingQR PairState = "awaiting_qr"
+	PairStatePaired     PairState = "paired"
+	PairStateError      PairState = "error"
 )
 
 // PairEvent is a single state transition broadcast to SSE subscribers and
@@ -27,13 +24,10 @@ type PairEvent struct {
 }
 
 // PairCache holds the latest QR code bytes emitted by whatsmeow's pairing
-// channel and a flag indicating whether the device is currently paired.
-// Safe for concurrent readers and a single writer (the pairing goroutine).
-// It also fans state changes out to SSE subscribers for event-driven UX.
+// channel and the current pairing state.
 type PairCache struct {
 	mu          sync.RWMutex
 	qr          string
-	paired      bool
 	state       PairState
 	detail      string
 	subscribers map[chan PairEvent]struct{}
@@ -52,7 +46,7 @@ func (c *PairCache) snapshot() PairEvent {
 	return PairEvent{
 		State:  c.state,
 		QR:     c.qr,
-		Paired: c.paired,
+		Paired: c.state == PairStatePaired,
 		Detail: c.detail,
 	}
 }
@@ -64,28 +58,25 @@ func (c *PairCache) broadcast() {
 		select {
 		case ch <- ev:
 		default:
-			// Slow subscriber: drop rather than block the writer.
 		}
 	}
 }
 
-// SetQR stores the latest pairing code. Clears the paired flag.
+// SetQR stores the latest pairing code.
 func (c *PairCache) SetQR(code string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.qr = code
-	c.paired = false
 	c.state = PairStateAwaitingQR
 	c.detail = "Scan with WhatsApp -> Linked devices"
 	c.broadcast()
 }
 
-// SetPaired flips the paired flag on and clears any pending QR.
+// SetPaired flips the paired state on and clears any pending QR.
 func (c *PairCache) SetPaired() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.qr = ""
-	c.paired = true
 	c.state = PairStatePaired
 	c.detail = "Paired"
 	c.broadcast()
@@ -100,13 +91,11 @@ func (c *PairCache) SetError(detail string) {
 	c.broadcast()
 }
 
-// Reset drops the paired flag and clears any pending QR. Used when a
-// user-driven re-pair starts.
+// Reset drops to unpaired and clears any pending QR.
 func (c *PairCache) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.qr = ""
-	c.paired = false
 	c.state = PairStateUnpaired
 	c.detail = "Reset"
 	c.broadcast()
@@ -116,11 +105,10 @@ func (c *PairCache) Reset() {
 func (c *PairCache) Paired() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.paired
+	return c.state == PairStatePaired
 }
 
-// QR returns the latest cached pairing code, or "" if none has been emitted
-// since the last Reset or SetPaired.
+// QR returns the latest cached pairing code, or "" if none.
 func (c *PairCache) QR() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -141,13 +129,11 @@ func (c *PairCache) Snapshot() PairEvent {
 	return c.snapshot()
 }
 
-// Subscribe returns a channel that receives state transitions. The caller
-// must call Unsubscribe when done to avoid leaking the channel.
+// Subscribe returns a channel that receives state transitions.
 func (c *PairCache) Subscribe() <-chan PairEvent {
 	ch := make(chan PairEvent, 16)
 	c.mu.Lock()
 	c.subscribers[ch] = struct{}{}
-	// Send current snapshot immediately so late subscribers catch up.
 	ch <- c.snapshot()
 	c.mu.Unlock()
 	return ch

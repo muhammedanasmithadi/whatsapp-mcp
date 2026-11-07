@@ -96,6 +96,10 @@ func (f *fakePairDriver) MarkMessageSent(id, messageID string, sentAt time.Time)
 	return nil
 }
 
+func (f *fakePairDriver) ClaimScheduledMessage(id string) (bool, error) {
+	return true, nil
+}
+
 func (f *fakePairDriver) MarkMessageFailed(id, reason string) error {
 	return nil
 }

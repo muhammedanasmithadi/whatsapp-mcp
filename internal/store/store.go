@@ -97,6 +97,16 @@ type MessageReadPosition struct {
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
 
+// ScheduledStatus is the explicit lifecycle state of a scheduled message.
+type ScheduledStatus string
+
+const (
+	ScheduledStatusPending ScheduledStatus = "pending"
+	ScheduledStatusSending ScheduledStatus = "sending"
+	ScheduledStatusSent    ScheduledStatus = "sent"
+	ScheduledStatusFailed  ScheduledStatus = "failed"
+)
+
 // ScheduledMessage is a message scheduled to be sent at a future time.
 type ScheduledMessage struct {
 	ID            string    `json:"id"`
@@ -654,12 +664,13 @@ func (s *Store) NextScheduledMessageTime() (time.Time, bool, error) {
 	return next, true, nil
 }
 
-// GetPendingScheduledMessages returns all scheduled messages with status 'pending'
-// whose scheduled_at is <= now.
+// GetPendingScheduledMessages returns all scheduled messages with status
+// 'pending' or 'sending' whose scheduled_at is <= now. 'sending' rows are
+// reclaimed after a crash so a message is never stuck in-flight forever.
 func (s *Store) GetPendingScheduledMessages(ctx context.Context) ([]ScheduledMessage, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, chat_jid, content, scheduled_at FROM scheduled_messages
-		WHERE status = 'pending' AND scheduled_at <= ?
+		WHERE status IN ('pending', 'sending') AND scheduled_at <= ?
 		ORDER BY scheduled_at ASC
 	`, time.Now())
 	if err != nil {
@@ -729,6 +740,25 @@ func (s *Store) ListScheduledMessages(status string) ([]ScheduledMessage, error)
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()
+}
+
+// ClaimScheduledMessage atomically moves a scheduled message from 'pending'
+// or 'sending' to 'sending'. Returns true if this caller won the claim and
+// is responsible for performing the send. A false return means the row was
+// already terminal (sent/failed) or missing.
+func (s *Store) ClaimScheduledMessage(id string) (bool, error) {
+	res, err := s.db.Exec(
+		"UPDATE scheduled_messages SET status = 'sending' WHERE id = ? AND status IN ('pending', 'sending')",
+		id,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // CancelScheduledMessage deletes a pending scheduled message. It reports

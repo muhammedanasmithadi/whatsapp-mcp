@@ -80,6 +80,8 @@ type pairDriver interface {
 	GetPendingScheduledMessages(ctx context.Context) ([]store.ScheduledMessage, error)
 	// NextScheduledMessageTime returns the earliest pending scheduled time.
 	NextScheduledMessageTime() (time.Time, bool, error)
+	// ClaimScheduledMessage atomically moves a row to 'sending'.
+	ClaimScheduledMessage(id string) (bool, error)
 	// MarkMessageSent marks a scheduled message as sent.
 	MarkMessageSent(id, messageID string, sentAt time.Time) error
 	// MarkMessageFailed marks a scheduled message as failed.
@@ -449,6 +451,16 @@ func (s *Server) runScheduler(ctx context.Context) {
 					timer.Stop()
 					return
 				}
+			}
+
+			claimed, err := s.cfg.Driver.ClaimScheduledMessage(m.ID)
+			if err != nil {
+				s.log.Printf("[WARN] scheduled message %s: claim failed: %v", m.ID, err)
+				continue
+			}
+			if !claimed {
+				// Another worker or a prior run already handled it.
+				continue
 			}
 
 			r, err := s.cfg.Driver.SendMessage(ctx, m.ChatJID, m.Content)

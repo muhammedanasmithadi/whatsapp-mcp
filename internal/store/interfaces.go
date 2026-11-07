@@ -25,6 +25,7 @@ type SchedulingStore interface {
 	StoreScheduledMessage(id, chatJID, content string, scheduledAt time.Time) error
 	ListScheduledMessages(status string) ([]ScheduledMessage, error)
 	CancelScheduledMessage(id string) (bool, error)
+	ClaimScheduledMessage(id string) (bool, error)
 	NextScheduledMessageTime() (time.Time, bool, error)
 }
 
