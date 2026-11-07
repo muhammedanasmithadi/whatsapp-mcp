@@ -115,14 +115,29 @@ The vendored fork lives under `vendor-whatsmeow/` and is kept in sync with upstr
 
 Protocol fixes are also contributed upstream where applicable: https://github.com/tulir/whatsmeow/pull/1330 (SKDM group ID) and a set-status-about branch tracking this repository's fork.
 
-## Statuses (Stories) — push-only delivery
+## Statuses (Stories) — push-only delivery, recoverable via re-pair
 
-Status updates are cached as `status@broadcast` messages and arrive only via push. WhatsApp Web's `WAWebApiStatus.getAllStatuses` is a local DB query — there is no on-demand server fetch for statuses.
+Status updates are cached as `status@broadcast` messages and arrive via push
+while the daemon is online and paired. WhatsApp Web's `WAWebApiStatus.getAllStatuses`
+is a local DB query — there is no on-demand server fetch for statuses on an
+already-paired device.
 
-Two consequences:
+**Missing statuses can be recovered by re-pairing.** When a linked device pairs
+for the first time, WhatsApp sends `INITIAL_STATUS_V3` (history sync type 1)
+which carries recent status updates. The daemon imports
+`HistorySync.statusV3Messages` (field 3) into `status@broadcast` rows,
+resolves the poster via `key.participant` / `WebMessageInfo.participant`
+(LID → phone number), and keeps placeholders for pruned payloads.
 
-1. **Missed broadcasts cannot be backfilled.** If the daemon was offline when a contact posted a status, that status is gone forever; WhatsApp does not re-send it, and `request_sync` for `status@broadcast` returns no history. Do not rely on the daemon to recover statuses posted while it was down.
-2. **StatusV3 history import.** `HistorySync.statusV3Messages` (field 3) is the real `INITIAL_STATUS_V3` payload. The daemon imports it into `status@broadcast` rows on sync, resolves the poster via `key.participant` / `WebMessageInfo.participant` (LID → phone number), and keeps placeholders for pruned payloads. Statuses posted while the daemon is online and paired appear normally.
+To recover statuses posted while the daemon was offline:
+
+1. Log out the MCP device from your phone (WhatsApp → Linked Devices → "WhatsApp MCP" → Log out)
+2. Restart the daemon: `systemctl --user restart whatsapp-mcp.service`
+3. Scan the fresh QR code at `http://127.0.0.1:8765/pair`
+4. During pairing bootstrap, WhatsApp sends `INITIAL_STATUS_V3` and the daemon
+   caches recent statuses automatically
+
+(while the machine was suspended) were recovered after re-pairing.
 
 Profile photos and online/last-seen presence work independently of status delivery.
 
