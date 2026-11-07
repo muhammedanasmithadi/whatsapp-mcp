@@ -210,7 +210,17 @@ func (c *Client) handleMessage(msg *events.Message) {
 	}
 
 	if nm.msg.Content == "" && nm.msg.MediaType == "" {
-		return
+		// Store messages from status@broadcast even if decryption failed
+		// (empty content/media type). WhatsApp delivers Status (Stories)
+		// updates to status@broadcast, but some may be encrypted with sender
+		// keys we don't have. We still store a placeholder so the user knows
+		// a status was posted.
+		if nm.msg.ChatJID == store.StatusBroadcastJID {
+			nm.msg.Content = "[status update]"
+			nm.msg.MediaType = "status"
+		} else {
+			return
+		}
 	}
 
 	err := c.store.StoreMessage(context.Background(), nm.msg, nm.mediaKey, nm.fileSHA256, nm.fileEncSHA256, nm.fileLength)
@@ -384,7 +394,17 @@ func (c *Client) handleHistorySync(historySync *events.HistorySync) {
 
 			c.log.Infof("Message content: %s, Media Type: %s", c.redactor.Body(nm.msg.Content), nm.msg.MediaType)
 			if nm.msg.Content == "" && nm.msg.MediaType == "" {
-				continue
+				// Store messages from status@broadcast even if decryption failed
+				// (empty content/media type). WhatsApp delivers Status (Stories)
+				// updates to status@broadcast, but some may be encrypted with sender
+				// keys we don't have. We still store a placeholder so the user knows
+				// a status was posted.
+				if nm.msg.ChatJID == store.StatusBroadcastJID {
+					nm.msg.Content = "[status update]"
+					nm.msg.MediaType = "status"
+				} else {
+					continue
+				}
 			}
 
 			// Override chatJID to the already-resolved one from the
