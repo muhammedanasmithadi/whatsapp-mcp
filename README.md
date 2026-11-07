@@ -136,8 +136,6 @@ To recover statuses posted while the daemon was offline:
 4. During pairing bootstrap, WhatsApp sends `INITIAL_STATUS_V3` and the daemon
    caches recent statuses automatically
 
-machine was suspended) were recovered after re-pairing, bringing the cached
-
 Profile photos and online/last-seen presence work independently of status delivery.
 
 ## Development
