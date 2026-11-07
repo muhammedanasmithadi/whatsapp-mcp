@@ -76,7 +76,7 @@ func (f *fakePairDriver) Logout(ctx context.Context) error {
 
 func (f *fakePairDriver) Disconnect() {}
 
-func (f *fakePairDriver) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor client.AnchorMode, count int, useLID bool) (string, error) {
+func (f *fakePairDriver) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor client.AnchorMode, count int, useLID client.LIDMode) (string, error) {
 	return "history sync requested", nil
 }
 

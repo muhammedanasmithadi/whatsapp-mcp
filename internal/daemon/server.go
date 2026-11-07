@@ -72,7 +72,7 @@ type pairDriver interface {
 	Logout(ctx context.Context) error
 	Disconnect()
 	// RequestHistorySync asks WhatsApp to backfill messages for a chat.
-	RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor client.AnchorMode, count int, useLID bool) (string, error)
+	RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor client.AnchorMode, count int, useLID client.LIDMode) (string, error)
 	// ListChatJIDs returns all cached chat JIDs (used for full history sync opt-in).
 	ListChatJIDs() ([]string, error)
 	// GetPendingScheduledMessages returns all pending scheduled messages whose

@@ -28,6 +28,14 @@ const (
 // DefaultSyncCount is WhatsApp's usual on-demand history-sync batch size.
 const DefaultSyncCount = 50
 
+// LIDMode controls whether a history-sync request uses the LID form.
+type LIDMode bool
+
+const (
+	LIDModePhone LIDMode = false
+	LIDModeLID   LIDMode = true
+)
+
 // RequestHistorySync asks WhatsApp to backfill messages for chatJID.
 //
 // WhatsApp resolves an on-demand history-sync cursor by message key (id +
@@ -42,7 +50,7 @@ const DefaultSyncCount = 50
 //
 // count bounds the batch size; zero means DefaultSyncCount. Returns a
 // human-readable status.
-func (c *Client) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor AnchorMode, count int, useLID bool) (string, error) {
+func (c *Client) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor AnchorMode, count int, useLID LIDMode) (string, error) {
 	c.log.Infof("[SYNC] Requesting history sync for chat: %s (anchor=%q, from=%v)", chatJID, anchor, fromTimestamp)
 
 	if c.wa == nil || !c.wa.IsConnected() {

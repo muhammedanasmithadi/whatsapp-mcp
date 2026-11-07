@@ -234,7 +234,7 @@ func (s *Server) registerRequestSync() {
 			}
 			ts = t
 		}
-		msg, err := s.client.RequestHistorySync(ctx, a.ChatJID, ts, client.AnchorMode(a.Anchor), int(a.Count), useLID)
+		msg, err := s.client.RequestHistorySync(ctx, a.ChatJID, ts, client.AnchorMode(a.Anchor), int(a.Count), client.LIDMode(useLID))
 		if err != nil {
 			s.auditLog("request_sync", a.ChatJID, "", "request_sync", "error", err.Error())
 			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error requesting history sync", true)), nil
