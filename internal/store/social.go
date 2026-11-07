@@ -271,6 +271,47 @@ func (s *Store) DeletePresence(ctx context.Context, jid string) error {
 	return err
 }
 
+// GetAutoResponder returns the current auto-responder configuration.
+// Returns enabled=false, message="" when never configured.
+func (s *Store) GetAutoResponder(ctx context.Context) (enabled bool, message string, err error) {
+	var enabledStr sql.NullString
+	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "enabled").Scan(&enabledStr)
+	if err == sql.ErrNoRows {
+		return false, "", nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	enabled = enabledStr.String == "true"
+
+	var msg sql.NullString
+	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "message").Scan(&msg)
+	if err == sql.ErrNoRows {
+		return enabled, "", nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	return enabled, msg.String, nil
+}
+
+// SetAutoResponder persists the auto-responder configuration.
+func (s *Store) SetAutoResponder(ctx context.Context, enabled bool, message string) error {
+	enabledStr := "false"
+	if enabled {
+		enabledStr = "true"
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO auto_responder (key, value, updated_at) VALUES ('enabled', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`, enabledStr); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO auto_responder (key, value, updated_at) VALUES ('message', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`, message)
+	return err
+}
+
 // ErrNoPresence is returned by helpers that want to distinguish "never seen"
 // from a database failure.
 var ErrNoPresence = errors.New("no presence data")

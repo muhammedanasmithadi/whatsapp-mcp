@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -19,6 +20,7 @@ func (s *Server) registerSocialReadTools() {
 	s.registerListStatusUpdates()
 	s.registerGetProfilePicture()
 	s.registerGetContactInfo()
+	s.registerGetAutoResponder()
 }
 
 // registerSocialActionTools wires tools that produce WhatsApp side effects
@@ -26,6 +28,7 @@ func (s *Server) registerSocialReadTools() {
 func (s *Server) registerSocialActionTools() {
 	s.registerMarkStatusViewed()
 	s.registerGetPresence()
+	s.registerSetAutoResponder()
 }
 
 // -- list_status_updates ----------------------------------------------------
@@ -217,5 +220,60 @@ func (s *Server) registerGetPresence() {
 			return s.toolErr("get_presence", a.JID, "", "get_presence", err), nil
 		}
 		return s.toolOK("get_presence", a.JID, "", "get_presence", "", result)
+	}))
+}
+
+// -- set_auto_responder -------------------------------------------------------
+
+type setAutoResponderArgs struct {
+	Enabled bool   `json:"enabled"`
+	Message string `json:"message,omitempty"`
+}
+
+func (s *Server) registerSetAutoResponder() {
+	tool := mcp.NewTool("set_auto_responder",
+		mcp.WithDescription("Enable or disable the auto-responder (out-of-office reply). When enabled, the daemon automatically replies with `message` to every incoming 1:1 text message that is not from the paired account. Replies are event-driven: WhatsApp push delivers the incoming message and the daemon replies immediately — no polling. Group chats, newsletters, status broadcasts, and media-only messages are ignored. Set enabled=false to turn it off. Returns {enabled, message}."),
+		mcp.WithBoolean("enabled", mcp.Required(), mcp.Description("true to enable automatic replies, false to disable")),
+		mcp.WithString("message", mcp.Description("auto-reply text sent to qualifying incoming messages; required when enabling")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a setAutoResponderArgs) (*mcp.CallToolResult, error) {
+		if a.Enabled && strings.TrimSpace(a.Message) == "" {
+			return errorResult(ErrInvalidParameter("message", "non-empty reply text when enabled", "empty string")), nil
+		}
+		if err := s.client.Store().SetAutoResponder(ctx, a.Enabled, a.Message); err != nil {
+			return s.toolErr("set_auto_responder", "", "", "set_auto_responder", err), nil
+		}
+		return s.toolOK("set_auto_responder", "", "", "set_auto_responder", "", map[string]any{
+			"enabled":  a.Enabled,
+			"message":  a.Message,
+		})
+	}))
+}
+
+// -- get_auto_responder -------------------------------------------------------
+
+type getAutoResponderArgs struct{}
+
+func (s *Server) registerGetAutoResponder() {
+	tool := mcp.NewTool("get_auto_responder",
+		mcp.WithDescription("Return the current auto-responder configuration: whether it is enabled and the reply message. Read-only; no side effects. Returns {enabled, message}."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, _ getAutoResponderArgs) (*mcp.CallToolResult, error) {
+		enabled, message, err := s.client.Store().GetAutoResponder(ctx)
+		if err != nil {
+			return s.toolErr("get_auto_responder", "", "", "get_auto_responder", err), nil
+		}
+		return s.toolOK("get_auto_responder", "", "", "get_auto_responder", "", map[string]any{
+			"enabled": enabled,
+			"message": message,
+		})
 	}))
 }

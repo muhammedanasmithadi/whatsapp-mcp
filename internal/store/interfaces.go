@@ -58,8 +58,16 @@ type MessageReader interface {
 	FindChatName(jid string) string
 }
 
+// AutoResponderStore is the persistence surface for the out-of-office / auto
+// reply configuration. A single row holds the enabled flag and the reply
+// message text.
+type AutoResponderStore interface {
+	GetAutoResponder(ctx context.Context) (enabled bool, message string, err error)
+	SetAutoResponder(ctx context.Context, enabled bool, message string) error
+}
+
 // Store satisfies ContactStore, SchedulingStore, StatusStore, PresenceStore,
-// AuditStore, and MessageReader.
+// AuditStore, MessageReader, and AutoResponderStore.
 
 var _ ContactStore = (*Store)(nil)
 var _ SchedulingStore = (*Store)(nil)
@@ -67,3 +75,4 @@ var _ StatusStore = (*Store)(nil)
 var _ PresenceStore = (*Store)(nil)
 var _ AuditStore = (*Store)(nil)
 var _ MessageReader = (*Store)(nil)
+var _ AutoResponderStore = (*Store)(nil)
