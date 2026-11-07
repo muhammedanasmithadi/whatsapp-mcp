@@ -1097,5 +1097,68 @@ func migrateSchema(db *sql.DB) error {
 			}
 		}
 	}
+	// auto_responder table: add start_time, end_time, cooldown_minutes columns
+	var arTable string
+	if err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='auto_responder'").Scan(&arTable); err != nil {
+		// Table doesn't exist yet, skip column additions (schema will create it)
+	} else {
+		arRows, err := db.Query("PRAGMA table_info(auto_responder)")
+		if err != nil {
+			return fmt.Errorf("pragma table_info(auto_responder): %w", err)
+		}
+		hasStartTime := false
+		hasEndTime := false
+		hasCoolDown := false
+		for arRows.Next() {
+			var (
+				cid        int
+				name       string
+				ctype      string
+				notnull    int
+				dfltValue  sql.NullString
+				primaryKey int
+			)
+			if err := arRows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &primaryKey); err != nil {
+				arRows.Close()
+				return fmt.Errorf("scan table_info(auto_responder): %w", err)
+			}
+			switch name {
+			case "start_time":
+				hasStartTime = true
+			case "end_time":
+				hasEndTime = true
+			case "cooldown_minutes":
+				hasCoolDown = true
+			}
+		}
+		arRows.Close()
+		if err := arRows.Err(); err != nil {
+			return fmt.Errorf("iterate table_info(auto_responder): %w", err)
+		}
+		if !hasStartTime {
+			if _, err := db.Exec("ALTER TABLE auto_responder ADD COLUMN start_time TEXT"); err != nil {
+				return fmt.Errorf("add column start_time: %w", err)
+			}
+		}
+		if !hasEndTime {
+			if _, err := db.Exec("ALTER TABLE auto_responder ADD COLUMN end_time TEXT"); err != nil {
+				return fmt.Errorf("add column end_time: %w", err)
+			}
+		}
+		if !hasCoolDown {
+			if _, err := db.Exec("ALTER TABLE auto_responder ADD COLUMN cooldown_minutes INTEGER DEFAULT 0"); err != nil {
+				return fmt.Errorf("add column cooldown_minutes: %w", err)
+			}
+		}
+	}
+	// auto_responder_cooldown table: tracks last reply time per contact
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS auto_responder_cooldown (
+			jid         TEXT PRIMARY KEY,
+			last_reply  TIMESTAMP
+		)
+	`); err != nil {
+		return fmt.Errorf("create table auto_responder_cooldown: %w", err)
+	}
 	return nil
 }

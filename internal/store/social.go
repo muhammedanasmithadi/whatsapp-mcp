@@ -292,7 +292,59 @@ func (s *Store) GetAutoResponder(ctx context.Context) (enabled bool, message str
 	if err != nil {
 		return false, "", err
 	}
+	var startTime, endTime sql.NullString
+	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "start_time").Scan(&startTime)
+	if err == nil && startTime.Valid {
+		_ = startTime // stored but not yet enforced at store layer
+	}
+	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "end_time").Scan(&endTime)
+	if err == nil && endTime.Valid {
+		_ = endTime // stored but not yet enforced at store layer
+	}
+	var coolDown sql.NullInt64
+	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "cooldown_minutes").Scan(&coolDown)
+	if err == nil && coolDown.Valid {
+		_ = coolDown // stored but not yet enforced at store layer
+	}
 	return enabled, msg.String, nil
+}
+
+// GetAutoResponderWithConfig returns the full auto-responder configuration
+// including start time, end time, and cooldown minutes.
+func (s *Store) GetAutoResponderWithConfig(ctx context.Context) (enabled bool, message, startTime, endTime string, cooldownMinutes int, err error) {
+	var enabledStr sql.NullString
+	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "enabled").Scan(&enabledStr)
+	if err == sql.ErrNoRows {
+		return false, "", "", "", 0, nil
+	}
+	if err != nil {
+		return false, "", "", "", 0, err
+	}
+	enabled = enabledStr.String == "true"
+
+	var msg sql.NullString
+	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "message").Scan(&msg)
+	if err == sql.ErrNoRows {
+		return enabled, "", "", "", 0, nil
+	}
+	if err != nil {
+		return false, "", "", "", 0, err
+	}
+	var st, et sql.NullString
+	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "start_time").Scan(&st)
+	if err == nil && st.Valid {
+		startTime = st.String
+	}
+	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "end_time").Scan(&et)
+	if err == nil && et.Valid {
+		endTime = et.String
+	}
+	var coolDown sql.NullInt64
+	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "cooldown_minutes").Scan(&coolDown)
+	if err == nil && coolDown.Valid {
+		cooldownMinutes = int(coolDown.Int64)
+	}
+	return enabled, msg.String, startTime, endTime, cooldownMinutes, nil
 }
 
 // SetAutoResponder persists the auto-responder configuration.
@@ -309,6 +361,102 @@ func (s *Store) SetAutoResponder(ctx context.Context, enabled bool, message stri
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO auto_responder (key, value, updated_at) VALUES ('message', ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`, message)
+	return err
+}
+
+// SetAutoResponderWithConfig persists the full auto-responder configuration
+// including start time, end time, and cooldown minutes.
+func (s *Store) SetAutoResponderWithConfig(ctx context.Context, enabled bool, message string, startTime, endTime string, cooldownMinutes int) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	enabledStr := "false"
+	if enabled {
+		enabledStr = "true"
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auto_responder (key, value, updated_at) VALUES ('enabled', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`, enabledStr); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auto_responder (key, value, updated_at) VALUES ('message', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`, message); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auto_responder (key, value, updated_at) VALUES ('start_time', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`, startTime); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auto_responder (key, value, updated_at) VALUES ('end_time', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`, endTime); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auto_responder (key, value, updated_at) VALUES ('cooldown_minutes', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`, cooldownMinutes); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CanAutoRespond checks whether the auto-responder should reply to a message
+// from the given JID at the current time. It checks:
+//   - auto-responder is enabled
+//   - current time is within the configured start/end window (if set)
+//   - cooldown period has elapsed since the last reply to this JID (if set)
+func (s *Store) CanAutoRespond(ctx context.Context, jid string) (bool, error) {
+	enabled, _, startTime, endTime, cooldownMinutes, err := s.GetAutoResponderWithConfig(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !enabled {
+		return false, nil
+	}
+	now := time.Now()
+	// Check time window
+	if startTime != "" {
+		start, err := time.Parse("15:04", startTime)
+		if err == nil {
+			start = time.Date(now.Year(), now.Month(), now.Day(), start.Hour(), start.Minute(), 0, 0, now.Location())
+			if now.Before(start) {
+				return false, nil
+			}
+		}
+	}
+	if endTime != "" {
+		end, err := time.Parse("15:04", endTime)
+		if err == nil {
+			end = time.Date(now.Year(), now.Month(), now.Day(), end.Hour(), end.Minute(), 0, 0, now.Location())
+			if now.After(end) {
+				return false, nil
+			}
+		}
+	}
+	// Check cooldown
+	if cooldownMinutes > 0 {
+		var lastReply sql.NullTime
+		err = s.db.QueryRowContext(ctx, `SELECT last_reply FROM auto_responder_cooldown WHERE jid = ?`, jid).Scan(&lastReply)
+		if err == nil && lastReply.Valid {
+			elapsed := now.Sub(lastReply.Time)
+			if elapsed < time.Duration(cooldownMinutes)*time.Minute {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
+}
+
+// RecordAutoRespond records that an auto-response was sent to the given JID
+// at the current time, for cooldown tracking.
+func (s *Store) RecordAutoRespond(ctx context.Context, jid string) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO auto_responder_cooldown (jid, last_reply) VALUES (?, CURRENT_TIMESTAMP)
+		ON CONFLICT(jid) DO UPDATE SET last_reply = CURRENT_TIMESTAMP`, jid)
 	return err
 }
 

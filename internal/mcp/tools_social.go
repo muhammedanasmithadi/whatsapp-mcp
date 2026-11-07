@@ -231,15 +231,21 @@ func (s *Server) registerGetPresence() {
 // -- set_auto_responder -------------------------------------------------------
 
 type setAutoResponderArgs struct {
-	Enabled bool   `json:"enabled"`
-	Message string `json:"message,omitempty"`
+	Enabled      bool   `json:"enabled"`
+	Message      string `json:"message,omitempty"`
+	StartTime    string `json:"start_time,omitempty"`
+	EndTime      string `json:"end_time,omitempty"`
+	CooldownMinutes int   `json:"cooldown_minutes,omitempty"`
 }
 
 func (s *Server) registerSetAutoResponder() {
 	tool := mcp.NewTool("set_auto_responder",
-		mcp.WithDescription("Enable or disable the auto-responder (out-of-office reply). When enabled, the daemon automatically replies with `message` to every incoming 1:1 text message that is not from the paired account. Replies are event-driven: WhatsApp push delivers the incoming message and the daemon replies immediately — no polling. Group chats, newsletters, status broadcasts, and media-only messages are ignored. Set enabled=false to turn it off. Returns {enabled, message}."),
+		mcp.WithDescription("Enable or disable the auto-responder (out-of-office reply). When enabled, the daemon automatically replies with `message` to every incoming 1:1 text message that is not from the paired account. Replies are event-driven: WhatsApp push delivers the incoming message and the daemon replies immediately — no polling. Group chats, newsletters, status broadcasts, and media-only messages are ignored. Optionally restrict replies to a time window (start_time, end_time in HH:MM format) and set a cooldown in minutes between replies to the same contact. Set enabled=false to turn it off. Returns {enabled, message}."),
 		mcp.WithBoolean("enabled", mcp.Required(), mcp.Description("true to enable automatic replies, false to disable")),
 		mcp.WithString("message", mcp.Description("auto-reply text sent to qualifying incoming messages; required when enabling")),
+		mcp.WithString("start_time", mcp.Description("optional start time in HH:MM format; auto-responder only active after this time")),
+		mcp.WithString("end_time", mcp.Description("optional end time in HH:MM format; auto-responder only active before this time")),
+		mcp.WithNumber("cooldown_minutes", mcp.Description("optional cooldown in minutes between replies to the same contact")),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -249,12 +255,11 @@ func (s *Server) registerSetAutoResponder() {
 		if a.Enabled && strings.TrimSpace(a.Message) == "" {
 			return errorResult(ErrInvalidParameter("message", "non-empty reply text when enabled", "empty string")), nil
 		}
-		if err := s.client.Store().SetAutoResponder(ctx, a.Enabled, a.Message); err != nil {
-			return s.toolErr("set_auto_responder", "", "", "set_auto_responder", err), nil
-		}
-		return s.toolOK("set_auto_responder", "", "", "set_auto_responder", "", map[string]any{
-			"enabled":  a.Enabled,
-			"message":  a.Message,
+		return s.handleTool(ctx, "set_auto_responder", "", "", "set_auto_responder", func() (any, string, error) {
+			if err := s.client.Store().SetAutoResponderWithConfig(ctx, a.Enabled, a.Message, a.StartTime, a.EndTime, a.CooldownMinutes); err != nil {
+				return nil, "", err
+			}
+			return map[string]any{"enabled": a.Enabled, "message": a.Message}, "", nil
 		})
 	}))
 }
@@ -265,20 +270,23 @@ type getAutoResponderArgs struct{}
 
 func (s *Server) registerGetAutoResponder() {
 	tool := mcp.NewTool("get_auto_responder",
-		mcp.WithDescription("Return the current auto-responder configuration: whether it is enabled and the reply message. Read-only; no side effects. Returns {enabled, message}."),
+		mcp.WithDescription("Return the current auto-responder configuration: whether it is enabled, the reply message, start time, end time, and cooldown minutes. Read-only; no side effects. Returns {enabled, message, start_time, end_time, cooldown_minutes}."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, _ getAutoResponderArgs) (*mcp.CallToolResult, error) {
-		enabled, message, err := s.client.Store().GetAutoResponder(ctx)
+		enabled, message, startTime, endTime, cooldownMinutes, err := s.client.Store().GetAutoResponderWithConfig(ctx)
 		if err != nil {
 			return s.toolErr("get_auto_responder", "", "", "get_auto_responder", err), nil
 		}
 		return s.toolOK("get_auto_responder", "", "", "get_auto_responder", "", map[string]any{
-			"enabled": enabled,
-			"message": message,
+			"enabled":         enabled,
+			"message":         message,
+			"start_time":      startTime,
+			"end_time":        endTime,
+			"cooldown_minutes": cooldownMinutes,
 		})
 	}))
 }

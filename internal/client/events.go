@@ -269,41 +269,54 @@ func (c *Client) handleMessage(msg *events.Message) {
 			}()
 		}
 
-		// Auto-responder: reply to incoming 1:1 text messages when enabled.
-		// Runs in a goroutine so a slow or rate-limited send never blocks
-		// message handling. WhatsApp push delivers the incoming message, so
-		// this is event-driven — no polling.
-		enabled, reply := false, ""
-		if acfg, amsg, aerr := c.store.GetAutoResponder(context.Background()); aerr == nil {
-			enabled, reply = acfg, amsg
-		}
-		chatJID := nm.chatJID
-		content := nm.msg.Content
-		isFromMe := msg.Info.IsFromMe
-		go func() {
-			if !enabled || reply == "" {
-				return
-			}
-			if isFromMe {
-				return
-			}
-			if strings.HasSuffix(chatJID, "@g.us") || strings.HasSuffix(chatJID, "@newsletter") {
-				return
-			}
-			if chatJID == store.StatusBroadcastJID {
-				return
-			}
-			if strings.TrimSpace(content) == "" {
-				return
-			}
-			r := c.Send(context.Background(), chatJID, reply)
-			if !r.Success {
-				c.log.Warnf("auto-responder: failed to reply to %s: %s",
-					c.redactor.JID(chatJID), r.Message)
-			} else {
+			// Auto-responder: reply to incoming 1:1 text messages when enabled.
+			// Runs in a goroutine so a slow or rate-limited send never blocks
+			// message handling. WhatsApp push delivers the incoming message, so
+			// this is event-driven — no polling.
+			chatJID := nm.chatJID
+			content := nm.msg.Content
+			isFromMe := msg.Info.IsFromMe
+			go func() {
+				can, err := c.store.CanAutoRespond(context.Background(), chatJID)
+				if err != nil {
+					c.log.Warnf("auto-responder: config check failed: %v", err)
+					return
+				}
+				if !can {
+					return
+				}
+				if isFromMe {
+					return
+				}
+				if strings.HasSuffix(chatJID, "@g.us") || strings.HasSuffix(chatJID, "@newsletter") {
+					return
+				}
+				if chatJID == store.StatusBroadcastJID {
+					return
+				}
+				if strings.TrimSpace(content) == "" {
+					return
+				}
+				// Get the reply message
+				_, reply, _, _, _, err := c.store.GetAutoResponderWithConfig(context.Background())
+				if err != nil {
+					c.log.Warnf("auto-responder: config check failed: %v", err)
+					return
+				}
+				if reply == "" {
+					return
+				}
+				r := c.Send(context.Background(), chatJID, reply)
+				if !r.Success {
+					c.log.Warnf("auto-responder: failed to reply to %s: %s",
+						c.redactor.JID(chatJID), r.Message)
+					return
+				}
+				if err := c.store.RecordAutoRespond(context.Background(), chatJID); err != nil {
+					c.log.Warnf("auto-responder: failed to record reply time: %v", err)
+				}
 				c.log.Infof("auto-responder: replied to %s", c.redactor.JID(chatJID))
-			}
-		}()
+			}()
 	}
 
 	if err != nil {
