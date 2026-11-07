@@ -108,6 +108,15 @@ type Config struct {
 	Logger          *log.Logger
 }
 
+// listenerState is the explicit lifecycle state of the HTTP listener.
+type listenerState int
+
+const (
+	listenerStateUnbound listenerState = iota
+	listenerStateBound
+	listenerStateShutdown
+)
+
 // Server is the long-lived daemon process. Safe for a single Run call.
 type Server struct {
 	cfg   Config
@@ -123,10 +132,11 @@ type Server struct {
 	wsUnregister chan chan wsEvent
 	wsBroadcast  chan wsEvent
 
-	mu         sync.Mutex
-	httpServer *http.Server
-	boundAddr  string
-	listenerOK chan struct{} // closed once the listener is bound (tests use this)
+	mu           sync.Mutex
+	httpServer   *http.Server
+	boundAddr    string
+	listenerState listenerState
+	listenerOK   chan struct{} // closed once the listener is bound (tests use this)
 }
 
 // wsEvent is a real-time event pushed to WebSocket subscribers.
@@ -330,6 +340,7 @@ func (s *Server) Run(ctx context.Context) error {
 		IdleTimeout:       120 * time.Second,
 	}
 	s.boundAddr = ln.Addr().String()
+	s.listenerState = listenerStateBound
 	httpSrv := s.httpServer
 	s.mu.Unlock()
 
@@ -360,6 +371,9 @@ func (s *Server) Run(ctx context.Context) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
+	s.mu.Lock()
+	s.listenerState = listenerStateShutdown
+	s.mu.Unlock()
 	s.cfg.Driver.Disconnect()
 	return nil
 }
