@@ -943,15 +943,11 @@ func (cli *Client) processProtocolParts(ctx context.Context, info *types.Message
 		msg = msg.GetDeviceSentMessage().GetMessage()
 	}
 	if msg.GetSenderKeyDistributionMessage() != nil {
-		if !info.IsGroup {
-			cli.Log.Warnf("Got sender key distribution message in non-group chat from %s", info.Sender)
-		} else {
-			encryptionIdentity := info.Sender
-			if encryptionIdentity.Server == types.DefaultUserServer && info.SenderAlt.Server == types.HiddenUserServer {
-				encryptionIdentity = info.SenderAlt
-			}
-			cli.handleSenderKeyDistributionMessage(ctx, info.Chat, encryptionIdentity, msg.SenderKeyDistributionMessage.AxolotlSenderKeyDistributionMessage)
+		encryptionIdentity := info.Sender
+		if encryptionIdentity.Server == types.DefaultUserServer && info.SenderAlt.Server == types.HiddenUserServer {
+			encryptionIdentity = info.SenderAlt
 		}
+		cli.handleSenderKeyDistributionMessage(ctx, info.Chat, encryptionIdentity, msg.SenderKeyDistributionMessage.AxolotlSenderKeyDistributionMessage)
 	}
 	// N.B. Edits are protocol messages, but they're also wrapped inside EditedMessage,
 	// which is only unwrapped after processProtocolParts, so this won't trigger for edits.
