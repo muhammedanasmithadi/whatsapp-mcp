@@ -404,3 +404,25 @@ func (c *Client) MarkMessageSent(id, messageID string, sentAt time.Time) error {
 func (c *Client) MarkMessageFailed(id, reason string) error {
 	return c.store.MarkMessageFailed(id, reason)
 }
+
+
+// ConnectionState is the explicit lifecycle state of the WhatsApp session.
+type ConnectionState int
+
+const (
+	ConnectionStateUnpaired ConnectionState = iota // no stored session
+	ConnectionStateDisconnected                    // paired but socket down
+	ConnectionStateConnected                      // paired and socket up
+)
+
+// ConnectionState reports the combined connection/pairing state instead of
+// forcing callers to combine IsLoggedIn() and IsConnected() themselves.
+func (c *Client) ConnectionState() ConnectionState {
+	if c.wa.Store.ID == nil {
+		return ConnectionStateUnpaired
+	}
+	if !c.wa.IsConnected() {
+		return ConnectionStateDisconnected
+	}
+	return ConnectionStateConnected
+}
