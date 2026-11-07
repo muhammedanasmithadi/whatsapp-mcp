@@ -906,8 +906,13 @@ func (c *Client) handlePollVote(msg *events.Message, chatJID, voterJID string) {
 		ts = now
 	}
 
-	if err := c.store.StorePollVote(ctx, pollID, chatJID, voterJID, selected, ts); err != nil {
+	accepted, err := c.store.StorePollVote(ctx, pollID, chatJID, voterJID, selected, ts)
+	if err != nil {
 		c.log.Warnf("Failed to store poll vote for poll %s in %s: %v", pollID, chatJID, err)
+		return
+	}
+	if !accepted {
+		c.log.Debugf("Ignored stale poll vote from %s on poll %s", voterJID, pollID)
 		return
 	}
 

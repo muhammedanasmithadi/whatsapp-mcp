@@ -74,15 +74,20 @@ func (s *Store) GetPollCreator(ctx context.Context, messageID, chatJID string) (
 // be the full normalised JID string. Replays of older PollUpdateMessages are
 // ignored: a vote is only overwritten when the incoming timestamp is >= the
 // stored one.
-func (s *Store) StorePollVote(ctx context.Context, pollMessageID, pollChatJID, voterJID string, selected []string, timestamp time.Time) error {
+// StorePollVote records a voter's latest selection for a poll. voterJID must
+// be the full normalised JID string. Replays of older PollUpdateMessages are
+// ignored: a vote is only overwritten when the incoming timestamp is >= the
+// stored one. Returns accepted=true when the row was inserted or updated,
+// false when a newer-or-equal vote was already stored (stale replay).
+func (s *Store) StorePollVote(ctx context.Context, pollMessageID, pollChatJID, voterJID string, selected []string, timestamp time.Time) (bool, error) {
 	if pollMessageID == "" || pollChatJID == "" || voterJID == "" {
-		return fmt.Errorf("store poll vote: poll_message_id, poll_chat_jid, voter_jid required")
+		return false, fmt.Errorf("store poll vote: poll_message_id, poll_chat_jid, voter_jid required")
 	}
 	payload, err := json.Marshal(selected)
 	if err != nil {
-		return fmt.Errorf("marshal selected options: %w", err)
+		return false, fmt.Errorf("marshal selected options: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO poll_votes
 		 (poll_message_id, poll_chat_jid, voter_jid, selected_options_json, timestamp)
 		 VALUES (?, ?, ?, ?, ?)
@@ -93,9 +98,13 @@ func (s *Store) StorePollVote(ctx context.Context, pollMessageID, pollChatJID, v
 		pollMessageID, pollChatJID, voterJID, string(payload), timestamp,
 	)
 	if err != nil {
-		return fmt.Errorf("insert poll vote: %w", err)
+		return false, fmt.Errorf("insert poll vote: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("insert poll vote: %w", err)
+	}
+	return n > 0, nil
 }
 
 // GetPollResults returns the stored option names and the per-option vote count

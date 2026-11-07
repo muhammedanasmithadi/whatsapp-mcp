@@ -113,11 +113,11 @@ func TestStorePollVote_Replacement(t *testing.T) {
 	voter := "447700000002@s.whatsapp.net"
 	ts := time.Date(2026, 2, 3, 11, 0, 0, 0, time.UTC)
 
-	if err := s.StorePollVote(ctx, "poll2", "123456789@g.us", voter, []string{"beer"}, ts); err != nil {
+	if _, err := s.StorePollVote(ctx, "poll2", "123456789@g.us", voter, []string{"beer"}, ts); err != nil {
 		t.Fatalf("first StorePollVote: %v", err)
 	}
 	// Same voter updates their vote.
-	if err := s.StorePollVote(ctx, "poll2", "123456789@g.us", voter, []string{"wine"}, ts.Add(time.Minute)); err != nil {
+	if _, err := s.StorePollVote(ctx, "poll2", "123456789@g.us", voter, []string{"wine"}, ts.Add(time.Minute)); err != nil {
 		t.Fatalf("second StorePollVote: %v", err)
 	}
 
@@ -177,11 +177,11 @@ func TestStorePollVote_IgnoresReplayOfOlderTimestamp(t *testing.T) {
 	t0 := t1.Add(-1 * time.Hour) // older
 
 	// Current vote at T1.
-	if err := s.StorePollVote(ctx, "poll-replay", "123456789@g.us", voter, []string{"b"}, t1); err != nil {
+	if _, err := s.StorePollVote(ctx, "poll-replay", "123456789@g.us", voter, []string{"b"}, t1); err != nil {
 		t.Fatalf("vote at T1: %v", err)
 	}
 	// Replay of an older vote at T0 must be ignored.
-	if err := s.StorePollVote(ctx, "poll-replay", "123456789@g.us", voter, []string{"a"}, t0); err != nil {
+	if _, err := s.StorePollVote(ctx, "poll-replay", "123456789@g.us", voter, []string{"a"}, t0); err != nil {
 		t.Fatalf("vote at T0: %v", err)
 	}
 
@@ -221,13 +221,13 @@ func TestGetPollResults_TallyWithZeroVoteOptions(t *testing.T) {
 
 	// 3 voters, no one picks salad.
 	baseTS := time.Date(2026, 2, 5, 13, 0, 0, 0, time.UTC)
-	if err := s.StorePollVote(ctx, "poll3", "123456789@g.us", "voter1@s.whatsapp.net", []string{"pizza"}, baseTS); err != nil {
+	if _, err := s.StorePollVote(ctx, "poll3", "123456789@g.us", "voter1@s.whatsapp.net", []string{"pizza"}, baseTS); err != nil {
 		t.Fatalf("vote 1: %v", err)
 	}
-	if err := s.StorePollVote(ctx, "poll3", "123456789@g.us", "voter2@s.whatsapp.net", []string{"pizza", "sushi"}, baseTS); err != nil {
+	if _, err := s.StorePollVote(ctx, "poll3", "123456789@g.us", "voter2@s.whatsapp.net", []string{"pizza", "sushi"}, baseTS); err != nil {
 		t.Fatalf("vote 2: %v", err)
 	}
-	if err := s.StorePollVote(ctx, "poll3", "123456789@g.us", "voter3@s.whatsapp.net", []string{"sushi"}, baseTS); err != nil {
+	if _, err := s.StorePollVote(ctx, "poll3", "123456789@g.us", "voter3@s.whatsapp.net", []string{"sushi"}, baseTS); err != nil {
 		t.Fatalf("vote 3: %v", err)
 	}
 
@@ -274,7 +274,7 @@ func TestGetPollResults_UnknownPollIgnoresOrphanVotes(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	if err := s.StorePollVote(ctx, "orphan-poll", "123456789@g.us",
+	if _, err := s.StorePollVote(ctx, "orphan-poll", "123456789@g.us",
 		"voter@s.whatsapp.net", []string{"x"}, time.Date(2026, 3, 3, 11, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("StorePollVote: %v", err)
 	}
