@@ -12,6 +12,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
@@ -432,7 +433,117 @@ func (c *Client) handleHistorySync(historySync *events.HistorySync) {
 		}
 	}
 
-	c.log.Infof("History sync complete. Stored %d messages.", syncedCount)
+	// Status (Stories) updates travel in their own HistorySync field, not as
+	// conversations. The INITIAL_STATUS_V3 sync uses this field exclusively,
+	// so ignoring it drops every status the phone includes in that chunk.
+	statusCount := c.importStatusV3Messages(ctx, ownID, historySync.Data.GetStatusV3Messages())
+
+	c.log.Infof("History sync complete. Stored %d messages and %d status updates.", syncedCount, statusCount)
+}
+
+// importStatusV3Messages persists the Status (Stories) updates carried in a
+// history-sync payload. WhatsApp separates these from conversations
+// (HistorySync.statusV3Messages, field 3), and the INITIAL_STATUS_V3 sync
+// populates only that field. A handler that walks conversations alone drops
+// the whole chunk. Returns the number of status rows stored.
+func (c *Client) importStatusV3Messages(ctx context.Context, ownID string, messages []*waWeb.WebMessageInfo) int {
+	if len(messages) == 0 {
+		return 0
+	}
+	// Messages carry a foreign key to chats. The status conversation header is
+	// usually created by live handling, but a fresh link can receive
+	// INITIAL_STATUS_V3 before any status message arrives, so guarantee the row
+	// exists without overwriting a name learned from live traffic.
+	if err := c.store.EnsureChat(store.StatusBroadcastJID, "Status"); err != nil {
+		c.log.Warnf("Failed to ensure status chat row: %v", err)
+		if c.metricSink != nil {
+			c.metricSink.IncErrors()
+		}
+		return 0
+	}
+	stored := 0
+	for _, wm := range messages {
+		if wm == nil || wm.Message == nil {
+			continue
+		}
+		key := wm.GetKey()
+		if key == nil {
+			continue
+		}
+		msgID := key.GetID()
+		if msgID == "" {
+			continue
+		}
+		ts := wm.GetMessageTimestamp()
+		if ts == 0 {
+			continue
+		}
+		timestamp := time.Unix(int64(ts), 0)
+		isFromMe := key.GetFromMe()
+
+		// The poster lives in key.participant for status messages. Some
+		// payloads put it in WebMessageInfo.participant instead, and a few
+		// use the key's remoteJID. Try each in order.
+		rawSender := key.GetParticipant()
+		if rawSender == "" {
+			rawSender = wm.GetParticipant()
+		}
+		if rawSender == "" {
+			if remote := key.GetRemoteJID(); remote != "" && remote != store.StatusBroadcastJID {
+				rawSender = remote
+			}
+		}
+		senderUser := ""
+		if rawSender != "" {
+			if jid, err := types.ParseJID(rawSender); err == nil {
+				senderUser = jid.User
+			} else {
+				senderUser = strings.Split(rawSender, "@")[0]
+			}
+		}
+
+		nm := c.normalizeIncomingMessage(
+			store.StatusBroadcastJID,
+			rawSender,
+			senderUser,
+			false, // status@broadcast is not a group chat
+			isFromMe,
+			ownID,
+			msgID,
+			timestamp,
+			wm.Message,
+		)
+		// Status rows always live under the fixed broadcast JID, whatever the
+		// payload put in the key's remoteJID.
+		nm.msg.ChatJID = store.StatusBroadcastJID
+		if nm.msg.Sender == "" {
+			// Senderless rows cannot be grouped or receipted; drop them rather
+			// than invent a sender.
+			c.log.Warnf("Skipping status history message %s with no sender", c.redactor.MsgID(msgID))
+			continue
+		}
+		if nm.msg.Content == "" && nm.msg.MediaType == "" {
+			// The payload can hold a status whose media was pruned. Keep a
+			// placeholder so the post is still visible.
+			nm.msg.Content = "[status update]"
+			nm.msg.MediaType = "status"
+		}
+		if err := c.store.StoreMessage(ctx, nm.msg, nm.mediaKey, nm.fileSHA256, nm.fileEncSHA256, nm.fileLength); err != nil {
+			c.log.Warnf("Failed to store status history message %s: %v", c.redactor.MsgID(msgID), err)
+			if c.metricSink != nil {
+				c.metricSink.IncErrors()
+			}
+			continue
+		}
+		if c.metricSink != nil {
+			c.metricSink.IncMessagesIn()
+		}
+		stored++
+		c.log.Infof("[%s] status <- %s: [%s] %s",
+			timestamp.Format("2006-01-02 15:04:05"), c.redactor.JID(nm.msg.Sender),
+			nm.msg.MediaType, c.redactor.Body(nm.msg.Content))
+	}
+	return stored
 }
 
 // GetChatName determines the appropriate name for a chat. It checks the
@@ -555,6 +666,28 @@ func extractTextContent(msg *waProto.Message) string {
 		}
 		return "[contact cards] " + label
 	}
+	if gi := msg.GetGroupInviteMessage(); gi != nil {
+		return "[group invite]"
+	}
+	if sm := msg.GetStickerMessage(); sm != nil {
+		return "[sticker]"
+	}
+	if loc := msg.GetLocationMessage(); loc != nil {
+		return "[location]"
+	}
+	if rxn := msg.GetReactionMessage(); rxn != nil {
+		emoji := rxn.GetText()
+		if emoji == "" {
+			emoji = "reaction"
+		}
+		return "[reaction: " + emoji + "]"
+	}
+	if pay := msg.GetSendPaymentMessage(); pay != nil {
+		return "[payment]"
+	}
+	if pay := msg.GetRequestPaymentMessage(); pay != nil {
+		return "[payment request]"
+	}
 	return ""
 }
 
@@ -588,6 +721,14 @@ func extractMediaInfo(msg *waProto.Message) (mediaType, filename, url, directPat
 			doc.GetURL(), doc.GetDirectPath(),
 			doc.GetMediaKey(), doc.GetFileSHA256(), doc.GetFileEncSHA256(), doc.GetFileLength()
 	}
+	if sticker := msg.GetStickerMessage(); sticker != nil {
+		return "sticker", generatedMediaFilename("sticker", sticker.GetFileSHA256(), ".webp"),
+			sticker.GetURL(), sticker.GetDirectPath(),
+			sticker.GetMediaKey(), sticker.GetFileSHA256(), sticker.GetFileEncSHA256(), sticker.GetFileLength()
+	}
+	// Location, reaction, and payment messages carry no downloadable payload,
+	// so they stay text-only placeholders and must not appear in
+	// list_media_messages.
 
 	return "", "", "", "", nil, nil, nil, 0
 }

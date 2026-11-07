@@ -1,10 +1,15 @@
 package client
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waWeb"
+
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -146,6 +151,134 @@ func TestNormalizeIncomingMessage_DirectChatNoLID(t *testing.T) {
 	}
 	if nm.msg.Sender != "447700000001" {
 		t.Errorf("sender = %q, want unchanged", nm.msg.Sender)
+	}
+}
+
+func TestImportStatusV3Messages(t *testing.T) {
+	// Statuses delivered in a history sync carry the poster as a LID in
+	// key.participant. The import must resolve it to a phone number and file
+	// the row under status@broadcast.
+	s := newTestStoreWithLIDMap(t, map[string]string{"245702512894109": "919207967567"})
+	c := newClientWithStore(t, s)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	ts := uint64(now.Unix())
+
+	msgs := []*waWeb.WebMessageInfo{
+		{
+			Key: &waCommon.MessageKey{
+				RemoteJID:   proto.String(store.StatusBroadcastJID),
+				FromMe:      proto.Bool(false),
+				ID:          proto.String("status-lid-1"),
+				Participant: proto.String("245702512894109@lid"),
+			},
+			Message: &waProto.Message{
+				ImageMessage: &waProto.ImageMessage{
+					URL:      proto.String("https://cdn.example.com/status"),
+					MediaKey: []byte("key123"),
+					Caption:  proto.String("sunset"),
+				},
+			},
+			MessageTimestamp: &ts,
+		},
+		{
+			Key: &waCommon.MessageKey{
+				RemoteJID: proto.String(store.StatusBroadcastJID),
+				FromMe:    proto.Bool(true),
+				ID:        proto.String("status-own-1"),
+			},
+			Message:          &waProto.Message{Conversation: proto.String("my status")},
+			MessageTimestamp: &ts,
+		},
+		{
+			// Some payloads put the poster in WebMessageInfo.participant.
+			Key: &waCommon.MessageKey{
+				RemoteJID: proto.String(store.StatusBroadcastJID),
+				FromMe:    proto.Bool(false),
+				ID:        proto.String("status-field-1"),
+			},
+			Participant:      proto.String("447700000003@s.whatsapp.net"),
+			Message:          &waProto.Message{Conversation: proto.String("field sender")},
+			MessageTimestamp: &ts,
+		},
+		{
+			// Pruned payload: keep a visible placeholder.
+			Key: &waCommon.MessageKey{
+				RemoteJID:   proto.String(store.StatusBroadcastJID),
+				FromMe:      proto.Bool(false),
+				ID:          proto.String("status-pruned-1"),
+				Participant: proto.String("447700000004@s.whatsapp.net"),
+			},
+			Message:          &waProto.Message{},
+			MessageTimestamp: &ts,
+		},
+	}
+
+	if got := c.importStatusV3Messages(context.Background(), "447700000001", msgs); got != len(msgs) {
+		t.Fatalf("importStatusV3Messages stored %d rows, want %d", got, len(msgs))
+	}
+
+	updates, err := s.ListStatusUpdates(context.Background(), now.Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ListStatusUpdates: %v", err)
+	}
+	byID := make(map[string]store.StatusUpdate, len(updates))
+	for _, u := range updates {
+		byID[u.MessageID] = u
+	}
+
+	lid := byID["status-lid-1"]
+	if lid.SenderJID != "919207967567@s.whatsapp.net" {
+		t.Errorf("LID status sender = %q, want resolved phone JID", lid.SenderJID)
+	}
+	if lid.MediaType != "image" || lid.Content != "sunset" {
+		t.Errorf("LID status = %+v, want image with caption", lid)
+	}
+	if lid.ExpiresAt.Sub(lid.Timestamp) != store.StatusTTL {
+		t.Errorf("expiry delta = %v, want %v", lid.ExpiresAt.Sub(lid.Timestamp), store.StatusTTL)
+	}
+
+	own := byID["status-own-1"]
+	if !own.IsFromMe || own.SenderJID != "447700000001@s.whatsapp.net" {
+		t.Errorf("own status = %+v, want IsFromMe with own JID", own)
+	}
+
+	field := byID["status-field-1"]
+	if field.SenderJID != "447700000003@s.whatsapp.net" {
+		t.Errorf("field-sender status sender = %q", field.SenderJID)
+	}
+
+	pruned := byID["status-pruned-1"]
+	if pruned.Content != "[status update]" || pruned.MediaType != "status" {
+		t.Errorf("pruned status = %+v, want placeholder", pruned)
+	}
+}
+
+func TestImportStatusV3Messages_SkipsSenderless(t *testing.T) {
+	s := newTestStoreWithLIDMap(t, nil)
+	c := newClientWithStore(t, s)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	ts := uint64(now.Unix())
+	msgs := []*waWeb.WebMessageInfo{{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(store.StatusBroadcastJID),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("status-no-sender"),
+		},
+		Message:          &waProto.Message{Conversation: proto.String("orphan")},
+		MessageTimestamp: &ts,
+	}}
+
+	if got := c.importStatusV3Messages(context.Background(), "", msgs); got != 0 {
+		t.Fatalf("importStatusV3Messages stored %d rows, want 0", got)
+	}
+	updates, err := s.ListStatusUpdates(context.Background(), now.Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ListStatusUpdates: %v", err)
+	}
+	if len(updates) != 0 {
+		t.Fatalf("ListStatusUpdates returned %d rows, want 0", len(updates))
 	}
 }
 
