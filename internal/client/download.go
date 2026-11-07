@@ -20,6 +20,15 @@ import (
 	"go.mau.fi/whatsmeow"
 )
 
+// cacheState is the explicit lifecycle state of a cached media file on disk.
+type cacheState int
+
+const (
+	cacheStateMissing cacheState = iota
+	cacheStateValid
+	cacheStateInvalid
+)
+
 // DownloadResult is the public return value from Download.
 type DownloadResult struct {
 	Success   bool
@@ -79,6 +88,36 @@ func IsMediaExpired(err error) bool {
 // decrypted bytes are additionally placed at that location (validated against
 // the configured media root). The cache is always populated so subsequent
 // calls remain idempotent.
+// inspectCache reports whether the cached media file at path is missing, valid
+// (size + SHA-256 match), or invalid.
+func inspectCache(path string, fileLength uint64, fileSHA256 []byte) cacheState {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cacheStateMissing
+		}
+		return cacheStateInvalid
+	}
+	if fileLength > 0 && uint64(info.Size()) != fileLength {
+		return cacheStateInvalid
+	}
+	if len(fileSHA256) > 0 {
+		f, err := os.Open(path)
+		if err != nil {
+			return cacheStateInvalid
+		}
+		defer f.Close()
+		digest := sha256.New()
+		if _, err := io.Copy(digest, f); err != nil {
+			return cacheStateInvalid
+		}
+		if !bytes.Equal(digest.Sum(nil), fileSHA256) {
+			return cacheStateInvalid
+		}
+	}
+	return cacheStateValid
+}
+
 func (c *Client) Download(ctx context.Context, messageID, chatJID, outputPath string) DownloadResult {
 	// Validate output_path first so a bad path fails the call before any DB
 	// or network work. The skip-if-exists check waits until after we have
@@ -146,13 +185,17 @@ func (c *Client) Download(ctx context.Context, messageID, chatJID, outputPath st
 	// Short-circuit if we already have the file in cache. If output_path is
 	// set, materialise it there from the cache (cheap hardlink + copy
 	// fallback) and return the output path instead.
-	if _, statErr := os.Stat(localPath); statErr == nil {
-		if err := validateCachedMedia(localPath, fileLength, fileSHA256); err == nil {
-			return finalizeDownload(localPath, absPath, resolvedOutput, mediaType, filename)
-		} else {
-			c.log.Warnf("Ignoring invalid cached media for message %s: %v", c.redactor.MsgID(messageID), err)
-		}
-	} else if !errors.Is(statErr, os.ErrNotExist) {
+	switch inspectCache(localPath, fileLength, fileSHA256) {
+	case cacheStateValid:
+		return finalizeDownload(localPath, absPath, resolvedOutput, mediaType, filename)
+	case cacheStateInvalid:
+		c.log.Warnf("Ignoring invalid cached media for message %s", c.redactor.MsgID(messageID))
+	case cacheStateMissing:
+		// fall through to download
+	default:
+	}
+	// Surface unexpected stat errors (not missing) before downloading.
+	if _, statErr := os.Stat(localPath); statErr != nil && !os.IsNotExist(statErr) {
 		return DownloadResult{Success: false, Message: fmt.Sprintf("failed to inspect media cache: %v", statErr)}
 	}
 
