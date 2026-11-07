@@ -190,6 +190,9 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		metricSink:       cfg.MetricSink,
 		onIncomingMsg:    cfg.OnIncomingMessage,
 		sttClient:        cfg.STTClient,
+		// ownPresence starts as "unavailable" rather than the zero value so
+		// the "unset" state is never ambiguous with a real availability.
+		ownPresence:      types.PresenceUnavailable,
 	}, nil
 }
 
