@@ -325,6 +325,15 @@ func (c *Client) MarkStatusViewed(ctx context.Context, sender string, ids []stri
 	return len(targets), nil
 }
 
+// PresenceResultState is the explicit source of a PresenceResult.
+type PresenceResultState string
+
+const (
+	PresenceResultLive   PresenceResultState = "live"
+	PresenceResultCached PresenceResultState = "cached"
+	PresenceResultNone   PresenceResultState = "none"
+)
+
 // PresenceResult is the live (or last-known) presence of a contact.
 type PresenceResult struct {
 	JID           string     `json:"jid"`
@@ -332,8 +341,9 @@ type PresenceResult struct {
 	Online        bool       `json:"online"`
 	LastSeen      *time.Time `json:"last_seen,omitempty"`
 	LastSeenKnown bool       `json:"last_seen_known"`
-	Answered      bool       `json:"answered"`
-	UpdatedAt     time.Time  `json:"updated_at,omitempty"`
+	Answered      bool                `json:"answered"`
+	State         PresenceResultState `json:"state,omitempty"`
+	UpdatedAt     time.Time           `json:"updated_at,omitempty"`
 	Note          string     `json:"note,omitempty"`
 }
 
@@ -446,6 +456,7 @@ func (c *Client) handlePresence(evt *events.Presence) {
 		Online:        !evt.Unavailable,
 		LastSeenKnown: !evt.LastSeen.IsZero(),
 		Answered:      true,
+		State:         PresenceResultLive,
 		UpdatedAt:     time.Now(),
 	}
 	if !evt.LastSeen.IsZero() {
@@ -475,6 +486,7 @@ func (c *Client) cachedPresence(jid types.JID) (*PresenceResult, error) {
 			return &PresenceResult{
 				JID:         jid.String(),
 				ContactName: c.store.FindChatName(jid.String()),
+				State:       PresenceResultNone,
 				Note:        "no presence response yet (contact may hide online/last-seen, or may not have responded in time)",
 			}, nil
 		}
@@ -485,6 +497,7 @@ func (c *Client) cachedPresence(jid types.JID) (*PresenceResult, error) {
 		ContactName:   c.store.FindChatName(entry.JID),
 		Online:        entry.Online,
 		LastSeenKnown: entry.LastSeenSeen,
+		State:         PresenceResultCached,
 		UpdatedAt:     entry.UpdatedAt,
 		Note:          "cached: no live response within the wait window",
 	}
