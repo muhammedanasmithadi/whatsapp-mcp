@@ -20,14 +20,24 @@ type pairingCache interface {
 	QR() string
 }
 
+// ToolSurface is the explicit exposure mode of the MCP server.
+type ToolSurface int
+
+const (
+	ToolSurfaceFull ToolSurface = iota
+	ToolSurfaceReadOnly
+	ToolSurfaceAllowlisted
+)
+
 // Server holds the MCP server, its bound WhatsApp client, store interfaces
 // for data access (Dependency Inversion), and an optional pairing cache (used
 // only by pairing_status).
 type Server struct {
-	client   *client.Client
-	mcp      *server.MCPServer
-	cache    pairingCache
-	readOnly bool
+	client      *client.Client
+	mcp         *server.MCPServer
+	cache       pairingCache
+	readOnly    bool
+	toolSurface ToolSurface
 	// toolAllowlist, if non-empty, restricts registration to only these tools.
 	// Used with WHATSAPP_MCP_ENABLED_TOOLS for granular access control beyond
 	// read-only mode.
@@ -94,6 +104,14 @@ func NewServer(c *client.Client, st *store.Store, cache pairingCache, opts ...Op
 	for _, opt := range opts {
 		opt(s)
 	}
+	// Derive the explicit tool surface from the configured flags.
+	if s.readOnly {
+		s.toolSurface = ToolSurfaceReadOnly
+	} else if len(s.toolAllowlist) > 0 {
+		s.toolSurface = ToolSurfaceAllowlisted
+	} else {
+		s.toolSurface = ToolSurfaceFull
+	}
 	s.registerTools()
 	s.registerResources()
 	return s
@@ -101,6 +119,9 @@ func NewServer(c *client.Client, st *store.Store, cache pairingCache, opts ...Op
 
 // ReadOnly reports whether the server was constructed in read-only mode.
 func (s *Server) ReadOnly() bool { return s.readOnly }
+
+// ToolSurface reports the explicit exposure mode of the server.
+func (s *Server) ToolSurface() ToolSurface { return s.toolSurface }
 
 // auditLog records an agent-initiated action in the append-only audit log.
 func (s *Server) auditLog(toolName, chatJID, messageID, action, result, details string) {
