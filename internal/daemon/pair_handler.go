@@ -52,6 +52,21 @@ type pairCoder interface {
 	PairPhone(ctx context.Context, phone string) (string, error)
 }
 
+// csrfTokenState is the explicit lifecycle of the single-use CSRF token.
+type csrfTokenState int
+
+const (
+	csrfTokenNone csrfTokenState = iota
+	csrfTokenIssued
+	csrfTokenConsumed
+)
+
+// csrfToken holds the current token together with its lifecycle state.
+type csrfToken struct {
+	state csrfTokenState
+	value string
+}
+
 // pairHandlers bundles the three pair endpoints against a shared cache and
 // a resetter. Wire to an *http.ServeMux via mount.
 type pairHandlers struct {
@@ -80,8 +95,8 @@ type pairHandlers struct {
 	}
 
 	// CSRF protection for the reset endpoint.
-	csrfMu    sync.Mutex
-	csrfToken string
+	csrfMu   sync.Mutex
+	csrf     csrfToken
 	publishWS func(evType, data string)
 
 	// Webhook HMAC secret for verifying incoming webhook signatures.
@@ -127,7 +142,7 @@ func (h *pairHandlers) generateCSRFToken() string {
 	}
 	token := hex.EncodeToString(b)
 	h.csrfMu.Lock()
-	h.csrfToken = token
+	h.csrf = csrfToken{state: csrfTokenIssued, value: token}
 	h.csrfMu.Unlock()
 	return token
 }
@@ -137,12 +152,12 @@ func (h *pairHandlers) generateCSRFToken() string {
 func (h *pairHandlers) validCSRFToken(token string) bool {
 	h.csrfMu.Lock()
 	defer h.csrfMu.Unlock()
-	if h.csrfToken == "" || token == "" {
+	if h.csrf.state != csrfTokenIssued || h.csrf.value == "" || token == "" {
 		return false
 	}
-	ok := h.csrfToken == token
+	ok := h.csrf.value == token
 	if ok {
-		h.csrfToken = "" // single-use: consume after validation
+		h.csrf = csrfToken{state: csrfTokenConsumed} // single-use: consume after validation
 	}
 	return ok
 }

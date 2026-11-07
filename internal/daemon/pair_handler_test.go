@@ -279,7 +279,7 @@ func (f *fakePairCoder) PairPhone(_ context.Context, _ string) (string, error) {
 func TestHandlePairCode_Success(t *testing.T) {
 	cache := NewPairCache()
 	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{code: "ABCD1234"}, nil, nil)
-	h.csrfToken = "tok"
+	h.csrf = csrfToken{state: csrfTokenIssued, value: "tok"}
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/pair/code", strings.NewReader("csrf_token=tok&phone=+919876543210"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -319,7 +319,7 @@ func TestHandlePairCode_NoCoder(t *testing.T) {
 func TestHandlePairCode_InvalidPhone(t *testing.T) {
 	cache := NewPairCache()
 	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{}, nil, nil)
-	h.csrfToken = "tok"
+	h.csrf = csrfToken{state: csrfTokenIssued, value: "tok"}
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/pair/code", strings.NewReader("csrf_token=tok&phone=0123456"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
