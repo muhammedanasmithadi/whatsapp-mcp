@@ -23,7 +23,7 @@ import (
 // StartEventHandler registers the event handler on the underlying whatsmeow
 // client. Must be called before Connect().
 func (c *Client) StartEventHandler() {
-	if c.handlerInstalled {
+	if c.handlerState == handlerInstalled {
 		return
 	}
 	c.handlerID = c.wa.AddEventHandler(func(evt interface{}) {
@@ -54,7 +54,7 @@ func (c *Client) StartEventHandler() {
 			c.log.Debugf("Unhandled event type: %T", v)
 		}
 	})
-	c.handlerInstalled = true
+	c.handlerState = handlerInstalled
 }
 
 // normalizedMessage holds the result of normalizeIncomingMessage: the

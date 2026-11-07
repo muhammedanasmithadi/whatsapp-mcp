@@ -64,14 +64,23 @@ type MetricSink interface {
 	IncRateLimited()
 }
 
+// handlerInstallState tracks whether the whatsmeow event handler has been
+// registered on the underlying client.
+type handlerInstallState int
+
+const (
+	handlerNotInstalled handlerInstallState = iota
+	handlerInstalled
+)
+
 // Client wraps a whatsmeow.Client together with the message cache and logger.
 type Client struct {
 	wa               *whatsmeow.Client
 	downloadMedia    func(context.Context, whatsmeow.DownloadableMessage) ([]byte, error)
 	store            *store.Store
 	log              waLog.Logger
-	handlerID        uint32
-	handlerInstalled bool
+	handlerID    uint32
+	handlerState handlerInstallState
 	allowedMediaRoot string
 	redactor         *security.Redactor
 	limiter          *ratelimit.Limiter
