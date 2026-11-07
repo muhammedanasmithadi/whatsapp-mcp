@@ -32,7 +32,7 @@ func TryLock(storeDir string) (*FileLock, error) {
 		}
 		return nil, fmt.Errorf("flock: %w", err)
 	}
-	return &FileLock{path: p, f: f}, nil
+	return &FileLock{path: p, f: f, state: lockStateLocked}, nil
 }
 
 // Release drops the lock. Safe to call multiple times.
@@ -43,4 +43,5 @@ func (l *FileLock) Release() {
 	_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
 	_ = l.f.Close()
 	l.f = nil
+	l.state = lockStateUnlocked
 }
