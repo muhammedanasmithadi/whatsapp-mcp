@@ -94,6 +94,38 @@ This tool connects an AI agent to your personal WhatsApp account. Treat it accor
 
 `WHATSAPP_MCP_MEDIA_ROOT` (default `<store>/uploads/`) is the only directory send/download tools may touch. Paths outside the root, including symlinks that resolve outside it, are rejected.
 
+## WhatsApp protocol layer
+
+The daemon speaks the WhatsApp Web multidevice protocol through [whatsmeow](https://github.com/tulir/whatsmeow). Because WhatsApp changes the protocol server-side without notice, the project vendors whatsmeow and applies protocol fixes immediately via a Go `replace` directive:
+
+```text
+replace go.mau.fi/whatsmeow => ./vendor-whatsmeow/go.mau.fi/whatsmeow
+```
+
+The vendored fork lives under `vendor-whatsmeow/` and is kept in sync with upstream. Key fixes carried in the fork:
+
+- **SKDM group ID**: `handleSenderKeyDistributionMessage` uses the protobuf `groupId` (not the enclosing stanza chat) to decide sender-key ownership, matching WhatsApp Web and Baileys. This is what makes statuses and group messages decrypt correctly when retried as direct-to-device SKDMs.
+- **Profile picture tctoken**: media requests include the required token so thumbnails resolve.
+- **Presence subscribe**: missing `id` attribute added to presence subscription stanzas.
+- **Argo decoding**: hard-coded failure and macOS early-return removed.
+- **SendPresence race**: presence updates no longer race with session teardown.
+- **GetPrivacySettings**: errors are no longer swallowed.
+- **Status About (set_status_message)**: WhatsApp Web calls the `xwa2_update_text_status` MEX mutation (mutation ID `9152604461510864`) first, then the legacy `<iq xmlns="status">` stanza. The MEX mutation is account-gated and fails with a 400 CRITICAL error on accounts without the text-status feature, so it is sent only when an emoji or ephemeral duration is requested; the legacy IQ is always sent to update the About text contacts see.
+- **canonicalContactJID**: wrong suffix `@s.client.net` → `@s.whatsapp.net` fixed.
+
+Protocol fixes are also contributed upstream where applicable: https://github.com/tulir/whatsmeow/pull/1330 (SKDM group ID) and a set-status-about branch tracking this repository's fork.
+
+## Statuses (Stories) — push-only delivery
+
+Status updates are cached as `status@broadcast` messages and arrive only via push. WhatsApp Web's `WAWebApiStatus.getAllStatuses` is a local DB query — there is no on-demand server fetch for statuses.
+
+Two consequences:
+
+1. **Missed broadcasts cannot be backfilled.** If the daemon was offline when a contact posted a status, that status is gone forever; WhatsApp does not re-send it, and `request_sync` for `status@broadcast` returns no history. Do not rely on the daemon to recover statuses posted while it was down.
+2. **StatusV3 history import.** `HistorySync.statusV3Messages` (field 3) is the real `INITIAL_STATUS_V3` payload. The daemon imports it into `status@broadcast` rows on sync, resolves the poster via `key.participant` / `WebMessageInfo.participant` (LID → phone number), and keeps placeholders for pruned payloads. Statuses posted while the daemon is online and paired appear normally.
+
+Profile photos and online/last-seen presence work independently of status delivery.
+
 ## Development
 
 ```bash
