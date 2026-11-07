@@ -506,11 +506,19 @@ func (s *Store) StoreLabel(labelID, name, color string) error {
 	return err
 }
 
+// LabelState is the explicit labeled/unlabeled state of a chat-label association.
+type LabelState bool
+
+const (
+	LabelUnlabeled LabelState = false
+	LabelLabeled   LabelState = true
+)
+
 // StoreLabelAssociation upserts a label association for a chat.
-func (s *Store) StoreLabelAssociation(chatJID, labelID string, labeled bool) error {
+func (s *Store) StoreLabelAssociation(chatJID, labelID string, labeled LabelState) error {
 	_, err := s.db.Exec(
 		"INSERT OR REPLACE INTO label_associations (chat_jid, label_id, labeled) VALUES (?, ?, ?)",
-		chatJID, labelID, labeled,
+		chatJID, labelID, bool(labeled),
 	)
 	return err
 }

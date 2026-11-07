@@ -853,9 +853,11 @@ func (c *Client) handleLabelAssociationChat(evt *events.LabelAssociationChat) {
 	}
 	chatJID := evt.JID.String()
 	labelID := evt.LabelID
-	labeled := false
+	labeled := store.LabelUnlabeled
 	if action := evt.Action; action != nil {
-		labeled = action.GetLabeled()
+		if action.GetLabeled() {
+			labeled = store.LabelLabeled
+		}
 	}
 
 	if err := c.store.StoreLabelAssociation(chatJID, labelID, labeled); err != nil {
