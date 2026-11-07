@@ -21,6 +21,8 @@ func (s *Server) registerSocialReadTools() {
 	s.registerGetProfilePicture()
 	s.registerGetContactInfo()
 	s.registerGetAutoResponder()
+	s.registerSetProfilePicture()
+	s.registerSetStatusPrivacy()
 }
 
 // registerSocialActionTools wires tools that produce WhatsApp side effects
@@ -29,6 +31,9 @@ func (s *Server) registerSocialActionTools() {
 	s.registerMarkStatusViewed()
 	s.registerGetPresence()
 	s.registerSetAutoResponder()
+	s.registerSendStatus()
+	s.registerDeleteStatus()
+	s.registerGetStatusViewers()
 }
 
 // -- list_status_updates ----------------------------------------------------
@@ -275,5 +280,177 @@ func (s *Server) registerGetAutoResponder() {
 			"enabled": enabled,
 			"message": message,
 		})
+	}))
+}
+
+// -- send_status --------------------------------------------------------------
+
+type sendStatusArgs struct {
+	MediaPath string `json:"media_path"`
+	Caption   string `json:"caption,omitempty"`
+}
+
+func (s *Server) registerSendStatus() {
+	tool := mcp.NewTool("send_status",
+		mcp.WithDescription("Post a WhatsApp Status (Story) update as a media message to status@broadcast. media_path must be an image or video under the configured media root. caption is the optional status text. Returns {success, chat_jid, message_id}."),
+		mcp.WithString("media_path", mcp.Required(), mcp.Description("absolute path to an image or video file under the media root")),
+		mcp.WithString("caption", mcp.Description("optional status caption text")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a sendStatusArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("media_path", a.MediaPath); r != nil {
+			return r, nil
+		}
+		r := s.client.SendStatus(ctx, a.MediaPath, a.Caption)
+		if !r.Success {
+			return s.toolErr("send_status", "", "", "send_status", fmt.Errorf("send status: %s", r.Message)), nil
+		}
+		return s.toolOK("send_status", "", "", "send_status", "", map[string]any{"success": true, "message_id": r.ID})
+	}))
+}
+
+// -- delete_status ------------------------------------------------------------
+
+type deleteStatusArgs struct {
+	MessageID string `json:"message_id"`
+}
+
+func (s *Server) registerDeleteStatus() {
+	tool := mcp.NewTool("delete_status",
+		mcp.WithDescription("Delete a Status (Story) update by revoking its message from status@broadcast. message_id is from list_status_updates. Returns {success, message_id}."),
+		mcp.WithString("message_id", mcp.Required(), mcp.Description("WhatsApp message ID of the status to delete")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a deleteStatusArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("message_id", a.MessageID); r != nil {
+			return r, nil
+		}
+		if err := s.client.DeleteStatus(ctx, a.MessageID); err != nil {
+			return s.toolErr("delete_status", "", a.MessageID, "delete_status", err), nil
+		}
+		return s.toolOK("delete_status", "", a.MessageID, "delete_status", "", map[string]any{"success": true, "message_id": a.MessageID})
+	}))
+}
+
+// -- get_status_viewers -------------------------------------------------------
+
+type getStatusViewersArgs struct {
+	MessageID string `json:"message_id"`
+}
+
+func (s *Server) registerGetStatusViewers() {
+	tool := mcp.NewTool("get_status_viewers",
+		mcp.WithDescription("Return viewers of a Status (Story) update. WhatsApp does not expose status viewer lists to linked devices through a public protocol endpoint, so this returns an empty list with a note. message_id is from list_status_updates. Returns {viewers, note}."),
+		mcp.WithString("message_id", mcp.Required(), mcp.Description("WhatsApp message ID of the status to check viewers for")),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a getStatusViewersArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("message_id", a.MessageID); r != nil {
+			return r, nil
+		}
+		viewers, err := s.client.GetStatusViewers(ctx, a.MessageID)
+		if err != nil {
+			return s.toolErr("get_status_viewers", "", a.MessageID, "get_status_viewers", err), nil
+		}
+		return s.toolOK("get_status_viewers", "", a.MessageID, "get_status_viewers", "", map[string]any{"viewers": viewers, "note": "WhatsApp does not expose status viewer lists to linked devices through a public endpoint"})
+	}))
+}
+
+// -- set_profile_picture ------------------------------------------------------
+
+type setProfilePictureArgs struct {
+	MediaPath string `json:"media_path"`
+}
+
+func (s *Server) registerSetProfilePicture() {
+	tool := mcp.NewTool("set_profile_picture",
+		mcp.WithDescription("Set the paired account's WhatsApp profile picture. media_path must be an image file under the configured media root. Returns {success} on success."),
+		mcp.WithString("media_path", mcp.Required(), mcp.Description("absolute path to an image file under the media root")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a setProfilePictureArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("media_path", a.MediaPath); r != nil {
+			return r, nil
+		}
+		if err := s.client.SetProfilePicture(ctx, a.MediaPath); err != nil {
+			return s.toolErr("set_profile_picture", "", "", "set_profile_picture", err), nil
+		}
+		return s.toolOK("set_profile_picture", "", "", "set_profile_picture", "", map[string]any{"success": true})
+	}))
+}
+
+// -- set_status_privacy_setting ---------------------------------------------
+
+type setStatusPrivacyArgs struct {
+	Mode      string   `json:"mode"`
+	UserJIDs  []string `json:"user_jids,omitempty"`
+}
+
+func (s *Server) registerSetStatusPrivacy() {
+	tool := mcp.NewTool("set_status_privacy_setting",
+		mcp.WithDescription("Set the privacy mode for the paired account's Status (Stories) updates. mode can be 'all' (everyone), 'contacts' (my contacts), 'close_friends' (close friends only), or 'custom' (custom list). For 'custom', user_jids should contain the JIDs of allowed contacts. Returns {success, mode}."),
+		mcp.WithString("mode", mcp.Required(), mcp.Description("privacy mode: all, contacts, close_friends, or custom")),
+		mcp.WithArray("user_jids", mcp.Description("for 'custom' mode: list of contact JIDs allowed to view statuses")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a setStatusPrivacyArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("mode", a.Mode); r != nil {
+			return r, nil
+		}
+		if err := s.client.SetStatusPrivacy(ctx, a.Mode, a.UserJIDs); err != nil {
+			return s.toolErr("set_status_privacy_setting", "", "", "set_status_privacy_setting", err), nil
+		}
+		return s.toolOK("set_status_privacy_setting", "", "", "set_status_privacy_setting", "", map[string]any{"success": true, "mode": a.Mode})
+	}))
+}
+
+// -- forward_message --------------------------------------------------------
+
+type forwardMessageArgs struct {
+	ChatJID       string `json:"chat_jid"`
+	SourceChatJID string `json:"source_chat_jid"`
+	MessageID     string `json:"message_id"`
+}
+
+func (s *Server) registerForwardMessage() {
+	tool := mcp.NewTool("forward_message",
+		mcp.WithDescription("Forward a message from source_chat_jid to chat_jid. The original message must be cached locally (use list_messages first). The forwarded message carries context info linking back to the original. Returns {success, chat_jid, message_id}."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description("target chat JID to forward to")),
+		mcp.WithString("source_chat_jid", mcp.Required(), mcp.Description("source chat JID where the message is located")),
+		mcp.WithString("message_id", mcp.Required(), mcp.Description("message ID to forward")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a forwardMessageArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if r := requireNonEmpty("source_chat_jid", a.SourceChatJID); r != nil {
+			return r, nil
+		}
+		if r := requireNonEmpty("message_id", a.MessageID); r != nil {
+			return r, nil
+		}
+		if err := s.client.ForwardMessage(ctx, a.ChatJID, a.SourceChatJID, a.MessageID); err != nil {
+			return s.toolErr("forward_message", a.ChatJID, a.MessageID, "forward_message", err), nil
+		}
+		return s.toolOK("forward_message", a.ChatJID, a.MessageID, "forward_message", "", map[string]any{"success": true})
 	}))
 }

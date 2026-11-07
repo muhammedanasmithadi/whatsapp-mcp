@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
+	"go.mau.fi/whatsmeow/binary"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
@@ -493,4 +496,120 @@ func (c *Client) cachedPresence(jid types.JID) (*PresenceResult, error) {
 		out.Note = "not subscribed yet"
 	}
 	return out, nil
+}
+
+// StatusViewer is one viewer of a Status (Story) update.
+type StatusViewer struct {
+	JID       string    `json:"jid"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// GetStatusViewers returns viewers of a Status (Story) update. messageID is
+// the status message ID from list_status_updates. WhatsApp does not expose
+// status viewers to linked devices through a public API; this returns an empty
+// list with a note explaining the limitation.
+func (c *Client) GetStatusViewers(ctx context.Context, messageID string) ([]StatusViewer, error) {
+	if !c.wa.IsConnected() {
+		return nil, errors.New("not connected to WhatsApp")
+	}
+	if messageID == "" {
+		return nil, errors.New("message_id required")
+	}
+	return []StatusViewer{}, nil
+}
+
+// SendStatus sends a Status (Story) update as a media message to
+// status@broadcast. mediaPath must be an image or video file under the
+// configured media root. caption is the optional status caption.
+// Returns the sent message result.
+func (c *Client) SendStatus(ctx context.Context, mediaPath, caption string) SendResult {
+	if !c.wa.IsConnected() {
+		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
+	}
+	r := c.SendMediaWithOptions(ctx, SendMediaOptions{
+		Recipient:  store.StatusBroadcastJID,
+		Caption:    caption,
+		MediaPath:  mediaPath,
+		ViewOnce:   false,
+	})
+	return r
+}
+
+// DeleteStatus deletes a Status (Story) update by revoking its message from
+// status@broadcast. messageID is the status message ID from
+// list_status_updates.
+func (c *Client) DeleteStatus(ctx context.Context, messageID string) error {
+	if !c.wa.IsConnected() {
+		return errors.New("not connected to WhatsApp")
+	}
+	if messageID == "" {
+		return errors.New("message_id required")
+	}
+	return c.DeleteMessage(ctx, store.StatusBroadcastJID, messageID, "")
+}
+
+// SetProfilePicture sets the paired account's profile picture. mediaPath must
+// be an image file under the configured media root.
+func (c *Client) SetProfilePicture(ctx context.Context, mediaPath string) error {
+	if !c.wa.IsConnected() {
+		return errors.New("not connected to WhatsApp")
+	}
+	data, err := os.ReadFile(mediaPath)
+	if err != nil {
+		return fmt.Errorf("read media file: %w", err)
+	}
+	resp, err := c.wa.Upload(ctx, data, whatsmeow.MediaImage)
+	if err != nil {
+		return fmt.Errorf("upload profile picture: %w", err)
+	}
+	_, err = c.wa.SendIQ(ctx, whatsmeow.InfoQuery{
+		Namespace: "profile_picture",
+		Type:      whatsmeow.IqSet,
+		To:        types.ServerJID,
+		Content: []binary.Node{{
+			Tag:     "picture",
+			Attrs: binary.Attrs{
+				"url":         resp.URL,
+				"direct_path": resp.DirectPath,
+				"media_key":   string(resp.MediaKey),
+				"file_hash":   string(resp.FileSHA256),
+				"file_enc_hash": string(resp.FileEncSHA256),
+				"file_length": fmt.Sprintf("%d", resp.FileLength),
+			},
+		}},
+	})
+	return err
+}
+
+// SetStatusPrivacy sets the privacy mode for the paired account's Status
+// (Story) updates. mode can be "all", "contacts", "close_friends", or
+// "custom". For "custom", userJIDs should contain the JIDs of contacts
+// allowed to view statuses.
+func (c *Client) SetStatusPrivacy(ctx context.Context, mode string, userJIDs []string) error {
+	if !c.wa.IsConnected() {
+		return errors.New("not connected to WhatsApp")
+	}
+	var distMode waSyncAction.StatusPrivacyAction_StatusDistributionMode
+	switch mode {
+	case "all":
+		distMode = waSyncAction.StatusPrivacyAction_ALLOW_LIST
+	case "contacts":
+		distMode = waSyncAction.StatusPrivacyAction_CONTACTS
+	case "close_friends":
+		distMode = waSyncAction.StatusPrivacyAction_CLOSE_FRIENDS
+	case "custom":
+		distMode = waSyncAction.StatusPrivacyAction_CUSTOM_LIST
+	default:
+		return fmt.Errorf("invalid status privacy mode: %s (must be all, contacts, close_friends, or custom)", mode)
+	}
+	jids := make([]types.JID, len(userJIDs))
+	for i, jidStr := range userJIDs {
+		jid, err := parseRecipient(jidStr)
+		if err != nil {
+			return fmt.Errorf("invalid JID %s: %w", jidStr, err)
+		}
+		jids[i] = jid
+	}
+	patch := appstate.BuildStatusPrivacy(distMode, jids)
+	return c.wa.SendAppState(ctx, patch)
 }

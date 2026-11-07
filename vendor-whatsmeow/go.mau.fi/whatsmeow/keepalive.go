@@ -63,7 +63,7 @@ func (cli *Client) keepAliveLoop(ctx, connCtx context.Context) {
 }
 
 func (cli *Client) sendKeepAlive(ctx context.Context) (isSuccess, shouldContinue bool) {
-	respCh, err := cli.sendIQAsync(ctx, infoQuery{
+	respCh, err := cli.sendIQAsync(ctx, InfoQuery{
 		Namespace: "w:p",
 		Type:      "get",
 		To:        types.ServerJID,

@@ -756,7 +756,7 @@ func (cli *Client) Logout(ctx context.Context) error {
 	if ownID.IsEmpty() {
 		return ErrNotLoggedIn
 	}
-	_, err := cli.sendIQ(ctx, infoQuery{
+	_, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "md",
 		Type:      "set",
 		To:        types.ServerJID,

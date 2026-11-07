@@ -30,7 +30,7 @@ const (
 )
 
 func (cli *Client) getServerPreKeyCount(ctx context.Context) (int, error) {
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "encrypt",
 		Type:      "get",
 		To:        types.ServerJID,
@@ -69,7 +69,7 @@ func (cli *Client) uploadPreKeys(ctx context.Context, initialUpload bool) {
 		return
 	}
 	cli.Log.Infof("Uploading %d new prekeys to server", len(preKeys))
-	_, err = cli.sendIQ(ctx, infoQuery{
+	_, err = cli.sendIQ(ctx, InfoQuery{
 		Namespace: "encrypt",
 		Type:      "set",
 		To:        types.ServerJID,
@@ -130,7 +130,7 @@ func (cli *Client) fetchPreKeys(ctx context.Context, users []types.JID) (map[typ
 			"reason": "identity",
 		}
 	}
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "encrypt",
 		Type:      "get",
 		To:        types.ServerJID,

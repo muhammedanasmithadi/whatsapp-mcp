@@ -23,9 +23,9 @@ func (cli *Client) TryFetchPrivacySettings(ctx context.Context, ignoreCache bool
 	} else if val := cli.privacySettingsCache.Load(); val != nil && !ignoreCache {
 		return val.(*types.PrivacySettings), nil
 	}
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "privacy",
-		Type:      iqGet,
+		Type:      IqGet,
 		To:        types.ServerJID,
 		Content:   []waBinary.Node{{Tag: "privacy"}},
 	})
@@ -63,9 +63,9 @@ func (cli *Client) SetPrivacySetting(ctx context.Context, name types.PrivacySett
 	if err != nil {
 		return settings, err
 	}
-	_, err = cli.sendIQ(ctx, infoQuery{
+	_, err = cli.sendIQ(ctx, InfoQuery{
 		Namespace: "privacy",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag: "privacy",
@@ -104,9 +104,9 @@ func (cli *Client) SetPrivacySetting(ctx context.Context, name types.PrivacySett
 
 // SetDefaultDisappearingTimer will set the default disappearing message timer.
 func (cli *Client) SetDefaultDisappearingTimer(ctx context.Context, timer time.Duration) (err error) {
-	_, err = cli.sendIQ(ctx, infoQuery{
+	_, err = cli.sendIQ(ctx, InfoQuery{
 		Namespace: "disappearing_mode",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag: "disappearing_mode",

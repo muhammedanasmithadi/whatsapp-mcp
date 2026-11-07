@@ -9,7 +9,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	waProto "go.mau.fi/whatsmeow/binary/proto"
+	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/ratelimit"
@@ -205,15 +205,15 @@ func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, target
 		}
 	}
 
-	ctxInfo := &waProto.ContextInfo{
+	ctxInfo := &waE2E.ContextInfo{
 		StanzaID: proto.String(targetMessageID),
 	}
 	if participant != "" {
 		ctxInfo.Participant = proto.String(participant)
 	}
 
-	msg := &waProto.Message{
-		ExtendedTextMessage: &waProto.ExtendedTextMessage{
+	msg := &waE2E.Message{
+		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 			Text:        proto.String(body),
 			ContextInfo: ctxInfo,
 		},
@@ -244,7 +244,7 @@ func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody st
 		return err
 	}
 
-	newContent := &waProto.Message{
+	newContent := &waE2E.Message{
 		Conversation: proto.String(newBody),
 	}
 	edit := c.wa.BuildEdit(chat, types.MessageID(messageID), newContent)
@@ -280,6 +280,66 @@ func (c *Client) DeleteMessage(ctx context.Context, chatJID, messageID, senderJI
 	if _, err := c.wa.SendMessage(ctx, chat, revoke); err != nil {
 		return fmt.Errorf("send revoke: %w", err)
 	}
+	return nil
+}
+
+// ForwardMessage forwards a message from sourceChatJID to targetChatJID. The
+// original message must be cached locally (use list_messages first). The
+// forwarded message carries ContextInfo linking back to the original message,
+// marking it as forwarded with a forwarding score of 1. Rate-limited because
+// forwarding is a send. Currently supports text messages; media messages are
+// forwarded as text references.
+func (c *Client) ForwardMessage(ctx context.Context, targetChatJID, sourceChatJID, messageID string) error {
+	if !c.wa.IsConnected() {
+		return errors.New("not connected to WhatsApp")
+	}
+	if messageID == "" {
+		return errors.New("message_id required")
+	}
+
+	target, err := types.ParseJID(targetChatJID)
+	if err != nil {
+		return fmt.Errorf("invalid target chat JID: %w", err)
+	}
+	source, err := types.ParseJID(sourceChatJID)
+	if err != nil {
+		return fmt.Errorf("invalid source chat JID: %w", err)
+	}
+
+	cached, err := c.store.GetMessage(ctx, messageID, source.String())
+	if err != nil {
+		return fmt.Errorf("look up message: %w", err)
+	}
+	if cached == nil {
+		return fmt.Errorf("message %s not found in chat %s", messageID, sourceChatJID)
+	}
+
+	// Build ContextInfo linking back to the original message, marking it as
+	// forwarded with a forwarding score of 1. ContextInfo lives on
+	// ExtendedTextMessage, not directly on Message.
+	msg := &waE2E.Message{
+		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			Text: proto.String(cached.Content),
+			ContextInfo: &waE2E.ContextInfo{
+				StanzaID:      new(messageID),
+				Participant:   new(cached.Sender),
+				RemoteJID:     new(source.String()),
+				ForwardingScore: new(uint32(1)),
+				IsForwarded:   new(true),
+			},
+		},
+	}
+
+	if err := c.checkActionRate(ctx, target); err != nil {
+		return err
+	}
+
+	_, err = c.wa.SendMessage(ctx, target, msg)
+	if err != nil {
+		return fmt.Errorf("send forwarded message: %w", err)
+	}
+
+	c.persistSent(ctx, target, "", cached.Content, "", msg)
 	return nil
 }
 

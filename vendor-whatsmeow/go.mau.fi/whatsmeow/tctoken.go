@@ -184,9 +184,9 @@ func (cli *Client) issuePrivacyTokenAndSave(jid types.JID, senderTimestamp time.
 
 // issuePrivacyToken sends an IQ to the server to issue a privacy token for the given JID.
 func (cli *Client) issuePrivacyToken(ctx context.Context, jid types.JID, timestamp time.Time) (*waBinary.Node, error) {
-	return cli.sendIQ(ctx, infoQuery{
+	return cli.sendIQ(ctx, InfoQuery{
 		Namespace: "privacy",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag: "tokens",

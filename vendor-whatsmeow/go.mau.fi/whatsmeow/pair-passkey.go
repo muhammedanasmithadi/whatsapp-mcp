@@ -131,9 +131,9 @@ func (cli *Client) SendPasskeyResponse(ctx context.Context, passkeyResp *types.W
 	} else {
 		cli.passkeySkipHandoffUX.Store(false)
 	}
-	_, err = cli.sendIQ(ctx, infoQuery{
+	_, err = cli.sendIQ(ctx, InfoQuery{
 		Namespace: "md",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag:     "passkey_prologue",
@@ -176,9 +176,9 @@ func (cli *Client) handlePasskeyContinuationNotification(ctx context.Context, no
 		return fmt.Errorf("failed to compute shared secret: %w", err)
 	}
 
-	_, err = cli.sendIQ(ctx, infoQuery{
+	_, err = cli.sendIQ(ctx, InfoQuery{
 		Namespace: "md",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag:     "companion_nonce",
@@ -235,9 +235,9 @@ func (cli *Client) SendPasskeyConfirmation(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal EncryptedPairingRequest: %w", err)
 	}
-	_, err = cli.sendIQ(ctx, infoQuery{
+	_, err = cli.sendIQ(ctx, InfoQuery{
 		Namespace: "md",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag:     "encrypted_pairing_request",
@@ -252,9 +252,9 @@ func (cli *Client) SendPasskeyConfirmation(ctx context.Context) error {
 }
 
 func (cli *Client) getCompanionRef(ctx context.Context) (string, error) {
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "md",
-		Type:      iqGet,
+		Type:      IqGet,
 		To:        types.ServerJID,
 		Content:   []waBinary.Node{{Tag: "ref"}},
 	})
@@ -273,9 +273,9 @@ func (cli *Client) getCompanionRef(ctx context.Context) (string, error) {
 }
 
 func (cli *Client) getPasskeyRequestOptions(ctx context.Context) (*types.WebAuthnPublicKey, error) {
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "md",
-		Type:      iqGet,
+		Type:      IqGet,
 		To:        types.ServerJID,
 		Content:   []waBinary.Node{{Tag: "passkey_request_options"}},
 	})

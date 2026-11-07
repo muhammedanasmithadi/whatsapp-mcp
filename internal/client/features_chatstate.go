@@ -86,3 +86,29 @@ func (c *Client) SetDisappearingTimer(ctx context.Context, recipient string, dur
 	}
 	return c.wa.SetDisappearingTimer(ctx, jid.ToNonAD(), duration, time.Now())
 }
+
+// PinMessage pins or unpins a specific message in a chat. The message must be
+// cached locally (use list_messages first). Pinning syncs to the phone and
+// other linked devices through WhatsApp app state.
+func (c *Client) PinMessage(ctx context.Context, chatJID, messageID string, pinned bool) error {
+	if !c.wa.IsConnected() {
+		return errors.New("not connected to WhatsApp")
+	}
+	if messageID == "" {
+		return errors.New("message_id required")
+	}
+	jid, err := parseRecipient(chatJID)
+	if err != nil {
+		return err
+	}
+	jid = jid.ToNonAD()
+	cached, err := c.store.GetMessage(ctx, messageID, jid.String())
+	if err != nil {
+		return fmt.Errorf("look up message: %w", err)
+	}
+	if cached == nil {
+		return fmt.Errorf("message %s is not cached in %s; sync the chat first", messageID, jid)
+	}
+	msgJID := types.NewJID(messageID, jid.Server)
+	return c.wa.SendAppState(ctx, appstate.BuildPin(msgJID.ToNonAD(), pinned))
+}

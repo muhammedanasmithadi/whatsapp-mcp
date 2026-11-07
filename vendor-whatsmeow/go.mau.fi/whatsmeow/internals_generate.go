@@ -39,8 +39,8 @@ func (cli *Client) DangerousInternals() *DangerousInternalClient {
         return &DangerousInternalClient{cli}
 }
 
-type DangerousInfoQuery = infoQuery
-type DangerousInfoQueryType = infoQueryType
+type DangerousInfoQuery = InfoQuery
+type DangerousInfoQueryType = InfoQueryType
 
 `
 

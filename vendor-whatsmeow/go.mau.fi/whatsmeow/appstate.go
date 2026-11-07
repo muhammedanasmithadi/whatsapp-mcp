@@ -471,7 +471,7 @@ func (cli *Client) fetchAppStatePatches(ctx context.Context, name appstate.WAPat
 	if !snapshot {
 		attrs["version"] = fromVersion
 	}
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "w:sync:app:state",
 		Type:      "set",
 		To:        types.ServerJID,
@@ -568,9 +568,9 @@ func (cli *Client) sendAppState(ctx context.Context, patch appstate.PatchInfo, a
 		return err
 	}
 
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "w:sync:app:state",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag: "sync",
@@ -638,9 +638,9 @@ func (cli *Client) sendAppState(ctx context.Context, patch appstate.PatchInfo, a
 }
 
 func (cli *Client) MarkNotDirty(ctx context.Context, cleanType string, ts time.Time) error {
-	_, err := cli.sendIQ(ctx, infoQuery{
+	_, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "urn:xmpp:whatsapp:dirty",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag: "clean",

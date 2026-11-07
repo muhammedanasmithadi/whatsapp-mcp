@@ -91,9 +91,9 @@ var DefaultStatusPrivacy = []types.StatusPrivacy{{
 //
 // There can be multiple different stored settings, the first one is always the default.
 func (cli *Client) GetStatusPrivacy(ctx context.Context) ([]types.StatusPrivacy, error) {
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "status",
-		Type:      iqGet,
+		Type:      IqGet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag: "privacy",

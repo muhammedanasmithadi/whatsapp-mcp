@@ -683,9 +683,9 @@ func (cli *Client) SetDisappearingTimer(ctx context.Context, chat types.JID, tim
 		})
 	case types.GroupServer:
 		if timer == 0 {
-			_, err = cli.sendGroupIQ(ctx, iqSet, chat, waBinary.Node{Tag: "not_ephemeral"})
+			_, err = cli.sendGroupIQ(ctx, IqSet, chat, waBinary.Node{Tag: "not_ephemeral"})
 		} else {
-			_, err = cli.sendGroupIQ(ctx, iqSet, chat, waBinary.Node{
+			_, err = cli.sendGroupIQ(ctx, IqSet, chat, waBinary.Node{
 				Tag: "ephemeral",
 				Attrs: waBinary.Attrs{
 					"expiration": strconv.Itoa(int(timer.Seconds())),

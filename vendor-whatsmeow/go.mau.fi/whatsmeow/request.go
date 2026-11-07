@@ -88,16 +88,16 @@ func (cli *Client) receiveResponse(ctx context.Context, data *waBinary.Node) boo
 	return true
 }
 
-type infoQueryType string
+type InfoQueryType string
 
 const (
-	iqSet infoQueryType = "set"
-	iqGet infoQueryType = "get"
+	IqSet InfoQueryType = "set"
+	IqGet InfoQueryType = "get"
 )
 
-type infoQuery struct {
+type InfoQuery struct {
 	Namespace string
-	Type      infoQueryType
+	Type      InfoQueryType
 	To        types.JID
 	Target    types.JID
 	ID        string
@@ -108,7 +108,7 @@ type infoQuery struct {
 	NoRetry bool
 }
 
-func (cli *Client) sendIQAsyncAndGetData(ctx context.Context, query *infoQuery) (<-chan *waBinary.Node, []byte, error) {
+func (cli *Client) sendIQAsyncAndGetData(ctx context.Context, query *InfoQuery) (<-chan *waBinary.Node, []byte, error) {
 	if cli == nil {
 		return nil, nil, ErrClientIsNil
 	}
@@ -142,14 +142,14 @@ func (cli *Client) sendIQAsyncAndGetData(ctx context.Context, query *infoQuery) 
 	return waiter, data, nil
 }
 
-func (cli *Client) sendIQAsync(ctx context.Context, query infoQuery) (<-chan *waBinary.Node, error) {
+func (cli *Client) sendIQAsync(ctx context.Context, query InfoQuery) (<-chan *waBinary.Node, error) {
 	ch, _, err := cli.sendIQAsyncAndGetData(ctx, &query)
 	return ch, err
 }
 
 const defaultRequestTimeout = 75 * time.Second
 
-func (cli *Client) sendIQ(ctx context.Context, query infoQuery) (*waBinary.Node, error) {
+func (cli *Client) sendIQ(ctx context.Context, query InfoQuery) (*waBinary.Node, error) {
 	if query.Timeout == 0 {
 		query.Timeout = defaultRequestTimeout
 	}
@@ -180,6 +180,12 @@ func (cli *Client) sendIQ(ctx context.Context, query infoQuery) (*waBinary.Node,
 	case <-time.After(query.Timeout):
 		return nil, ErrIQTimedOut
 	}
+}
+
+// SendIQ sends an info query IQ and waits for the response. Exported wrapper
+// around sendIQ for use by external callers.
+func (cli *Client) SendIQ(ctx context.Context, query InfoQuery) (*waBinary.Node, error) {
+	return cli.sendIQ(ctx, query)
 }
 
 func (cli *Client) retryFrame(

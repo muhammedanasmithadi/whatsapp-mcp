@@ -218,7 +218,7 @@ func (cli *Client) SetPassive(ctx context.Context, passive bool) error {
 	if passive {
 		tag = "passive"
 	}
-	_, err := cli.sendIQ(ctx, infoQuery{
+	_, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "passive",
 		Type:      "set",
 		To:        types.ServerJID,

@@ -40,8 +40,8 @@ func (cli *Client) DangerousInternals() *DangerousInternalClient {
 	return &DangerousInternalClient{cli}
 }
 
-type DangerousInfoQuery = infoQuery
-type DangerousInfoQueryType = infoQueryType
+type DangerousInfoQuery = InfoQuery
+type DangerousInfoQueryType = InfoQueryType
 
 func (int *DangerousInternalClient) FetchAppState(ctx context.Context, name appstate.WAPatchName, fullSync, onlyIfNotSynced bool) ([]any, error) {
 	return int.c.fetchAppState(ctx, name, fullSync, onlyIfNotSynced)
@@ -255,7 +255,7 @@ func (int *DangerousInternalClient) DownloadEncryptedMediaToFile(ctx context.Con
 	return int.c.downloadEncryptedMediaToFile(ctx, url, checksum, file)
 }
 
-func (int *DangerousInternalClient) SendGroupIQ(ctx context.Context, iqType infoQueryType, jid types.JID, content waBinary.Node) (*waBinary.Node, error) {
+func (int *DangerousInternalClient) SendGroupIQ(ctx context.Context, iqType InfoQueryType, jid types.JID, content waBinary.Node) (*waBinary.Node, error) {
 	return int.c.sendGroupIQ(ctx, iqType, jid, content)
 }
 
@@ -647,15 +647,15 @@ func (int *DangerousInternalClient) ReceiveResponse(ctx context.Context, data *w
 	return int.c.receiveResponse(ctx, data)
 }
 
-func (int *DangerousInternalClient) SendIQAsyncAndGetData(ctx context.Context, query *infoQuery) (<-chan *waBinary.Node, []byte, error) {
+func (int *DangerousInternalClient) SendIQAsyncAndGetData(ctx context.Context, query *InfoQuery) (<-chan *waBinary.Node, []byte, error) {
 	return int.c.sendIQAsyncAndGetData(ctx, query)
 }
 
-func (int *DangerousInternalClient) SendIQAsync(ctx context.Context, query infoQuery) (<-chan *waBinary.Node, error) {
+func (int *DangerousInternalClient) SendIQAsync(ctx context.Context, query InfoQuery) (<-chan *waBinary.Node, error) {
 	return int.c.sendIQAsync(ctx, query)
 }
 
-func (int *DangerousInternalClient) SendIQ(ctx context.Context, query infoQuery) (*waBinary.Node, error) {
+func (int *DangerousInternalClient) SendIQ(ctx context.Context, query InfoQuery) (*waBinary.Node, error) {
 	return int.c.sendIQ(ctx, query)
 }
 

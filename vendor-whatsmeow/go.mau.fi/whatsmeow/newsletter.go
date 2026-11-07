@@ -25,9 +25,9 @@ import (
 
 // NewsletterSubscribeLiveUpdates subscribes to receive live updates from a WhatsApp channel temporarily (for the duration returned).
 func (cli *Client) NewsletterSubscribeLiveUpdates(ctx context.Context, jid types.JID) (time.Duration, error) {
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "newsletter",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        jid,
 		Content: []waBinary.Node{{
 			Tag: "live_updates",
@@ -176,9 +176,9 @@ func (cli *Client) sendMexIQ(ctx context.Context, queryID string, variables any)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "w:mex",
-		Type:      iqGet,
+		Type:      IqGet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag: "query",
@@ -325,9 +325,9 @@ func (cli *Client) CreateNewsletter(ctx context.Context, params CreateNewsletter
 //
 //	cli.AcceptTOSNotice("20601218", "5")
 func (cli *Client) AcceptTOSNotice(ctx context.Context, noticeID, stage string) error {
-	_, err := cli.sendIQ(ctx, infoQuery{
+	_, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "tos",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag: "notice",
@@ -387,9 +387,9 @@ func (cli *Client) GetNewsletterMessages(ctx context.Context, jid types.JID, par
 			attrs["before"] = params.Before
 		}
 	}
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "newsletter",
-		Type:      iqGet,
+		Type:      IqGet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag:   "messages",
@@ -428,9 +428,9 @@ func (cli *Client) GetNewsletterMessageUpdates(ctx context.Context, jid types.JI
 			attrs["after"] = params.After
 		}
 	}
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "newsletter",
-		Type:      iqGet,
+		Type:      IqGet,
 		To:        jid,
 		Content: []waBinary.Node{{
 			Tag:   "message_updates",

@@ -11,8 +11,10 @@ import (
 func (s *Server) registerChatStateTools() {
 	s.registerMuteChat()
 	s.registerPinChat()
+	s.registerPinMessage()
 	s.registerStarMessage()
 	s.registerSetDisappearingTimer()
+	s.registerForwardMessage()
 }
 
 // -- mute_chat --------------------------------------------------------------
@@ -82,6 +84,41 @@ func (s *Server) registerPinChat() {
 			return s.toolErr("pin_chat", a.ChatJID, "", "pin_chat", err), nil
 		}
 		return s.toolOK("pin_chat", a.ChatJID, "", "pin_chat", fmt.Sprintf("pinned=%v", a.Pinned), map[string]any{"success": true, "chat_jid": a.ChatJID, "pinned": a.Pinned})
+	}))
+}
+
+// -- pin_message --------------------------------------------------------------
+
+type pinMessageArgs struct {
+	ChatJID         string `json:"chat_jid"`
+	MessageID       string `json:"message_id"`
+	TargetSenderJID string `json:"target_sender_jid,omitempty"`
+	Pinned          bool   `json:"pinned"`
+}
+
+func (s *Server) registerPinMessage() {
+	tool := mcp.NewTool("pin_message",
+		mcp.WithDescription("Pin or unpin a specific message in a chat; recipients see a pinned badge on the message. The message must be cached locally (use list_messages first). Pinning syncs to the phone and other linked devices through WhatsApp app state. Returns {success, chat_jid, message_id, pinned}."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(recipientDesc)),
+		mcp.WithString("message_id", mcp.Required(), mcp.Description("WhatsApp message ID of the message to pin (use `message_id` from list_messages)")),
+		mcp.WithString("target_sender_jid", mcp.Description("JID of the message's original sender; required in group chats, omit in 1:1 chats ("+jidDesc+")")),
+		mcp.WithBoolean("pinned", mcp.Required(), mcp.Description("true to pin, false to unpin")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a pinMessageArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if r := requireNonEmpty("message_id", a.MessageID); r != nil {
+			return r, nil
+		}
+		if err := s.client.PinMessage(ctx, a.ChatJID, a.MessageID, a.Pinned); err != nil {
+			return s.toolErr("pin_message", a.ChatJID, a.MessageID, "pin_message", err), nil
+		}
+		return s.toolOK("pin_message", a.ChatJID, a.MessageID, "pin_message", fmt.Sprintf("pinned=%v", a.Pinned), map[string]any{"success": true, "chat_jid": a.ChatJID, "message_id": a.MessageID, "pinned": a.Pinned})
 	}))
 }
 

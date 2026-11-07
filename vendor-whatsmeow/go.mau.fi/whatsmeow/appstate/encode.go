@@ -373,3 +373,26 @@ func newMessageRange(lastMessageTimestamp time.Time, lastMessageKey *waCommon.Me
 	}
 	return messageRange
 }
+
+// BuildStatusPrivacy builds an app state patch for setting status (Story)
+// privacy distribution mode.
+func BuildStatusPrivacy(mode waSyncAction.StatusPrivacyAction_StatusDistributionMode, userJIDs []types.JID) PatchInfo {
+	userJIDStrings := make([]string, len(userJIDs))
+	for i, jid := range userJIDs {
+		userJIDStrings[i] = jid.String()
+	}
+	action := &waSyncAction.StatusPrivacyAction{
+		Mode:    new(mode),
+		UserJID: userJIDStrings,
+	}
+	return PatchInfo{
+		Type: WAPatchRegularLow,
+		Mutations: []MutationInfo{{
+			Index:   []string{IndexStatusPrivacy},
+			Version: 3,
+			Value: &waSyncAction.SyncActionValue{
+				StatusPrivacy: action,
+			},
+		}},
+	}
+}

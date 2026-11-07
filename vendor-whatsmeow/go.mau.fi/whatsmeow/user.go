@@ -55,9 +55,9 @@ func stripURLPrefix(link string, prefixes ...string) string {
 // The links look like https://wa.me/message/<code> or https://api.whatsapp.com/message/<code>. You can either provide
 // the full link, or just the <code> part.
 func (cli *Client) ResolveBusinessMessageLink(ctx context.Context, code string) (*types.BusinessMessageLinkTarget, error) {
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "w:qr",
-		Type:      iqGet,
+		Type:      IqGet,
 		// WhatsApp android doesn't seem to have a "to" field for this one at all, not sure why but it works
 		Content: []waBinary.Node{{
 			Tag: "qr",
@@ -99,9 +99,9 @@ func (cli *Client) ResolveBusinessMessageLink(ctx context.Context, code string) 
 // The links look like https://wa.me/qr/<code> or https://api.whatsapp.com/qr/<code>. You can either provide
 // the full link, or just the <code> part.
 func (cli *Client) ResolveContactQRLink(ctx context.Context, code string) (*types.ContactQRLinkTarget, error) {
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "w:qr",
-		Type:      iqGet,
+		Type:      IqGet,
 		Content: []waBinary.Node{{
 			Tag: "qr",
 			Attrs: waBinary.Attrs{
@@ -135,9 +135,9 @@ func (cli *Client) GetContactQRLink(ctx context.Context, revoke bool) (string, e
 	if revoke {
 		action = "revoke"
 	}
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "w:qr",
-		Type:      iqSet,
+		Type:      IqSet,
 		Content: []waBinary.Node{{
 			Tag: "qr",
 			Attrs: waBinary.Attrs{
@@ -182,9 +182,9 @@ func (cli *Client) SetStatusMessage(ctx context.Context, status types.SetStatusI
 	if status.Text != nil {
 		text = *status.Text
 	}
-	_, err := cli.sendIQ(ctx, infoQuery{
+	_, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "status",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag:     "status",
@@ -305,10 +305,10 @@ func (cli *Client) GetUserInfo(ctx context.Context, jids []types.JID) (map[types
 }
 
 func (cli *Client) GetBotListV2(ctx context.Context) ([]types.BotListInfo, error) {
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		To:        types.ServerJID,
 		Namespace: "bot",
-		Type:      iqGet,
+		Type:      IqGet,
 		Content: []waBinary.Node{
 			{Tag: "bot", Attrs: waBinary.Attrs{"v": "2"}},
 		},
@@ -465,8 +465,8 @@ func (cli *Client) parseBusinessProfile(node *waBinary.Node) (*types.BusinessPro
 
 // GetBusinessProfile gets the profile info of a WhatsApp business account
 func (cli *Client) GetBusinessProfile(ctx context.Context, jid types.JID) (*types.BusinessProfile, error) {
-	resp, err := cli.sendIQ(ctx, infoQuery{
-		Type:      iqGet,
+	resp, err := cli.sendIQ(ctx, InfoQuery{
+		Type:      IqGet,
 		To:        types.ServerJID,
 		Namespace: "w:biz",
 		Content: []waBinary.Node{{
@@ -640,7 +640,7 @@ func (cli *Client) GetProfilePictureInfo(ctx context.Context, jid types.JID, par
 			Content: pictureContent,
 		}}
 	}
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: namespace,
 		Type:      "get",
 		To:        to,
@@ -862,9 +862,9 @@ func (cli *Client) getFBIDDevicesInternal(ctx context.Context, jids []types.JID)
 		users[i].Attrs = waBinary.Attrs{"jid": jid}
 		// TODO include dhash for users
 	}
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "fbid:devices",
-		Type:      iqGet,
+		Type:      IqGet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag:     "users",
@@ -960,7 +960,7 @@ func (cli *Client) usync(ctx context.Context, jids []types.JID, mode, context st
 			return nil, fmt.Errorf("unknown user server '%s'", jid.Server)
 		}
 	}
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "usync",
 		Type:      "get",
 		To:        types.ServerJID,
@@ -1028,9 +1028,9 @@ func (cli *Client) GetBlocklist(ctx context.Context, dhash string) (*types.Block
 			},
 		}}
 	}
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "blocklist",
-		Type:      iqGet,
+		Type:      IqGet,
 		To:        types.ServerJID,
 		Content:   content,
 	})
@@ -1099,9 +1099,9 @@ func (cli *Client) UpdateBlocklist(ctx context.Context, jid types.JID, action ev
 		itemAttrs["dhash"] = dhash
 	}
 
-	resp, err := cli.sendIQ(ctx, infoQuery{
+	resp, err := cli.sendIQ(ctx, InfoQuery{
 		Namespace: "blocklist",
-		Type:      iqSet,
+		Type:      IqSet,
 		To:        types.ServerJID,
 		Content: []waBinary.Node{{
 			Tag:   "item",
