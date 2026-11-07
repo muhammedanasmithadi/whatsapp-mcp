@@ -202,7 +202,7 @@ func (s *Server) registerRequestSync() {
 		mcp.WithDescription("Ask WhatsApp servers to backfill historical messages for a chat into the local cache; messages arrive asynchronously and become queryable via list_messages once delivered. No effect on the chat itself or other users. The request is always anchored on a real cached message, because WhatsApp resolves the cursor by message key. Use `anchor: \"oldest\"` to extend history backwards, calling repeatedly to walk back `count` messages at a time; `anchor: \"newest\"` (the default) only fills gaps below the most recent message. Returns a plain-text confirmation describing what was requested. An empty result afterwards means the server served nothing for that cursor, typically because the history predates WhatsApp's retention for linked devices."),
 		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
 		mcp.WithString("from_timestamp", mcp.Description("ISO-8601 UTC timestamp; anchors on the newest cached message at or before this time, falling back to the oldest cached message when nothing is cached that far back. Ignored when `anchor` is set")),
-		mcp.WithString("anchor", mcp.Description("which cached message to anchor on: `oldest` to extend history backwards, `newest` to fill recent gaps (default)"), mcp.Enum(client.AnchorNewest, client.AnchorOldest)),
+		mcp.WithString("anchor", mcp.Description("which cached message to anchor on: `oldest` to extend history backwards, `newest` to fill recent gaps (default)"), mcp.Enum(string(client.AnchorNewest), string(client.AnchorOldest))),
 		mcp.WithNumber("count", mcp.DefaultNumber(client.DefaultSyncCount), mcp.Description("how many messages to request before the anchor (default 50)")),
 		mcp.WithBoolean("use_lid", mcp.DefaultBool(true), mcp.Description("resolve the chat to its LID form (default true). Messages predating WhatsApp's LID migration are keyed on the phone-number JID; set false when walking back past that boundary returns empty batches")),
 		mcp.WithReadOnlyHintAnnotation(false),
@@ -215,7 +215,7 @@ func (s *Server) registerRequestSync() {
 			return errorResult(ErrInvalidParameter("chat_jid", "non-empty string", "empty string")), nil
 		}
 		switch a.Anchor {
-		case "", client.AnchorNewest, client.AnchorOldest:
+		case "", string(client.AnchorNewest), string(client.AnchorOldest):
 		default:
 			return errorResult(ErrInvalidParameter("anchor", fmt.Sprintf("one of %q, %q, or empty", client.AnchorNewest, client.AnchorOldest), a.Anchor)), nil
 		}
@@ -234,7 +234,7 @@ func (s *Server) registerRequestSync() {
 			}
 			ts = t
 		}
-		msg, err := s.client.RequestHistorySync(ctx, a.ChatJID, ts, a.Anchor, int(a.Count), useLID)
+		msg, err := s.client.RequestHistorySync(ctx, a.ChatJID, ts, client.AnchorMode(a.Anchor), int(a.Count), useLID)
 		if err != nil {
 			s.auditLog("request_sync", a.ChatJID, "", "request_sync", "error", err.Error())
 			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error requesting history sync", true)), nil

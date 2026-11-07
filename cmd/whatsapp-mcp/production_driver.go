@@ -146,7 +146,7 @@ func (p *productionDriver) PairPhone(ctx context.Context, phone string) (string,
 }
 
 // RequestHistorySync asks WhatsApp to backfill messages for a chat.
-func (p *productionDriver) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor string, count int, useLID bool) (string, error) {
+func (p *productionDriver) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor client.AnchorMode, count int, useLID bool) (string, error) {
 	return p.c.RequestHistorySync(ctx, chatJID, fromTimestamp, anchor, count, useLID)
 }
 

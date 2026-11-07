@@ -11,15 +11,18 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
+// AnchorMode is the explicit history-sync anchor mode.
+type AnchorMode string
+
 // History-sync anchor modes accepted by RequestHistorySync.
 const (
 	// AnchorNewest walks back from the newest cached message. This repairs
 	// recent gaps but cannot extend history further back than the cache
 	// already reaches.
-	AnchorNewest = "newest"
+	AnchorNewest AnchorMode = "newest"
 	// AnchorOldest walks back from the oldest cached message. Repeated calls
 	// extend history backwards a batch at a time.
-	AnchorOldest = "oldest"
+	AnchorOldest AnchorMode = "oldest"
 )
 
 // DefaultSyncCount is WhatsApp's usual on-demand history-sync batch size.
@@ -39,7 +42,7 @@ const DefaultSyncCount = 50
 //
 // count bounds the batch size; zero means DefaultSyncCount. Returns a
 // human-readable status.
-func (c *Client) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor string, count int, useLID bool) (string, error) {
+func (c *Client) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor AnchorMode, count int, useLID bool) (string, error) {
 	c.log.Infof("[SYNC] Requesting history sync for chat: %s (anchor=%q, from=%v)", chatJID, anchor, fromTimestamp)
 
 	if c.wa == nil || !c.wa.IsConnected() {
@@ -117,7 +120,7 @@ func (c *Client) RequestHistorySync(ctx context.Context, chatJID string, fromTim
 }
 
 // resolveAnchor picks a real cached message to use as the sync cursor.
-func (c *Client) resolveAnchor(chatJID string, fromTimestamp time.Time, anchor string) (id string, ts time.Time, isFromMe bool, describe string, err error) {
+func (c *Client) resolveAnchor(chatJID string, fromTimestamp time.Time, anchor AnchorMode) (id string, ts time.Time, isFromMe bool, describe string, err error) {
 	switch {
 	case anchor == AnchorOldest:
 		id, ts, isFromMe, err = c.store.GetOldestMessage(chatJID)
