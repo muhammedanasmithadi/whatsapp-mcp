@@ -585,20 +585,25 @@ func (cli *Client) BuildUnavailableMessageRequest(chat, sender types.JID, id str
 //
 // The response will contain to `count` messages immediately before the given message.
 // The recommended number of messages to request at a time is 50.
-func (cli *Client) BuildHistorySyncRequest(lastKnownMessageInfo *types.MessageInfo, count int) *waE2E.Message {
+// Pass mode=1 (HistorySync_INITIAL_STATUS_V3) to request status backfill instead of message history.
+func (cli *Client) BuildHistorySyncRequest(lastKnownMessageInfo *types.MessageInfo, count int, mode int32) *waE2E.Message {
+	req := &waE2E.PeerDataOperationRequestMessage_HistorySyncOnDemandRequest{
+		ChatJID:          new(lastKnownMessageInfo.Chat.String()),
+		OldestMsgID:      new(lastKnownMessageInfo.ID),
+		OldestMsgFromMe:  new(lastKnownMessageInfo.IsFromMe),
+		OnDemandMsgCount: new(int32(count)),
+		// Despite the field name saying "MS", this is actually supposed to contain seconds
+		OldestMsgTimestampMS: new(lastKnownMessageInfo.Timestamp.Unix()),
+	}
+	if mode != 0 {
+		req.Mode = new(mode)
+	}
 	return &waE2E.Message{
 		ProtocolMessage: &waE2E.ProtocolMessage{
 			Type: waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_MESSAGE.Enum(),
 			PeerDataOperationRequestMessage: &waE2E.PeerDataOperationRequestMessage{
 				PeerDataOperationRequestType: waE2E.PeerDataOperationRequestType_HISTORY_SYNC_ON_DEMAND.Enum(),
-				HistorySyncOnDemandRequest: &waE2E.PeerDataOperationRequestMessage_HistorySyncOnDemandRequest{
-					ChatJID:          new(lastKnownMessageInfo.Chat.String()),
-					OldestMsgID:      new(lastKnownMessageInfo.ID),
-					OldestMsgFromMe:  new(lastKnownMessageInfo.IsFromMe),
-					OnDemandMsgCount: new(int32(count)),
-					// Despite the field name saying "MS", this is actually supposed to contain seconds
-					OldestMsgTimestampMS: new(lastKnownMessageInfo.Timestamp.Unix()),
-				},
+				HistorySyncOnDemandRequest:   req,
 			},
 		},
 	}

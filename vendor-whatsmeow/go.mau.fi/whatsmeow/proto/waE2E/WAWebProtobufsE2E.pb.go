@@ -22419,6 +22419,7 @@ type PeerDataOperationRequestMessage_HistorySyncOnDemandRequest struct {
 	OldestMsgTimestampMS  *int64                 `protobuf:"varint,5,opt,name=oldestMsgTimestampMS" json:"oldestMsgTimestampMS,omitempty"`
 	AccountLid            *string                `protobuf:"bytes,6,opt,name=accountLid" json:"accountLid,omitempty"`
 	SupportInlineResponse *bool                  `protobuf:"varint,7,opt,name=supportInlineResponse" json:"supportInlineResponse,omitempty"`
+	Mode                  *int32                 `protobuf:"varint,8,opt,name=mode" json:"mode,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }

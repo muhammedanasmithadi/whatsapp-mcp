@@ -14,14 +14,15 @@ import (
 
 // registerMessageTools wires message-mutation and history tools:
 // edit_message, delete_message, mark_read, mark_chat_read, request_sync,
-// download_media, recover_media, transcribe_voice_note, archive_chat,
-// unarchive_chat.
+// request_status_sync, download_media, recover_media, transcribe_voice_note,
+// archive_chat, unarchive_chat.
 func (s *Server) registerMessageTools() {
 	s.registerEditMessage()
 	s.registerDeleteMessage()
 	s.registerMarkRead()
 	s.registerMarkChatRead()
 	s.registerRequestSync()
+	s.registerRequestStatusSync()
 	s.registerDownloadMedia()
 	s.registerRecoverMedia()
 	s.registerTranscribeVoiceNote()
@@ -239,6 +240,35 @@ func (s *Server) registerRequestSync() {
 			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error requesting history sync", true)), nil
 		}
 		s.auditLog("request_sync", a.ChatJID, "", "request_sync", "success", fmt.Sprintf("requested %d messages", int(a.Count)))
+		return mcp.NewToolResultText(msg), nil
+	}))
+}
+
+// -- request_status_sync -------------------------------------------------------
+
+type requestStatusSyncArgs struct {
+	Count flexInt `json:"count,omitempty"`
+}
+
+func (s *Server) registerRequestStatusSync() {
+	tool := mcp.NewTool("request_status_sync",
+		mcp.WithDescription("Ask WhatsApp servers to backfill missed Status (Stories) updates using the INITIAL_STATUS_V3 history sync type (mode=1). Unlike request_sync, this does not require a cached anchor message — WhatsApp may return statuses posted while the linked device was offline, if the server supports backfill for linked devices. Statuses arrive asynchronously and become queryable via list_status_updates once delivered. No effect on the chat itself or other users. Returns a plain-text confirmation describing what was requested. An empty result afterwards means the server served nothing for that cursor — typically because WhatsApp does not backfill statuses for linked devices."),
+		mcp.WithNumber("count", mcp.DefaultNumber(client.DefaultSyncCount), mcp.Description("how many status updates to request (default 50)")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a requestStatusSyncArgs) (*mcp.CallToolResult, error) {
+		if a.Count < 0 {
+			return errorResult(ErrInvalidParameter("count", "non-negative integer", fmt.Sprintf("%d", a.Count))), nil
+		}
+		msg, err := s.client.RequestStatusSync(ctx, int(a.Count))
+		if err != nil {
+			s.auditLog("request_status_sync", "", "", "request_status_sync", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error requesting status sync", true)), nil
+		}
+		s.auditLog("request_status_sync", "", "", "request_status_sync", "success", fmt.Sprintf("requested %d statuses", int(a.Count)))
 		return mcp.NewToolResultText(msg), nil
 	}))
 }

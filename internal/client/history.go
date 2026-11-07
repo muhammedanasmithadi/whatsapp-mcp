@@ -92,7 +92,7 @@ func (c *Client) RequestHistorySync(ctx context.Context, chatJID string, fromTim
 		Timestamp: timestamp,
 	}
 
-	historyMsg := c.wa.BuildHistorySyncRequest(messageInfo, count)
+	historyMsg := c.wa.BuildHistorySyncRequest(messageInfo, count, 0)
 	if historyMsg == nil {
 		return "", fmt.Errorf("failed to build history sync request")
 	}
@@ -144,4 +144,51 @@ func (c *Client) resolveAnchor(chatJID string, fromTimestamp time.Time, anchor s
 		return "", time.Time{}, false, "", fmt.Errorf("failed to resolve sync anchor for %s: %v", chatJID, err)
 	}
 	return id, ts, isFromMe, describe, nil
+}
+
+// RequestStatusSync requests missed Status (Stories) updates using the
+// INITIAL_STATUS_V3 history sync type (mode=1). Unlike RequestHistorySync,
+// this does not require a cached anchor message — WhatsApp should return
+// statuses posted while the linked device was offline, if the server supports
+// backfill for linked devices.
+//
+// Returns a human-readable status. Delivery is asynchronous; re-query
+// list_status_updates shortly.
+func (c *Client) RequestStatusSync(ctx context.Context, count int) (string, error) {
+	if c.wa == nil || !c.wa.IsConnected() {
+		return "", fmt.Errorf("client not connected")
+	}
+	if c.wa.Store.ID == nil {
+		return "", fmt.Errorf("device not paired")
+	}
+	if count <= 0 {
+		count = DefaultSyncCount
+	}
+
+	messageInfo := &types.MessageInfo{
+		MessageSource: types.MessageSource{
+			Chat:     types.StatusBroadcastJID,
+			IsFromMe: false,
+		},
+	}
+
+	historyMsg := c.wa.BuildHistorySyncRequest(messageInfo, count, 1)
+	if historyMsg == nil {
+		return "", fmt.Errorf("failed to build status sync request")
+	}
+
+	ownJID := c.wa.Store.ID.ToNonAD()
+	c.log.Infof("[SYNC] Requesting status backfill for %s (mode=INITIAL_STATUS_V3, count=%d)",
+		types.StatusBroadcastJID, count)
+
+	resp, err := c.wa.SendMessage(ctx, ownJID, historyMsg, whatsmeow.SendRequestExtra{Peer: true})
+	if err != nil {
+		return "", fmt.Errorf("failed to send status sync request: %v", err)
+	}
+	c.log.Infof("[SYNC] Status sync request sent: ID=%s, Timestamp=%v", resp.ID, resp.Timestamp)
+
+	return fmt.Sprintf(
+		"Status sync requested for %s (requesting %d status updates, mode=INITIAL_STATUS_V3). "+
+			"Delivery is asynchronous; re-query list_status_updates shortly.",
+		types.StatusBroadcastJID, count), nil
 }
