@@ -8,7 +8,9 @@
 set -euo pipefail
 
 mod_version=$(go list -m -f '{{.Version}}' go.mau.fi/whatsmeow)
-mod_dir=$(go env GOMODCACHE)/go.mau.fi/whatsmeow@${mod_version}
+# .Dir follows the replace directive in go.mod, so this resolves to the vendored
+# fork rather than a copy in the module cache that 'go mod download' never fetched.
+mod_dir=$(go list -m -f '{{.Dir}}' go.mau.fi/whatsmeow)
 
 if [[ ! -d "$mod_dir" ]]; then
   echo "error: whatsmeow module not found at ${mod_dir}" >&2
