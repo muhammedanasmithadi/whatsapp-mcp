@@ -94,47 +94,85 @@ jobs:
             gh issue create --title "whatsmeow upstream update available" --label upstream --body "$body"
           fi
 
-  release:
+  build-binaries:
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    needs: test
-    permissions:
-      contents: write
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - os: macos-15
+            goos: darwin
+            goarch: amd64
+          - os: macos-15
+            goos: darwin
+            goarch: arm64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
-      # go-sqlite3 needs cgo. A CGO_ENABLED=0 binary builds but dies at runtime
-      # with "sqlite3 requires cgo to work", so cross-compile with zig as the C
-      # compiler instead of disabling cgo.
-      - uses: goto-bus-stop/setup-zig@v2
+      # go-sqlite3 needs cgo. CGO_ENABLED=0 compiles but dies at runtime with
+      # "sqlite3 requires cgo to work", so build on the target OS with its
+      # native C compiler rather than cross-compiling.
+      - name: Install MinGW (Windows)
+        if: matrix.goos == 'windows'
+        uses: msys2/setup-msys2@v2
         with:
-          version: 0.13.0
-      - name: Build release binaries
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc
+      - name: Build binary
+        shell: bash
         run: |
           set -euo pipefail
-          export ZIG_GLOBAL_CACHE_DIR="$RUNNER_TEMP/zig-cache"
-          export ZIG_LOCAL_CACHE_DIR="$RUNNER_TEMP/zig-local-cache"
-          mkdir -p "$ZIG_GLOBAL_CACHE_DIR" "$ZIG_LOCAL_CACHE_DIR"
           VERSION="${GITHUB_REF#refs/tags/v}"
-          mkdir -p dist
-          build() {
-            local goos="${1%/*}" goarch="${1#*/}" cc="$2" ext=""
-            [ "$goos" = "windows" ] && ext=".exe"
-            echo "Building $goos/$goarch"
-            CC="$cc" CGO_ENABLED=1 GOOS="$goos" GOARCH="$goarch" \
-              go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" \
-              -o "dist/whatsapp-mcp_${VERSION}_${goos}_${goarch}${ext}" ./cmd/whatsapp-mcp
-          }
-          build linux/amd64   "zig cc -target x86_64-linux-gnu"
-          build linux/arm64   "zig cc -target aarch64-linux-gnu"
-          build darwin/amd64  "zig cc -target x86_64-macos"
-          build darwin/arm64  "zig cc -target aarch64-macos"
-          build windows/amd64 "zig cc -target x86_64-windows-gnu"
-          # Guard against shipping a cgo-less binary that cannot open the store.
-          ./dist/whatsapp-mcp_${VERSION}_linux_amd64 -store "$RUNNER_TEMP/smoke-store" smoke
-          (cd dist && sha256sum * > checksums.txt)
+          ext=""
+          [[ "${{ matrix.goos }}" == "windows" ]] && ext=".exe"
+          export CGO_ENABLED=1
+          case "${{ matrix.goos }}" in
+            windows)
+              export PATH="/c/msys64/mingw64/bin:$PATH"
+              export CC=x86_64-w64-mingw32-gcc
+              ;;
+            darwin)
+              # Xcode's SDK is universal; -arch selects the slice for cgo's C compiler.
+              export CC="clang -arch ${{ matrix.goarch }}"
+              ;;
+          esac
+          go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" \
+            -o "whatsapp-mcp_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}${ext}" \
+            ./cmd/whatsapp-mcp
+      - name: Smoke test (linux/amd64)
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: ./whatsapp-mcp_${GITHUB_REF#refs/tags/v}_linux_amd64 -store "$RUNNER_TEMP/smoke-store" smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-mcp-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: whatsapp-mcp_*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [test, build-binaries]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > checksums.txt
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
