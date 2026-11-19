@@ -2,7 +2,8 @@
 CREATE TABLE IF NOT EXISTS chats (
     jid TEXT PRIMARY KEY,
     name TEXT,
-    last_message_time TIMESTAMP
+    last_message_time TIMESTAMP,
+    archived BOOLEAN NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (

@@ -169,7 +169,7 @@ func (s *Store) ListMessages(ctx context.Context, params ListMessagesParams) ([]
 }
 
 // ListChats returns chats matching query. sortBy is "last_active" (default) or "name".
-func (s *Store) ListChats(ctx context.Context, query string, limit, page int, includeLastMessage bool, sortBy string) ([]Chat, error) {
+func (s *Store) ListChats(ctx context.Context, query string, limit, page int, includeLastMessage, includeArchived bool, sortBy string) ([]Chat, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -181,9 +181,16 @@ func (s *Store) ListChats(ctx context.Context, query string, limit, page int, in
 	b.WriteString(chatSelectSQL("chats", includeLastMessage))
 
 	var args []any
+	clauses := []string{}
 	if query != "" {
-		b.WriteString(" WHERE (LOWER(chats.name) LIKE LOWER(?) OR chats.jid LIKE ?)")
+		clauses = append(clauses, "(LOWER(chats.name) LIKE LOWER(?) OR chats.jid LIKE ?)")
 		args = append(args, "%"+query+"%", "%"+query+"%")
+	}
+	if !includeArchived {
+		clauses = append(clauses, "chats.archived = 0")
+	}
+	if len(clauses) > 0 {
+		b.WriteString(" WHERE " + strings.Join(clauses, " AND "))
 	}
 
 	if sortBy == "name" {

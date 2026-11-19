@@ -313,6 +313,7 @@ type listChatsArgs struct {
 	Limit              int    `json:"limit,omitempty"`
 	Page               int    `json:"page,omitempty"`
 	IncludeLastMessage *bool  `json:"include_last_message,omitempty"`
+	IncludeArchived   *bool  `json:"include_archived,omitempty"`
 	SortBy             string `json:"sort_by,omitempty"`
 }
 
@@ -324,6 +325,7 @@ func (s *Server) registerListChats() {
 		mcp.WithNumber("page", mcp.DefaultNumber(0), mcp.Description("zero-based page index for paging through results (default 0)")),
 		mcp.WithBoolean("include_last_message", mcp.DefaultBool(true), mcp.Description("if true, include each chat's most recent message in the result (defaults to true)")),
 		mcp.WithString("sort_by", mcp.DefaultString("last_active"), mcp.Enum("last_active", "name"), mcp.Description("sort order: `last_active` (most-recent first, default) or `name` (alphabetic)")),
+		mcp.WithBoolean("include_archived", mcp.DefaultBool(false), mcp.Description("if true, include archived chats (default false)")),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -335,7 +337,8 @@ func (s *Server) registerListChats() {
 			sortBy = "last_active"
 		}
 		include := a.IncludeLastMessage == nil || *a.IncludeLastMessage
-		chats, err := s.client.Store().ListChats(ctx, a.Query, a.Limit, a.Page, include, sortBy)
+		includeArchived := a.IncludeArchived != nil && *a.IncludeArchived
+		chats, err := s.client.Store().ListChats(ctx, a.Query, a.Limit, a.Page, include, includeArchived, sortBy)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
