@@ -134,7 +134,7 @@ func TestListChats_SortByLastActive(t *testing.T) {
 	// NOTE: ListChats always selects latest_msg.* columns even when
 	// includeLastMessage=false, which causes a SQL error. Until the source
 	// is fixed, tests pass true here. See bug note in the test summary.
-	chats, err := s.ListChats(ctx, "", 20, 0, true, "last_active")
+	chats, err := s.ListChats(ctx, "", 20, 0, true, false, "last_active")
 	if err != nil {
 		t.Fatalf("ListChats: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestListChats_SortByName(t *testing.T) {
 	ctx := context.Background()
 
 	// See note in TestListChats_SortByLastActive.
-	chats, err := s.ListChats(ctx, "", 20, 0, true, "name")
+	chats, err := s.ListChats(ctx, "", 20, 0, true, false, "name")
 	if err != nil {
 		t.Fatalf("ListChats: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestListChats_IncludeLastMessage(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	chats, err := s.ListChats(ctx, "", 20, 0, true, "last_active")
+	chats, err := s.ListChats(ctx, "", 20, 0, true, false, "last_active")
 	if err != nil {
 		t.Fatalf("ListChats: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestListChats_IsGroupField(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	chats, err := s.ListChats(ctx, "", 20, 0, true, "last_active")
+	chats, err := s.ListChats(ctx, "", 20, 0, true, false, "last_active")
 	if err != nil {
 		t.Fatalf("ListChats: %v", err)
 	}
