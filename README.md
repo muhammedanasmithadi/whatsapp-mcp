@@ -74,6 +74,10 @@ Protocol fixes carried in the fork (also contributed upstream where applicable):
 
 ### Build
 
+Download a prebuilt binary from the [latest release](https://github.com/muhammedanasmithadi/whatsapp-mcp/releases/latest). Release assets cover Linux (amd64, arm64), macOS (amd64, arm64) and Windows (amd64), with SHA-256 sums in `checksums.txt`. The binary needs no runtime dependencies except FFmpeg for voice-note transcoding.
+
+Or build from source:
+
 ```bash
 git clone https://github.com/muhammedanasmithadi/whatsapp-mcp.git
 cd whatsapp-mcp
