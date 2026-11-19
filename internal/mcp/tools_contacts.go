@@ -61,10 +61,28 @@ func (s *Server) registerListContacts() {
 		if err != nil {
 			return s.toolErr("list_contacts", "", "", "list_contacts", err), nil
 		}
+		// Merge in cached WhatsApp contacts (from whatsmeow) so users see their
+		// address book even when nothing has been saved in the bridge-local
+		// table. Local rows take precedence on name.
+		if s.client != nil && s.client.Store() != nil {
+			localByJID := make(map[string]bool, len(contacts))
+			for _, c := range contacts {
+				localByJID[c.JID] = true
+			}
+			waContacts, werr := s.client.Store().SearchContacts(ctx, strings.TrimSpace(a.Query))
+			if werr == nil {
+				for _, wc := range waContacts {
+					if localByJID[wc.JID] {
+						continue
+					}
+					contacts = append(contacts, wc)
+				}
+			}
+		}
 		if q := strings.ToLower(strings.TrimSpace(a.Query)); q != "" {
 			filtered := make([]store.Contact, 0, len(contacts))
 			for _, c := range contacts {
-				if strings.Contains(strings.ToLower(c.Name), q) || strings.Contains(strings.ToLower(c.PhoneNumber), q) {
+				if strings.Contains(strings.ToLower(c.Name), q) || strings.Contains(strings.ToLower(c.PhoneNumber), q) || strings.Contains(strings.ToLower(c.JID), q) {
 					filtered = append(filtered, c)
 				}
 			}

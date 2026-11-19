@@ -50,9 +50,6 @@ func (s *Server) registerSearchContacts() {
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a searchContactsArgs) (*mcp.CallToolResult, error) {
-		if a.Query == "" {
-			return errorResult(ErrInvalidParameter("query", "non-empty string", "empty string")), nil
-		}
 		contacts, err := s.client.Store().SearchContacts(ctx, a.Query)
 		if err != nil {
 			s.auditLog("search_contacts", "", "", "search_contacts", "error", err.Error())
