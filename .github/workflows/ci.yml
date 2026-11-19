@@ -114,6 +114,9 @@ jobs:
       - name: Build release binaries
         run: |
           set -euo pipefail
+          export ZIG_GLOBAL_CACHE_DIR="$RUNNER_TEMP/zig-cache"
+          export ZIG_LOCAL_CACHE_DIR="$RUNNER_TEMP/zig-local-cache"
+          mkdir -p "$ZIG_GLOBAL_CACHE_DIR" "$ZIG_LOCAL_CACHE_DIR"
           VERSION="${GITHUB_REF#refs/tags/v}"
           mkdir -p dist
           build() {
