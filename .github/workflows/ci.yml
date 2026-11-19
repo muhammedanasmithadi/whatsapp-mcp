@@ -144,13 +144,9 @@ jobs:
               export CC=x86_64-w64-mingw32-gcc
               ;;
             darwin)
-              # Xcode's SDK is universal; -arch selects the slice for cgo's C
-              # compiler. Go calls amd64 what clang calls x86_64.
-              case "${{ matrix.goarch }}" in
-                amd64) carch=x86_64 ;;
-                arm64) carch=arm64 ;;
-              esac
-              export CC="clang -arch $carch"
+              # Xcode's SDK is universal. Go passes the target -arch to clang
+              # itself; setting one here too makes clang reject -E output.
+              export CC=clang
               ;;
           esac
           go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" \
