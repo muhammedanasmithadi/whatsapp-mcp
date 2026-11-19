@@ -43,10 +43,10 @@ const (
 type PresenceEntry struct {
 	JID          string        `json:"jid"`
 	Online       PresenceState `json:"online"`
-	LastSeen     time.Time `json:"last_seen,omitempty"`
-	LastSeenSeen bool      `json:"last_seen_known"`
-	SubscribedAt time.Time `json:"subscribed_at,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	LastSeen     time.Time     `json:"last_seen,omitempty"`
+	LastSeenSeen bool          `json:"last_seen_known"`
+	SubscribedAt time.Time     `json:"subscribed_at,omitempty"`
+	UpdatedAt    time.Time     `json:"updated_at,omitempty"`
 }
 
 // ListStatusUpdates returns cached Status (Stories) messages since the given
@@ -417,9 +417,9 @@ type AutoRespondDecision string
 
 const (
 	AutoRespondAllowed       AutoRespondDecision = "allowed"
-	AutoRespondDisabled     AutoRespondDecision = "disabled"
+	AutoRespondDisabled      AutoRespondDecision = "disabled"
 	AutoRespondOutsideWindow AutoRespondDecision = "outside_window"
-	AutoRespondInCooldown   AutoRespondDecision = "in_cooldown"
+	AutoRespondInCooldown    AutoRespondDecision = "in_cooldown"
 )
 
 // CanAutoRespond checks whether the auto-responder should reply to a message

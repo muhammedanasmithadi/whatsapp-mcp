@@ -449,4 +449,3 @@ func TestClaimScheduledMessage(t *testing.T) {
 		t.Fatal("claimed unknown row")
 	}
 }
-

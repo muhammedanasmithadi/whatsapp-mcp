@@ -231,11 +231,11 @@ func (s *Server) registerGetPresence() {
 // -- set_auto_responder -------------------------------------------------------
 
 type setAutoResponderArgs struct {
-	Enabled      bool   `json:"enabled"`
-	Message      string `json:"message,omitempty"`
-	StartTime    string `json:"start_time,omitempty"`
-	EndTime      string `json:"end_time,omitempty"`
-	CooldownMinutes int   `json:"cooldown_minutes,omitempty"`
+	Enabled         bool   `json:"enabled"`
+	Message         string `json:"message,omitempty"`
+	StartTime       string `json:"start_time,omitempty"`
+	EndTime         string `json:"end_time,omitempty"`
+	CooldownMinutes int    `json:"cooldown_minutes,omitempty"`
 }
 
 func (s *Server) registerSetAutoResponder() {
@@ -282,10 +282,10 @@ func (s *Server) registerGetAutoResponder() {
 			return s.toolErr("get_auto_responder", "", "", "get_auto_responder", err), nil
 		}
 		return s.toolOK("get_auto_responder", "", "", "get_auto_responder", "", map[string]any{
-			"enabled":         enabled,
-			"message":         message,
-			"start_time":      startTime,
-			"end_time":        endTime,
+			"enabled":          enabled,
+			"message":          message,
+			"start_time":       startTime,
+			"end_time":         endTime,
 			"cooldown_minutes": cooldownMinutes,
 		})
 	}))
@@ -402,8 +402,8 @@ func (s *Server) registerSetProfilePicture() {
 // -- set_status_privacy_setting ---------------------------------------------
 
 type setStatusPrivacyArgs struct {
-	Mode      string   `json:"mode"`
-	UserJIDs  []string `json:"user_jids,omitempty"`
+	Mode     string   `json:"mode"`
+	UserJIDs []string `json:"user_jids,omitempty"`
 }
 
 func (s *Server) registerSetStatusPrivacy() {

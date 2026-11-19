@@ -313,7 +313,7 @@ type listChatsArgs struct {
 	Limit              int    `json:"limit,omitempty"`
 	Page               int    `json:"page,omitempty"`
 	IncludeLastMessage *bool  `json:"include_last_message,omitempty"`
-	IncludeArchived   *bool  `json:"include_archived,omitempty"`
+	IncludeArchived    *bool  `json:"include_archived,omitempty"`
 	SortBy             string `json:"sort_by,omitempty"`
 }
 

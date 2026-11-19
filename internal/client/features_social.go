@@ -336,15 +336,15 @@ const (
 
 // PresenceResult is the live (or last-known) presence of a contact.
 type PresenceResult struct {
-	JID           string     `json:"jid"`
-	ContactName   string     `json:"contact_name,omitempty"`
-	Online        bool       `json:"online"`
-	LastSeen      *time.Time `json:"last_seen,omitempty"`
-	LastSeenKnown bool       `json:"last_seen_known"`
+	JID           string              `json:"jid"`
+	ContactName   string              `json:"contact_name,omitempty"`
+	Online        bool                `json:"online"`
+	LastSeen      *time.Time          `json:"last_seen,omitempty"`
+	LastSeenKnown bool                `json:"last_seen_known"`
 	Answered      bool                `json:"answered"`
 	State         PresenceResultState `json:"state,omitempty"`
 	UpdatedAt     time.Time           `json:"updated_at,omitempty"`
-	Note          string     `json:"note,omitempty"`
+	Note          string              `json:"note,omitempty"`
 }
 
 // GetPresence asks WhatsApp for a contact's presence, waits up to wait for the
@@ -544,10 +544,10 @@ func (c *Client) SendStatus(ctx context.Context, mediaPath, caption string) Send
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
 	}
 	r := c.SendMediaWithOptions(ctx, SendMediaOptions{
-		Recipient:  store.StatusBroadcastJID,
-		Caption:    caption,
-		MediaPath:  mediaPath,
-		ViewOnce:   false,
+		Recipient: store.StatusBroadcastJID,
+		Caption:   caption,
+		MediaPath: mediaPath,
+		ViewOnce:  false,
 	})
 	return r
 }
@@ -584,14 +584,14 @@ func (c *Client) SetProfilePicture(ctx context.Context, mediaPath string) error 
 		Type:      whatsmeow.IqSet,
 		To:        types.ServerJID,
 		Content: []binary.Node{{
-			Tag:     "picture",
+			Tag: "picture",
 			Attrs: binary.Attrs{
-				"url":         resp.URL,
-				"direct_path": resp.DirectPath,
-				"media_key":   string(resp.MediaKey),
-				"file_hash":   string(resp.FileSHA256),
+				"url":           resp.URL,
+				"direct_path":   resp.DirectPath,
+				"media_key":     string(resp.MediaKey),
+				"file_hash":     string(resp.FileSHA256),
 				"file_enc_hash": string(resp.FileEncSHA256),
-				"file_length": fmt.Sprintf("%d", resp.FileLength),
+				"file_length":   fmt.Sprintf("%d", resp.FileLength),
 			},
 		}},
 	})

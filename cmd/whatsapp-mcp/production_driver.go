@@ -34,9 +34,9 @@ type productionDriver struct {
 	c *client.Client
 
 	// pairingMu guards pairingState and pairingAttempts.
-	pairingMu        sync.Mutex
-	pairing          pairingState
-	pairingAttempts  int
+	pairingMu       sync.Mutex
+	pairing         pairingState
+	pairingAttempts int
 
 	// handlerState ensures the logged-out event handler is installed only once.
 	handlerState handlerInstallState

@@ -132,11 +132,11 @@ type Server struct {
 	wsUnregister chan chan wsEvent
 	wsBroadcast  chan wsEvent
 
-	mu           sync.Mutex
-	httpServer   *http.Server
-	boundAddr    string
+	mu            sync.Mutex
+	httpServer    *http.Server
+	boundAddr     string
 	listenerState listenerState
-	listenerOK   chan struct{} // closed once the listener is bound (tests use this)
+	listenerOK    chan struct{} // closed once the listener is bound (tests use this)
 }
 
 // wsEvent is a real-time event pushed to WebSocket subscribers.

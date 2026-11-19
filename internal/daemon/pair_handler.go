@@ -95,8 +95,8 @@ type pairHandlers struct {
 	}
 
 	// CSRF protection for the reset endpoint.
-	csrfMu   sync.Mutex
-	csrf     csrfToken
+	csrfMu    sync.Mutex
+	csrf      csrfToken
 	publishWS func(evType, data string)
 
 	// Webhook HMAC secret for verifying incoming webhook signatures.

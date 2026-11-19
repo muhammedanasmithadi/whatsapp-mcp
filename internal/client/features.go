@@ -321,11 +321,11 @@ func (c *Client) ForwardMessage(ctx context.Context, targetChatJID, sourceChatJI
 		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 			Text: proto.String(cached.Content),
 			ContextInfo: &waE2E.ContextInfo{
-				StanzaID:      new(messageID),
-				Participant:   new(cached.Sender),
-				RemoteJID:     new(source.String()),
+				StanzaID:        new(messageID),
+				Participant:     new(cached.Sender),
+				RemoteJID:       new(source.String()),
 				ForwardingScore: new(uint32(1)),
-				IsForwarded:   new(true),
+				IsForwarded:     new(true),
 			},
 		},
 	}

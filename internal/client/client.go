@@ -79,8 +79,8 @@ type Client struct {
 	downloadMedia    func(context.Context, whatsmeow.DownloadableMessage) ([]byte, error)
 	store            *store.Store
 	log              waLog.Logger
-	handlerID    uint32
-	handlerState handlerInstallState
+	handlerID        uint32
+	handlerState     handlerInstallState
 	allowedMediaRoot string
 	redactor         *security.Redactor
 	limiter          *ratelimit.Limiter
@@ -192,7 +192,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		sttClient:        cfg.STTClient,
 		// ownPresence starts as "unavailable" rather than the zero value so
 		// the "unset" state is never ambiguous with a real availability.
-		ownPresence:      types.PresenceUnavailable,
+		ownPresence: types.PresenceUnavailable,
 	}, nil
 }
 
@@ -408,14 +408,13 @@ func (c *Client) MarkMessageFailed(id, reason string) error {
 	return c.store.MarkMessageFailed(id, reason)
 }
 
-
 // ConnectionState is the explicit lifecycle state of the WhatsApp session.
 type ConnectionState int
 
 const (
-	ConnectionStateUnpaired ConnectionState = iota // no stored session
-	ConnectionStateDisconnected                    // paired but socket down
-	ConnectionStateConnected                      // paired and socket up
+	ConnectionStateUnpaired     ConnectionState = iota // no stored session
+	ConnectionStateDisconnected                        // paired but socket down
+	ConnectionStateConnected                           // paired and socket up
 )
 
 // ConnectionState reports the combined connection/pairing state instead of

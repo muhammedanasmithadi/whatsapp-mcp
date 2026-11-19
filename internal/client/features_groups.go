@@ -164,13 +164,13 @@ type ParticipantUpdateOptions struct {
 
 // ParticipantOutcome is the result for one requested participant.
 type ParticipantOutcome struct {
-	Input           string    `json:"input"`
-	JID             string    `json:"jid,omitempty"`
+	Input           string            `json:"input"`
+	JID             string            `json:"jid,omitempty"`
 	Status          participantStatus `json:"status"`
-	ErrorCode       int       `json:"error_code,omitempty"`
-	Error           string    `json:"error,omitempty"`
-	InviteMessageID string    `json:"invite_message_id,omitempty"`
-	InviteExpiresAt time.Time `json:"invite_expires_at,omitzero"`
+	ErrorCode       int               `json:"error_code,omitempty"`
+	Error           string            `json:"error,omitempty"`
+	InviteMessageID string            `json:"invite_message_id,omitempty"`
+	InviteExpiresAt time.Time         `json:"invite_expires_at,omitzero"`
 }
 
 // ParticipantUpdateReport is the result of UpdateGroupParticipants, with one
