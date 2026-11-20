@@ -1,0 +1,63 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.muhammedanasmithadi/whatsapp-mcp",
+  "title": "WhatsApp MCP",
+  "description": "Self-hosted personal WhatsApp bridge with 86 MCP tools over stdio or Streamable HTTP.",
+  "repository": {
+    "url": "https://github.com/muhammedanasmithadi/whatsapp-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/muhammedanasmithadi/whatsapp-mcp",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/muhammedanasmithadi/whatsapp-mcp/v0.2.0/mcpb/icon.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "256x256"
+      ]
+    }
+  ],
+  "version": "0.2.0",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/muhammedanasmithadi/whatsapp-mcp/releases/download/v0.2.0/whatsapp-mcp_0.2.0_darwin_amd64.mcpb",
+      "fileSha256": "b770fb143dca58bc0a8a5da501f742e27c3c1cca2f8df571298410a852de041b",
+      "transport": {
+        "type": "stdio"
+      }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/muhammedanasmithadi/whatsapp-mcp/releases/download/v0.2.0/whatsapp-mcp_0.2.0_darwin_arm64.mcpb",
+      "fileSha256": "0512be17144fe80e0a1bb73668532d359a1a0387506edf79350e7357e0e787f0",
+      "transport": {
+        "type": "stdio"
+      }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/muhammedanasmithadi/whatsapp-mcp/releases/download/v0.2.0/whatsapp-mcp_0.2.0_linux_amd64.mcpb",
+      "fileSha256": "d30cd64af90c90619ea3254dbf8aef1b5c615e476f4e33881f452f23a306ca5d",
+      "transport": {
+        "type": "stdio"
+      }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/muhammedanasmithadi/whatsapp-mcp/releases/download/v0.2.0/whatsapp-mcp_0.2.0_linux_arm64.mcpb",
+      "fileSha256": "dadc24eaf600de5958eab20b10cc3182b0170c7fb833b32d41ce2d5242d075e4",
+      "transport": {
+        "type": "stdio"
+      }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/muhammedanasmithadi/whatsapp-mcp/releases/download/v0.2.0/whatsapp-mcp_0.2.0_windows_amd64.mcpb",
+      "fileSha256": "cc9637f12b370d779e8e4c9a76600fbc5ab9932c48ae856f51e681a98b1b197d",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
