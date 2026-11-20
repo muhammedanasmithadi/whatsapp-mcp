@@ -45,9 +45,7 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	}
 
 	if !readOnly {
-		if v := os.Getenv("WHATSAPP_MCP_READ_ONLY"); v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes") {
-			readOnly = true
-		}
+		readOnly = readOnlyFromEnv()
 	}
 	if !fullHistorySync {
 		if v := os.Getenv("WHATSAPP_MCP_FULL_HISTORY_SYNC"); v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes") {
@@ -55,18 +53,7 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 		}
 	}
 
-	var toolNames []string
-	if enabledTools != "" {
-		toolNames = strings.Split(enabledTools, ",")
-		for i, n := range toolNames {
-			toolNames[i] = strings.TrimSpace(n)
-		}
-	} else if v := os.Getenv("WHATSAPP_MCP_ENABLED_TOOLS"); v != "" {
-		toolNames = strings.Split(v, ",")
-		for i, n := range toolNames {
-			toolNames[i] = strings.TrimSpace(n)
-		}
-	}
+	toolNames := parseEnabledTools(enabledTools)
 
 	addr = resolveAddr(addr)
 	if !allowRemote && !isLoopbackAddr(addr) {

@@ -3,6 +3,7 @@
 //
 //	login  — one-shot interactive QR pairing (writes session to store/whatsapp.db)
 //	serve  — long-running HTTP daemon: serves MCP at /mcp and pairing UI at /pair
+//	stdio  — MCP over stdin/stdout for MCPB and desktop clients
 //	smoke  — non-interactive boot-check used by CI (no network, no listener)
 package main
 
@@ -28,6 +29,7 @@ Usage:
 Commands:
   login   Pair this device with your WhatsApp account via QR code (terminal)
   serve   Run the always-on HTTP MCP daemon (tracks events + serves MCP on 127.0.0.1:8765)
+  stdio   Serve MCP over stdin/stdout for MCPB and desktop clients
   smoke   Non-interactive boot check (CI): opens store + builds MCP server without connecting
   help    Show this help
 
@@ -89,6 +91,8 @@ func main() {
 		code = runLogin(storeDir, redactor, rest)
 	case "serve":
 		code = runServe(storeDir, redactor, rest)
+	case "stdio":
+		code = runStdio(storeDir, redactor, rest)
 	case "smoke":
 		code = runSmoke(storeDir, redactor, rest)
 	case "help", "-h", "--help":

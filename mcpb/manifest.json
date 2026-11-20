@@ -1,0 +1,48 @@
+{
+  "manifest_version": "0.3",
+  "name": "whatsapp-mcp",
+  "display_name": "WhatsApp MCP",
+  "version": "0.0.0",
+  "description": "Self-hosted personal WhatsApp bridge for AI agents. 86 tools over stdio or Streamable HTTP, with read-only and allowlist modes.",
+  "author": {
+    "name": "Muhammed Anas Smithadi",
+    "url": "https://github.com/muhammedanasmithadi"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/muhammedanasmithadi/whatsapp-mcp.git"
+  },
+  "homepage": "https://github.com/muhammedanasmithadi/whatsapp-mcp",
+  "license": "MIT",
+  "icon": "icon.png",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/whatsapp-mcp",
+    "mcp_config": {
+      "command": "server/whatsapp-mcp",
+      "args": ["-store", "${user_config.store_dir}", "stdio"],
+      "env": {
+        "WHATSAPP_MCP_READ_ONLY": "${user_config.read_only}"
+      }
+    }
+  },
+  "user_config": {
+    "store_dir": {
+      "type": "directory",
+      "title": "Session and message store",
+      "description": "Where the paired WhatsApp session and local SQLite history are kept. Pair once first with `whatsapp-mcp -store DIR login`.",
+      "required": true,
+      "default": "${HOME}/.whatsapp-mcp"
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only mode",
+      "description": "Remove every tool that can change WhatsApp state.",
+      "required": false,
+      "default": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"]
+  }
+}

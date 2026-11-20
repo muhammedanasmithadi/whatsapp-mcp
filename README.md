@@ -114,6 +114,24 @@ Add this to your client configuration:
 
 Restart your client. The daemon outlives client restarts.
 
+### One-click install with MCPB
+
+Each release also ships a `.mcpb` bundle for Linux, macOS and Windows. Install the bundle matching your platform in an MCPB-capable desktop client; the client starts the binary over **stdio** and fills in the configuration for you.
+
+Pair once before installing the bundle, because stdio mode has no browser to show a QR code:
+
+```bash
+whatsapp-mcp -store ~/.whatsapp-mcp login
+```
+
+The bundle's `store_dir` setting defaults to `~/.whatsapp-mcp`, and its `read_only` setting maps to `WHATSAPP_MCP_READ_ONLY`. To run stdio mode by hand:
+
+```bash
+whatsapp-mcp -store ~/.whatsapp-mcp stdio -read-only
+```
+
+stdout carries JSON-RPC frames only; every diagnostic goes to stderr.
+
 ## Serve flags and environment
 
 | Flag / env var | Default | Purpose |
