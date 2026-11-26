@@ -40,7 +40,7 @@ type editMessageArgs struct {
 
 func (s *Server) registerEditMessage() {
 	tool := mcp.NewTool("edit_message",
-		mcp.WithDescription("Edit a previously-sent text message in place; recipients see the new body with an `edited` label. Only your own messages can be edited and only within WhatsApp's edit window (~15 minutes). Re-edit by calling again with another `new_body`; to remove the message entirely use delete_message (revoke). Returns the plain-text string `Message edited` on success."),
+		mcp.WithDescription("Edit a previously-sent text message in place; recipients see the new body with an `edited` label. Only your own messages can be edited and only within WhatsApp's edit window (~15 minutes). Re-edit by calling again with another `new_body`; to remove the message entirely use delete_message (revoke). Returns a JSON object `{Success, Message, ID, MessageID}` where `ID` is the edit's own message id."),
 		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
 		mcp.WithString("message_id", mcp.Required(), mcp.Description("WhatsApp message ID of your own message to edit (use `message_id` from list_messages)")),
 		mcp.WithString("new_body", mcp.Required(), mcp.Description("replacement message body text")),
@@ -50,12 +50,18 @@ func (s *Server) registerEditMessage() {
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a editMessageArgs) (*mcp.CallToolResult, error) {
-		if err := s.client.EditMessage(ctx, a.ChatJID, a.MessageID, a.NewBody); err != nil {
+		editID, err := s.client.EditMessage(ctx, a.ChatJID, a.MessageID, a.NewBody)
+		if err != nil {
 			s.auditLog("edit_message", a.ChatJID, a.MessageID, "edit", "error", err.Error())
 			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error editing message", true)), nil
 		}
 		s.auditLog("edit_message", a.ChatJID, a.MessageID, "edit", "success", "edited")
-		return mcp.NewToolResultText("Message edited"), nil
+		return resultJSON(map[string]any{
+			"Success":   true,
+			"Message":   "Message edited",
+			"ID":        editID,
+			"MessageID": a.MessageID,
+		})
 	}))
 }
 

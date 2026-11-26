@@ -275,7 +275,7 @@ type sendReplyArgs struct {
 
 func (s *Server) registerSendReply() {
 	tool := mcp.NewTool("send_reply",
-		mcp.WithDescription("Send a text message that visibly quotes a previous message; recipients see the new text with the quoted message attached. Reversible via delete_message (revoke) or edit_message (correct text). Use send_message for a fresh non-quoting message and send_reaction for an emoji acknowledgement. Returns the plain-text string `Reply sent` on success."),
+		mcp.WithDescription("Send a text message that visibly quotes a previous message; recipients see the new text with the quoted message attached. Reversible via delete_message (revoke) or edit_message (correct text). Use send_message for a fresh non-quoting message and send_reaction for an emoji acknowledgement. Returns a JSON object `{Success, Message, ID, QuotedID}` where `ID` is the new reply's message id."),
 		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
 		mcp.WithString("target_message_id", mcp.Required(), mcp.Description("WhatsApp message ID of the message being quoted (use `message_id` from list_messages)")),
 		mcp.WithString("target_sender_jid", mcp.Description("JID of the quoted message's original sender; required in group chats, omit in 1:1 chats ("+jidDesc+")")),
@@ -286,12 +286,18 @@ func (s *Server) registerSendReply() {
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a sendReplyArgs) (*mcp.CallToolResult, error) {
-		if err := s.client.SendReply(ctx, a.ChatJID, a.TargetMessageID, a.TargetSenderJID, a.Body); err != nil {
+		replyID, err := s.client.SendReply(ctx, a.ChatJID, a.TargetMessageID, a.TargetSenderJID, a.Body)
+		if err != nil {
 			s.auditLog("send_reply", a.ChatJID, a.TargetMessageID, "reply", "error", err.Error())
 			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error sending reply", true)), nil
 		}
-		s.auditLog("send_reply", a.ChatJID, a.TargetMessageID, "reply", "success", "reply sent")
-		return mcp.NewToolResultText("Reply sent"), nil
+		s.auditLog("send_reply", a.ChatJID, replyID, "reply", "success", "reply sent")
+		return resultJSON(map[string]any{
+			"Success":  true,
+			"Message":  "Reply sent",
+			"ID":       replyID,
+			"QuotedID": a.TargetMessageID,
+		})
 	}))
 }
 

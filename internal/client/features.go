@@ -183,16 +183,16 @@ func (c *Client) persistReaction(ctx context.Context, chat types.JID, msgID, tar
 
 // SendReply sends a text reply that quotes targetMessageID from chatJID.
 // Rate-limited and cached like other outbound actions.
-func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, targetSenderJID, body string) error {
+func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, targetSenderJID, body string) (string, error) {
 	if !c.wa.IsConnected() {
-		return errors.New("not connected to WhatsApp")
+		return "", errors.New("not connected to WhatsApp")
 	}
 	chat, err := types.ParseJID(chatJID)
 	if err != nil {
-		return fmt.Errorf("invalid chat JID: %w", err)
+		return "", fmt.Errorf("invalid chat JID: %w", err)
 	}
 	if err := c.checkActionRate(ctx, chat); err != nil {
-		return err
+		return "", err
 	}
 
 	participant := ""
@@ -222,36 +222,42 @@ func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, target
 
 	resp, err := c.wa.SendMessage(ctx, chat, msg)
 	if err != nil {
-		return fmt.Errorf("send reply: %w", err)
+		return "", fmt.Errorf("send reply: %w", err)
 	}
 
 	// Cache the reply so local history stays complete.
 	c.persistSent(ctx, chat, resp.ID, body, "", msg)
-	return nil
+	return resp.ID, nil
 }
 
 // EditMessage edits a previously-sent message. The new body becomes the new
 // conversation text. Rate-limited.
-func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody string) error {
+func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody string) (string, error) {
 	if !c.wa.IsConnected() {
-		return errors.New("not connected to WhatsApp")
+		return "", errors.New("not connected to WhatsApp")
 	}
 	chat, err := types.ParseJID(chatJID)
 	if err != nil {
-		return fmt.Errorf("invalid chat JID: %w", err)
+		return "", fmt.Errorf("invalid chat JID: %w", err)
 	}
 	if err := c.checkActionRate(ctx, chat); err != nil {
-		return err
+		return "", err
 	}
 
 	newContent := &waE2E.Message{
 		Conversation: proto.String(newBody),
 	}
 	edit := c.wa.BuildEdit(chat, types.MessageID(messageID), newContent)
-	if _, err := c.wa.SendMessage(ctx, chat, edit); err != nil {
-		return fmt.Errorf("send edit: %w", err)
+	resp, err := c.wa.SendMessage(ctx, chat, edit)
+	if err != nil {
+		return "", fmt.Errorf("send edit: %w", err)
 	}
-	return nil
+	// WhatsApp replaces the message body in place. The cache must match, or
+	// list_messages shows the old text forever.
+	if err := c.store.UpdateMessage(ctx, messageID, chat.String(), newBody); err != nil {
+		c.log.Warnf("Cache edit of %s: %v", messageID, err)
+	}
+	return resp.ID, nil
 }
 
 // DeleteMessage revokes a message for everyone. senderJID is required only
@@ -279,6 +285,10 @@ func (c *Client) DeleteMessage(ctx context.Context, chatJID, messageID, senderJI
 	revoke := c.wa.BuildRevoke(chat, sender, types.MessageID(messageID))
 	if _, err := c.wa.SendMessage(ctx, chat, revoke); err != nil {
 		return fmt.Errorf("send revoke: %w", err)
+	}
+	// The message is gone for everyone; the cache must stop serving its body.
+	if err := c.store.RevokeMessage(ctx, messageID, chat.String()); err != nil {
+		c.log.Warnf("Cache revoke of %s: %v", messageID, err)
 	}
 	return nil
 }
