@@ -158,7 +158,7 @@ stdout carries JSON-RPC frames only; every diagnostic goes to stderr.
 
 ## MCP tools reference
 
-The server exposes **90 tools**, grouped by domain:
+The server exposes **91 tools**, grouped by domain:
 
 ### Messaging
 

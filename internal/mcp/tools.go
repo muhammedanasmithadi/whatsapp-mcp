@@ -34,6 +34,7 @@ func (s *Server) registerTools() {
 		// media download are kept because they are read-side operations.
 		s.registerRequestSync()
 		s.registerSyncContacts()
+		s.registerResyncAppState()
 		s.registerDownloadMedia()
 		s.registerRecoverMedia()
 		s.registerTranscribeVoiceNote()
@@ -61,6 +62,7 @@ func (s *Server) registerTools() {
 	// Local contact book and the message scheduler queue.
 	s.registerContactActionTools()
 	s.registerSyncContacts()
+	s.registerResyncAppState()
 	s.registerSchedulingActionTools()
 
 	// Channels and chat-level settings backed by WhatsApp app state.

@@ -281,6 +281,59 @@ func (s *Server) registerSyncContacts() {
 	}))
 }
 
+// resyncAppStateArgs selects which app-state patch to resync.
+type resyncAppStateArgs struct {
+	Patch string `json:"patch,omitempty"`
+}
+
+func (s *Server) registerResyncAppState() {
+	tool := mcp.NewTool("resync_app_state",
+		mcp.WithDescription("Force a full app-state resync from the server, dropping the local version for one patch and re-fetching it. Use it when app-state mutations fail with a server 409 or a mismatch of the local state hash: the linked device is holding a stale version, so every write collides. Covers pin_chat, pin_message, star_message and set_status_privacy_setting, which all write the regular_low patch. Read-only on WhatsApp: it refreshes this device's cached state and writes no account change. If the resync itself fails with a mismatching LTHash, the device's app-state key is stale rather than its version, and only re-linking the device recovers it. Returns {patch, resynced_at}."),
+		mcp.WithString("patch", mcp.Description("app-state patch: regular_low (pins, stars, status privacy), regular, regular_high, critical_block, critical_unblock_low (contacts). Defaults to regular_low.")),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a resyncAppStateArgs) (*mcp.CallToolResult, error) {
+		if s.client == nil || s.client.WA() == nil {
+			return s.toolErr("resync_app_state", "", "", "resync_app_state", fmt.Errorf("not connected")), nil
+		}
+		patch := appstate.WAPatchName(a.Patch)
+		if patch == "" {
+			patch = appstate.WAPatchRegularLow
+		}
+		switch patch {
+		case appstate.WAPatchCriticalBlock, appstate.WAPatchCriticalUnblockLow,
+			appstate.WAPatchRegularLow, appstate.WAPatchRegular, appstate.WAPatchRegularHigh:
+		default:
+			return errorResult(ErrInvalidParameter("patch", "one of regular_low, regular, regular_high, critical_block, critical_unblock_low", a.Patch)), nil
+		}
+
+		s.syncMu.Lock()
+		if time.Since(s.lastSync) < 10*time.Minute && patch != appstate.WAPatchRegularLow {
+			remaining := 10*time.Minute - time.Since(s.lastSync)
+			s.syncMu.Unlock()
+			return s.toolErr("resync_app_state", "", "", "resync_app_state",
+				fmt.Errorf("rate limited: try again in %s", remaining.Round(time.Second))), nil
+		}
+		s.syncMu.Unlock()
+
+		if err := s.client.WA().FetchAppState(ctx, patch, true, false); err != nil {
+			return s.toolErr("resync_app_state", "", "", "resync_app_state", err), nil
+		}
+
+		s.syncMu.Lock()
+		s.lastSync = time.Now()
+		s.syncMu.Unlock()
+
+		return s.toolOK("resync_app_state", "", "", "resync_app_state", "", map[string]any{
+			"patch":       string(patch),
+			"resynced_at": time.Now().UTC().Format(time.RFC3339),
+		})
+	}))
+}
+
 // canonicalContactJID normalizes a phone number or JID and rejects non-user
 // JIDs (groups, broadcasts) that do not belong in a personal address book.
 func canonicalContactJID(raw string) (string, error) {
