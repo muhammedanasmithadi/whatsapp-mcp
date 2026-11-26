@@ -18,8 +18,6 @@ func TestStoreChatPreservesArchivedFlag(t *testing.T) {
 		t.Fatalf("ArchiveChat: %v", err)
 	}
 
-	// An inbound message re-stores the chat row; it must not resurrect the
-	// chat into the default listing.
 	if err := s.StoreChat(jid, "Second", time.Now()); err != nil {
 		t.Fatalf("StoreChat after archive: %v", err)
 	}

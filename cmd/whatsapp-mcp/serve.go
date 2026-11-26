@@ -61,9 +61,6 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 		return 2
 	}
 
-	// When binding to a non-loopback address we require a shared bearer
-	// token. Loopback-only operation intentionally keeps no token so local
-	// editors and curl can hit the daemon without extra setup.
 	var authToken string
 	if allowRemote {
 		authToken = os.Getenv("WHATSAPP_MCP_TOKEN")
@@ -96,8 +93,6 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	if mkErr := os.MkdirAll(allowedMediaRoot, 0o755); mkErr != nil {
 		fmt.Fprintf(os.Stderr, "warn: could not create media root %q: %v\n", allowedMediaRoot, mkErr)
 	}
-	// Operator UX: make the media root obvious on boot so users know where
-	// to drop outbound attachments.
 	fmt.Fprintf(os.Stderr, "media root: %s (drop outbound files here)\n", allowedMediaRoot)
 
 	st, err := store.Open(storeDir)
@@ -126,7 +121,6 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 		logger = client.NewStderrLogger("Client", "INFO", false)
 	}
 
-	// Voice-note transcription client (optional).
 	var sttClient stt.Client
 	if ep := os.Getenv("WHATSAPP_MCP_STT_ENDPOINT"); ep != "" {
 		sttClient = stt.NewHTTPClient()
@@ -149,9 +143,6 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 
 	drv := newProductionDriver(c)
 
-	// The daemon owns the pair cache, so build it first, then hand the cache
-	// to the MCP server (so pairing_status can surface the live QR), then
-	// mount the MCP HTTP handler back onto the daemon.
 	d, err := daemon.New(daemon.Config{
 		Addr:            addr,
 		Driver:          drv,
@@ -165,11 +156,8 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 		return 1
 	}
 
-	// Wire the daemon as the client's metrics sink so send/receive/error
-	// counters are exposed at /metrics.
 	c.SetMetricSink(d)
 
-	// Wire real-time message events to WebSocket subscribers.
 	c.SetOnIncomingMessage(func(data string) {
 		d.PublishWS("message", data)
 	})
@@ -197,7 +185,6 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	return 0
 }
 
-// resolveAddr applies the -addr / WHATSAPP_MCP_ADDR / default precedence.
 func resolveAddr(flagValue string) string {
 	if flagValue != "" {
 		return flagValue
@@ -208,20 +195,14 @@ func resolveAddr(flagValue string) string {
 	return "127.0.0.1:8765"
 }
 
-// isLoopbackAddr reports whether addr's host resolves to a loopback IP.
-// Hostnames (including "localhost") are resolved via DNS; all returned
-// addresses must be loopback for the check to pass. Non-loopback binds
-// require -allow-remote.
 func isLoopbackAddr(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false
 	}
-	// If it parses directly as an IP, check without DNS.
 	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback()
 	}
-	// Resolve hostname and require every address to be loopback.
 	addrs, err := net.LookupHost(host)
 	if err != nil || len(addrs) == 0 {
 		return false

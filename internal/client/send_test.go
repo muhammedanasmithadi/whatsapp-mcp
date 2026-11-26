@@ -8,12 +8,6 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-// TestParseRecipient covers the recipient-string → types.JID conversion used
-// by every send tool. The headline behaviour: a leading `+` on a bare phone
-// number is stripped (so E.164-with-plus is accepted as a courtesy), and any
-// other non-digit input on the bare-number path is rejected with a clear
-// error instead of silently constructing an invalid JID. Fully-qualified JIDs
-// containing `@` are delegated to whatsmeow's own parser unchanged.
 func TestParseRecipient(t *testing.T) {
 	cases := []struct {
 		name       string

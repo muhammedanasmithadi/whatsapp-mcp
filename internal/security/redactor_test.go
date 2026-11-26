@@ -26,7 +26,6 @@ func TestRedactor_JID(t *testing.T) {
 
 func TestRedactor_JID_Debug(t *testing.T) {
 	r := &Redactor{Debug: true}
-	// Phone-number user-parts are masked in debug mode.
 	in := "15551234567@s.whatsapp.net"
 	want := "*****34567@s.whatsapp.net"
 	if got := r.JID(in); got != want {

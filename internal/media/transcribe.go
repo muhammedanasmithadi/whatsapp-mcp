@@ -1,4 +1,3 @@
-// Package media provides audio transcription helpers for WhatsApp voice notes.
 package media
 
 import (
@@ -9,15 +8,11 @@ import (
 	"os/exec"
 )
 
-// ConvertToWAV converts any audio format ffmpeg can read (including Ogg Opus
-// WhatsApp voice notes) to 16kHz mono WAV, suitable for speech-to-text
-// endpoints. Returns the WAV bytes.
 func ConvertToWAV(ctx context.Context, audioData []byte, inputFormat string) ([]byte, error) {
 	if len(audioData) == 0 {
 		return nil, fmt.Errorf("media: empty audio data")
 	}
 
-	// Write input to a temp file.
 	inFile, err := os.CreateTemp("", "stt-input.*."+inputFormat)
 	if err != nil {
 		return nil, fmt.Errorf("media: create input temp file: %w", err)
@@ -40,7 +35,6 @@ func ConvertToWAV(ctx context.Context, audioData []byte, inputFormat string) ([]
 	outFile.Close()
 	defer os.Remove(outPath)
 
-	// ffmpeg: decode input to 16kHz mono WAV (PCM_S16LE).
 	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-i", inPath,
 		"-ar", "16000",

@@ -45,7 +45,6 @@ func TestReadOnlyFromEnv(t *testing.T) {
 }
 
 func TestRunStdioRejectsUnknownFlag(t *testing.T) {
-	// Flag parsing happens before any store or network work.
 	if got := runStdio(t.TempDir(), nil, []string{"-not-a-flag"}); got != 2 {
 		t.Fatalf("runStdio with unknown flag = %d, want 2", got)
 	}

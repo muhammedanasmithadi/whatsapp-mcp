@@ -7,16 +7,10 @@ import (
 	"time"
 )
 
-// StatusBroadcastJID is the fixed WhatsApp JID that carries Status (Stories)
-// updates. Status messages are ordinary messages whose chat JID is this
-// broadcast address and whose sender is the contact who posted them.
 const StatusBroadcastJID = "status@broadcast"
 
-// StatusTTL is how long a WhatsApp Status update stays visible. WhatsApp
-// deletes statuses after 24 hours; we keep the cached row but mark it expired.
 const StatusTTL = 24 * time.Hour
 
-// StatusUpdate is one cached Status (Stories) item posted by a contact.
 type StatusUpdate struct {
 	MessageID   string    `json:"message_id"`
 	SenderJID   string    `json:"sender_jid"`
@@ -31,7 +25,6 @@ type StatusUpdate struct {
 	Expired     bool      `json:"expired"`
 }
 
-// PresenceEntry is the last known presence state for a contact.
 type PresenceState bool
 
 const (
@@ -48,9 +41,6 @@ type PresenceEntry struct {
 	UpdatedAt    time.Time     `json:"updated_at,omitempty"`
 }
 
-// ListStatusUpdates returns cached Status (Stories) messages since the given
-// time, newest first. Sender display names are resolved from the local
-// contacts table first, then the cached chat list.
 func (s *Store) ListStatusUpdates(ctx context.Context, since time.Time, limit int) ([]StatusUpdate, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 1000
@@ -95,9 +85,6 @@ func (s *Store) ListStatusUpdates(ctx context.Context, since time.Time, limit in
 		return nil, err
 	}
 	// The store uses a single SQLite connection (MaxOpenConns(1)), so the
-	// outer result set must be fully drained and closed before issuing name
-	// lookups. Resolving names inside the loop deadlocks on that one
-	// connection.
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
@@ -114,9 +101,6 @@ func (s *Store) ListStatusUpdates(ctx context.Context, since time.Time, limit in
 	return updates, nil
 }
 
-// StatusMessageIDs returns the message IDs of cached status updates posted by
-// senderJID at or after since. Used to validate mark-viewed targets so a tool
-// caller cannot send read receipts for arbitrary chats.
 func (s *Store) StatusMessageIDs(ctx context.Context, senderJID string, since time.Time) (map[string]struct{}, error) {
 	sender := strings.TrimSuffix(senderJID, "@s.whatsapp.net")
 	rows, err := s.db.QueryContext(ctx, `
@@ -138,10 +122,6 @@ func (s *Store) StatusMessageIDs(ctx context.Context, senderJID string, since ti
 	return ids, rows.Err()
 }
 
-// lookupDisplayName returns the best local name for a JID. User-created
-// contact entries win, then the account's address book (stored by whatsmeow in
-// whatsapp.db), then chat history names. A bare phone number saved as a chat
-// name is ignored so callers see a real name when one exists.
 func (s *Store) lookupDisplayName(jid string) string {
 	var name string
 	if err := s.db.QueryRow("SELECT COALESCE(name, '') FROM contacts WHERE jid = ?", jid).Scan(&name); err == nil && name != "" {
@@ -173,8 +153,6 @@ func isDigitsOnly(s string) bool {
 	return true
 }
 
-// UpsertPresence records the latest presence event for a JID. A zero lastSeen
-// leaves any previously known last-seen timestamp intact.
 func (s *Store) UpsertPresence(ctx context.Context, jid string, online PresenceState, lastSeen time.Time) error {
 	var lastSeenArg any
 	if !lastSeen.IsZero() {
@@ -191,8 +169,6 @@ func (s *Store) UpsertPresence(ctx context.Context, jid string, online PresenceS
 	return err
 }
 
-// MarkPresenceSubscribed records that this client asked WhatsApp for presence
-// updates about a JID, without changing any previously observed state.
 func (s *Store) MarkPresenceSubscribed(ctx context.Context, jid string) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO presence (jid, online, subscribed_at, updated_at)
@@ -204,8 +180,6 @@ func (s *Store) MarkPresenceSubscribed(ctx context.Context, jid string) error {
 	return err
 }
 
-// GetPresence returns the cached presence entry for a JID. sql.ErrNoRows means
-// no event or subscription has ever been observed.
 func (s *Store) GetPresence(ctx context.Context, jid string) (*PresenceEntry, error) {
 	var (
 		p        PresenceEntry
@@ -233,8 +207,6 @@ func (s *Store) GetPresence(ctx context.Context, jid string) (*PresenceEntry, er
 	return &p, nil
 }
 
-// ListPresence returns every cached presence entry, most recently updated
-// first.
 func (s *Store) ListPresence(ctx context.Context) ([]PresenceEntry, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT jid, online, last_seen, subscribed_at, updated_at
@@ -270,8 +242,6 @@ func (s *Store) ListPresence(ctx context.Context) ([]PresenceEntry, error) {
 	return out, rows.Err()
 }
 
-// DeletePresence removes a presence entry. Mainly useful for tests and for
-// clearing a contact the user no longer wants tracked.
 func (s *Store) DeletePresence(ctx context.Context, jid string) error {
 	_, err := s.db.ExecContext(ctx, "DELETE FROM presence WHERE jid = ?", jid)
 	return err
@@ -313,7 +283,6 @@ func (s *Store) GetAutoResponderWithConfig(ctx context.Context) (enabled bool, m
 	return enabled, msg.String, startTime, endTime, cooldownMinutes, nil
 }
 
-// SetAutoResponder persists the auto-responder configuration.
 func (s *Store) SetAutoResponder(ctx context.Context, enabled bool, message string) error {
 	enabledStr := "false"
 	if enabled {
@@ -330,8 +299,6 @@ func (s *Store) SetAutoResponder(ctx context.Context, enabled bool, message stri
 	return err
 }
 
-// SetAutoResponderWithConfig persists the full auto-responder configuration
-// including start time, end time, and cooldown minutes.
 func (s *Store) SetAutoResponderWithConfig(ctx context.Context, enabled bool, message string, startTime, endTime string, cooldownMinutes int) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -370,8 +337,6 @@ func (s *Store) SetAutoResponderWithConfig(ctx context.Context, enabled bool, me
 	return tx.Commit()
 }
 
-// AutoRespondDecision is the explicit state of an auto-responder eligibility
-// check.
 type AutoRespondDecision string
 
 const (
@@ -381,11 +346,6 @@ const (
 	AutoRespondInCooldown    AutoRespondDecision = "in_cooldown"
 )
 
-// CanAutoRespond checks whether the auto-responder should reply to a message
-// from the given JID at the current time. It checks:
-//   - auto-responder is enabled
-//   - current time is within the configured start/end window (if set)
-//   - cooldown period has elapsed since the last reply to this JID (if set)
 func (s *Store) CanAutoRespond(ctx context.Context, jid string) (AutoRespondDecision, error) {
 	enabled, _, startTime, endTime, cooldownMinutes, err := s.GetAutoResponderWithConfig(ctx)
 	if err != nil {
@@ -395,7 +355,6 @@ func (s *Store) CanAutoRespond(ctx context.Context, jid string) (AutoRespondDeci
 		return AutoRespondDisabled, nil
 	}
 	now := time.Now()
-	// Check time window
 	if startTime != "" {
 		start, err := time.Parse("15:04", startTime)
 		if err == nil {
@@ -414,7 +373,6 @@ func (s *Store) CanAutoRespond(ctx context.Context, jid string) (AutoRespondDeci
 			}
 		}
 	}
-	// Check cooldown
 	if cooldownMinutes > 0 {
 		var lastReply sql.NullTime
 		err = s.db.QueryRowContext(ctx, `SELECT last_reply FROM auto_responder_cooldown WHERE jid = ?`, jid).Scan(&lastReply)
@@ -428,8 +386,6 @@ func (s *Store) CanAutoRespond(ctx context.Context, jid string) (AutoRespondDeci
 	return AutoRespondAllowed, nil
 }
 
-// RecordAutoRespond records that an auto-response was sent to the given JID
-// at the current time, for cooldown tracking.
 func (s *Store) RecordAutoRespond(ctx context.Context, jid string) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO auto_responder_cooldown (jid, last_reply) VALUES (?, CURRENT_TIMESTAMP)

@@ -13,19 +13,11 @@ import (
 //go:embed testdata/seed.sql
 var testFixtures embed.FS
 
-// uniqueDB counter so each openTestStore call gets an isolated shared-cache DB.
 var uniqueDBCounter atomic.Uint64
 
-// openTestStore opens an in-memory store, applies the schema and seeds fixtures.
-// The returned Store is registered for cleanup via t.Cleanup. The whatsmeowDB
-// handle points at the same in-memory DB (the seeded whatsmeow_lid_map table
-// lives there).
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 
-	// Use a uniquely-named in-memory DB with shared cache so repeat opens
-	// across tests don't collide. `mode=memory&cache=shared` with a named
-	// file makes the DB persist across connections in the same process.
 	id := uniqueDBCounter.Add(1)
 	dsn := fmt.Sprintf("file:store_test_%d?mode=memory&cache=shared&_foreign_keys=on", id)
 
@@ -33,8 +25,6 @@ func openTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("open in-memory db: %v", err)
 	}
-	// A single connection to avoid per-connection isolation weirdness with
-	// shared-cache in-memory databases.
 	db.SetMaxOpenConns(1)
 
 	seed, err := testFixtures.ReadFile("testdata/seed.sql")
@@ -47,8 +37,6 @@ func openTestStore(t *testing.T) *Store {
 		t.Fatalf("apply seed: %v", err)
 	}
 
-	// A second handle to the same shared-cache DB, playing the role of
-	// whatsmeowDB. LID lookups hit the same underlying tables.
 	waDB, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		db.Close()

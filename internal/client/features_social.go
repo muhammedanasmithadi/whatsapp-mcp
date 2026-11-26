@@ -24,15 +24,11 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// Profile-picture lookup errors. These are normal, privacy-gated outcomes —
-// not transport failures — so the MCP layer can report them cleanly.
 var (
 	ErrProfilePictureNotSet = errors.New("no profile picture set")
 	ErrProfilePictureHidden = errors.New("profile picture is hidden by privacy settings")
 )
 
-// ProfilePictureResult is the public result of GetProfilePicture. Path is the
-// locally cached copy, suitable for inline display in an MCP client.
 type ProfilePictureResult struct {
 	JID     string `json:"jid"`
 	URL     string `json:"url"`
@@ -43,9 +39,6 @@ type ProfilePictureResult struct {
 	Bytes   int    `json:"bytes,omitempty"`
 }
 
-// GetProfilePicture fetches a contact's or group's profile photo from
-// WhatsApp, downloads it, and caches it under <storeDir>/profile-pics.
-// preview asks WhatsApp for the small thumbnail instead of the full image.
 func (c *Client) GetProfilePicture(ctx context.Context, recipient string, preview bool) (*ProfilePictureResult, error) {
 	if !c.wa.IsConnected() {
 		return nil, errors.New("not connected to WhatsApp")
@@ -99,8 +92,6 @@ func (c *Client) GetProfilePicture(ctx context.Context, recipient string, previe
 	return result, nil
 }
 
-// downloadProfilePicture fetches a profile photo CDN URL. Profile photos are
-// served unencrypted (unlike message media), so a plain HTTPS GET is enough.
 func (c *Client) downloadProfilePicture(ctx context.Context, url string) ([]byte, string, error) {
 	const maxProfilePictureBytes = 10 << 20
 
@@ -138,7 +129,6 @@ func (c *Client) downloadProfilePicture(ctx context.Context, url string) ([]byte
 	return data, ext, nil
 }
 
-// ContactInfoResult is live profile metadata returned by GetContactInfo.
 type ContactInfoResult struct {
 	JID          string   `json:"jid"`
 	PhoneNumber  string   `json:"phone_number,omitempty"`
@@ -151,8 +141,6 @@ type ContactInfoResult struct {
 	VerifiedName string   `json:"verified_name,omitempty"`
 }
 
-// GetContactInfo fetches live profile metadata (About text, picture ID, LID,
-// device list) via one usync lookup, and merges locally cached names.
 func (c *Client) GetContactInfo(ctx context.Context, recipient string) (*ContactInfoResult, error) {
 	if !c.wa.IsConnected() {
 		return nil, errors.New("not connected to WhatsApp")
@@ -192,8 +180,6 @@ func (c *Client) GetContactInfo(ctx context.Context, recipient string) (*Contact
 	return out, nil
 }
 
-// StatusGroup is one contact's set of cached Status (Stories) updates,
-// newest first.
 type StatusGroup struct {
 	SenderJID   string               `json:"sender_jid"`
 	SenderName  string               `json:"sender_name,omitempty"`
@@ -203,7 +189,6 @@ type StatusGroup struct {
 	Updates     []store.StatusUpdate `json:"updates"`
 }
 
-// ListStatusOptions filters ListStatusUpdates.
 type ListStatusOptions struct {
 	Hours          int    // look-back window; defaults to 24
 	Sender         string // optional phone/JID filter
@@ -211,9 +196,6 @@ type ListStatusOptions struct {
 	Limit          int    // max status items; defaults to 200
 }
 
-// ListStatusUpdates returns cached Status (Stories) updates grouped by sender,
-// newest group first. This is the same source WhatsApp Web uses: status
-// messages delivered to the status@broadcast JID and stored locally.
 func (c *Client) ListStatusUpdates(ctx context.Context, opts ListStatusOptions) ([]StatusGroup, int, error) {
 	if opts.Hours <= 0 {
 		opts.Hours = 24
@@ -276,10 +258,6 @@ func (c *Client) ListStatusUpdates(ctx context.Context, opts ListStatusOptions) 
 	return groups, total, nil
 }
 
-// MarkStatusViewed sends read receipts for cached status updates from one
-// sender, which adds the paired account to the poster's viewer list. If ids is
-// empty, every unexpired cached update from that sender is marked. It returns
-// the number of receipts sent.
 func (c *Client) MarkStatusViewed(ctx context.Context, sender string, ids []string) (int, error) {
 	if !c.wa.IsConnected() {
 		return 0, errors.New("not connected to WhatsApp")
@@ -321,7 +299,6 @@ func (c *Client) MarkStatusViewed(ctx context.Context, sender string, ids []stri
 	return len(targets), nil
 }
 
-// PresenceResultState is the explicit source of a PresenceResult.
 type PresenceResultState string
 
 const (
@@ -330,7 +307,6 @@ const (
 	PresenceResultNone   PresenceResultState = "none"
 )
 
-// PresenceResult is the live (or last-known) presence of a contact.
 type PresenceResult struct {
 	JID           string              `json:"jid"`
 	ContactName   string              `json:"contact_name,omitempty"`
@@ -343,10 +319,6 @@ type PresenceResult struct {
 	Note          string              `json:"note,omitempty"`
 }
 
-// GetPresence asks WhatsApp for a contact's presence, waits up to wait for the
-// server's response, and returns it. WhatsApp only delivers presence while the
-// querying client is marked available, so this briefly sets the account
-// available and then restores its previous availability.
 func (c *Client) GetPresence(ctx context.Context, recipient string, wait time.Duration) (*PresenceResult, error) {
 	if !c.wa.IsConnected() {
 		return nil, errors.New("not connected to WhatsApp")
@@ -367,8 +339,6 @@ func (c *Client) GetPresence(ctx context.Context, recipient string, wait time.Du
 		if err := c.wa.SendPresence(ctx, types.PresenceAvailable); err != nil {
 			return nil, fmt.Errorf("mark online for presence query: %w", err)
 		}
-		// Restore the pre-query availability in the background: the caller
-		// should not wait on an extra round trip.
 		restore := previous
 		if restore == "" {
 			restore = types.PresenceUnavailable
@@ -395,7 +365,6 @@ func (c *Client) GetPresence(ctx context.Context, recipient string, wait time.Du
 	case pr := <-ch:
 		return &pr, nil
 	case <-time.After(wait):
-		// Fall back to whatever was cached before this query.
 		return c.cachedPresence(jid)
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -433,11 +402,8 @@ func (c *Client) addPresenceWaiter(jid string) (<-chan PresenceResult, func()) {
 	return ch, cancel
 }
 
-// handlePresence persists a live presence event and wakes any GetPresence
-// caller waiting for that JID.
 func (c *Client) handlePresence(evt *events.Presence) {
 	rawJID := evt.From.ToNonAD().String()
-	// WhatsApp usually addresses presence by LID on modern accounts. Resolve
 	// to the phone JID so callers querying either form see the same row.
 	jid := c.store.ResolveLIDToJID(rawJID)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -477,8 +443,6 @@ func (c *Client) handlePresence(evt *events.Presence) {
 	c.log.Debugf("Presence: %s online=%v last_seen=%v", c.redactor.JID(jid), pr.Online, pr.LastSeenKnown)
 }
 
-// cachedPresence converts a stored presence row into a result for a caller
-// whose live query timed out.
 func (c *Client) cachedPresence(jid types.JID) (*PresenceResult, error) {
 	entry, err := c.store.GetPresence(context.Background(), jid.String())
 	if err != nil {
@@ -511,10 +475,6 @@ func (c *Client) cachedPresence(jid types.JID) (*PresenceResult, error) {
 	return out, nil
 }
 
-// SendStatus sends a Status (Story) update as a media message to
-// status@broadcast. mediaPath must be an image or video file under the
-// configured media root. caption is the optional status caption.
-// Returns the sent message result.
 func (c *Client) SendStatus(ctx context.Context, mediaPath, caption string) SendResult {
 	if !c.wa.IsConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
@@ -528,9 +488,6 @@ func (c *Client) SendStatus(ctx context.Context, mediaPath, caption string) Send
 	return r
 }
 
-// DeleteStatus deletes a Status (Story) update by revoking its message from
-// status@broadcast. messageID is the status message ID from
-// list_status_updates.
 func (c *Client) DeleteStatus(ctx context.Context, messageID string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -541,8 +498,6 @@ func (c *Client) DeleteStatus(ctx context.Context, messageID string) error {
 	return c.DeleteMessage(ctx, store.StatusBroadcastJID, messageID, "")
 }
 
-// SetProfilePicture sets the paired account's profile picture. mediaPath must
-// be an image file under the configured media root.
 func (c *Client) SetProfilePicture(ctx context.Context, mediaPath string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -578,10 +533,6 @@ func (c *Client) SetProfilePicture(ctx context.Context, mediaPath string) error 
 	return err
 }
 
-// SetStatusPrivacy sets the privacy mode for the paired account's Status
-// (Story) updates. mode can be "all", "contacts", "close_friends", or
-// "custom". For "custom", userJIDs should contain the JIDs of contacts
-// allowed to view statuses.
 func (c *Client) SetStatusPrivacy(ctx context.Context, mode string, userJIDs []string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")

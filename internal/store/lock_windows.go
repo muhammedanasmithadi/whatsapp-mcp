@@ -11,11 +11,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// TryLock acquires a non-blocking exclusive byte-range lock on
-// <storeDir>/.lock via LockFileEx, the Windows analogue of flock(2). If the
-// lock is held by another process, a wrapped ErrLocked is returned whose
-// message includes the full path of the lock file and a hint for recovery
-// when the lock is stale.
 func TryLock(storeDir string) (*FileLock, error) {
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create store dir: %w", err)
@@ -30,8 +25,6 @@ func TryLock(storeDir string) (*FileLock, error) {
 	if err := windows.LockFileEx(windows.Handle(f.Fd()), flags, 0, 1, 0, ol); err != nil {
 		_ = f.Close()
 		if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
-			// Wrap ErrLocked so existing errors.Is callers still match,
-			// but enrich the message with the operator-recovery hint.
 			return nil, fmt.Errorf("%w (if no other whatsapp-mcp is running, remove %s)", ErrLocked, p)
 		}
 		return nil, fmt.Errorf("lockfileex: %w", err)
@@ -39,7 +32,6 @@ func TryLock(storeDir string) (*FileLock, error) {
 	return &FileLock{path: p, f: f, state: lockStateLocked}, nil
 }
 
-// Release drops the lock. Safe to call multiple times.
 func (l *FileLock) Release() {
 	if l == nil || l.f == nil {
 		return

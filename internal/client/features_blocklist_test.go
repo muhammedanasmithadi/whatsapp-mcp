@@ -8,10 +8,6 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-// Blocklist methods gate on (*whatsmeow.Client).IsConnected, which is false
-// when c.wa is nil — so we can exercise the "not-connected" branch cheaply
-// via newDisconnectedClient() (defined in features_groups_test.go).
-
 func TestGetBlocklist_NotConnected(t *testing.T) {
 	c := newDisconnectedClient()
 	_, err := c.GetBlocklist(context.Background())
@@ -39,7 +35,6 @@ func TestBlocklistJSON_AddsPhones(t *testing.T) {
 			PN:  types.JID{User: "447700000003", Server: types.DefaultUserServer},
 		},
 	}}
-	// The server-supplied PN wins; the LID map only fills items without one.
 	phones := map[string]string{"99887766@lid": "447700000002", "55554444@lid": "stale"}
 	b, err := json.Marshal(blocklistJSON(list, func(j string) string { return phones[j] }))
 	if err != nil {

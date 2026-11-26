@@ -23,7 +23,6 @@ func TestRefundSendRestoresBudget(t *testing.T) {
 		t.Fatal("third send should have hit the hourly cap")
 	}
 
-	// The second send failed on the wire and never left the device.
 	l.RefundSend(true)
 
 	d := l.AllowSend(true)
@@ -52,8 +51,6 @@ func TestRefundSendClearsBothBudgetAndPacing(t *testing.T) {
 		t.Fatal("the interval floor should deny the immediate second send")
 	}
 
-	// The first send never reached WhatsApp, so it must consume neither the
-	// hourly budget nor the pacing floor: the operator loses nothing.
 	l.RefundSend(true)
 
 	if d := l.AllowSend(true); !d.Allowed {

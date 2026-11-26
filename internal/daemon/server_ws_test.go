@@ -11,9 +11,6 @@ import (
 	"github.com/coder/websocket"
 )
 
-// TestServer_WSBroadcastDelivered pins the WebSocket fan-out path: a
-// subscriber that registers through wsRegister receives every published
-// event, and an unregistering subscriber stops receiving them.
 func TestServer_WSBroadcastDelivered(t *testing.T) {
 	drv := newFakePairDriver(true)
 	s := newTestServer(t, drv)
@@ -52,9 +49,6 @@ func TestServer_WSBroadcastDelivered(t *testing.T) {
 	}
 }
 
-// TestServer_WSShutdownDoesNotDoubleClose pins the fix for a shutdown
-// panic: the hub owns every close, so a subscriber that unregisters after
-// the hub already cleaned up must not close the same channel twice.
 func TestServer_WSShutdownDoesNotDoubleClose(t *testing.T) {
 	drv := newFakePairDriver(true)
 	s := newTestServer(t, drv)
@@ -79,7 +73,6 @@ func TestServer_WSShutdownDoesNotDoubleClose(t *testing.T) {
 		return len(s.wsSubs) == 1
 	}, "subscriber registered")
 
-	// Cancelling the run context cleans up every subscriber in the hub.
 	cancel()
 	select {
 	case <-runDone:
@@ -87,8 +80,6 @@ func TestServer_WSShutdownDoesNotDoubleClose(t *testing.T) {
 		t.Fatal("server did not shut down")
 	}
 
-	// The handler's deferred unregister now finds no channel left to close;
-	// if both closers ran, the hub would have panicked during shutdown.
 	_ = conn.Close(websocket.StatusNormalClosure, "")
 	time.Sleep(50 * time.Millisecond)
 }

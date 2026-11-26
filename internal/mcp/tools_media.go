@@ -8,7 +8,6 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// registerMediaTools wires the poll + contact-card tools.
 func (s *Server) registerMediaTools() {
 	s.registerSendPoll()
 	s.registerSendPollVote()

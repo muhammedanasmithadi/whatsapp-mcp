@@ -13,9 +13,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
-// registerSocialReadTools wires read-oriented profile/status tools. These are
-// always registered (including read-only mode): they do not send messages or
-// change WhatsApp state.
 func (s *Server) registerSocialReadTools() {
 	s.registerListStatusUpdates()
 	s.registerGetProfilePicture()
@@ -23,8 +20,6 @@ func (s *Server) registerSocialReadTools() {
 	s.registerGetAutoResponder()
 }
 
-// registerSocialActionTools wires tools that produce WhatsApp side effects
-// (status read receipts, transient availability for a presence query).
 func (s *Server) registerSocialActionTools() {
 	s.registerMarkStatusViewed()
 	s.registerGetPresence()
@@ -35,8 +30,6 @@ func (s *Server) registerSocialActionTools() {
 	s.registerSetProfilePicture()
 	s.registerSetStatusPrivacy()
 }
-
-// -- list_status_updates ----------------------------------------------------
 
 type listStatusUpdatesArgs struct {
 	Sender         string `json:"sender,omitempty"`
@@ -91,8 +84,6 @@ func (s *Server) registerListStatusUpdates() {
 	}))
 }
 
-// -- mark_status_viewed -----------------------------------------------------
-
 type markStatusViewedArgs struct {
 	Sender     string   `json:"sender"`
 	MessageIDs []string `json:"message_ids,omitempty"`
@@ -119,8 +110,6 @@ func (s *Server) registerMarkStatusViewed() {
 		return s.toolOK("mark_status_viewed", a.Sender, "", "mark_status_viewed", fmt.Sprintf("%d receipts", count), map[string]any{"success": true, "sender": a.Sender, "viewed": count})
 	}))
 }
-
-// -- get_profile_picture ----------------------------------------------------
 
 type getProfilePictureArgs struct {
 	JID     string `json:"jid"`
@@ -165,8 +154,6 @@ func (s *Server) registerGetProfilePicture() {
 	}))
 }
 
-// -- get_contact_info -------------------------------------------------------
-
 type getContactInfoArgs struct {
 	JID string `json:"jid"`
 }
@@ -191,8 +178,6 @@ func (s *Server) registerGetContactInfo() {
 		return s.toolOK("get_contact_info", a.JID, "", "get_contact_info", "", info)
 	}))
 }
-
-// -- get_presence -----------------------------------------------------------
 
 type getPresenceArgs struct {
 	JID  string `json:"jid"`
@@ -228,8 +213,6 @@ func (s *Server) registerGetPresence() {
 	}))
 }
 
-// -- set_auto_responder -------------------------------------------------------
-
 type setAutoResponderArgs struct {
 	Enabled         bool   `json:"enabled"`
 	Message         string `json:"message,omitempty"`
@@ -264,8 +247,6 @@ func (s *Server) registerSetAutoResponder() {
 	}))
 }
 
-// -- get_auto_responder -------------------------------------------------------
-
 type getAutoResponderArgs struct{}
 
 func (s *Server) registerGetAutoResponder() {
@@ -290,8 +271,6 @@ func (s *Server) registerGetAutoResponder() {
 		})
 	}))
 }
-
-// -- send_status --------------------------------------------------------------
 
 type sendStatusArgs struct {
 	MediaPath string `json:"media_path"`
@@ -321,8 +300,6 @@ func (s *Server) registerSendStatus() {
 	}))
 }
 
-// -- delete_status ------------------------------------------------------------
-
 type deleteStatusArgs struct {
 	MessageID string `json:"message_id"`
 }
@@ -347,8 +324,6 @@ func (s *Server) registerDeleteStatus() {
 	}))
 }
 
-// -- get_status_viewers -------------------------------------------------------
-
 type getStatusViewersArgs struct {
 	MessageID string `json:"message_id"`
 }
@@ -370,8 +345,6 @@ func (s *Server) registerGetStatusViewers() {
 			fmt.Errorf("WhatsApp does not expose status viewer lists to linked devices; check the viewer count on the phone")), nil
 	}))
 }
-
-// -- set_profile_picture ------------------------------------------------------
 
 type setProfilePictureArgs struct {
 	MediaPath string `json:"media_path"`
@@ -396,8 +369,6 @@ func (s *Server) registerSetProfilePicture() {
 		return s.toolOK("set_profile_picture", "", "", "set_profile_picture", "", map[string]any{"success": true})
 	}))
 }
-
-// -- set_status_privacy_setting ---------------------------------------------
 
 type setStatusPrivacyArgs struct {
 	Mode     string   `json:"mode"`
@@ -424,8 +395,6 @@ func (s *Server) registerSetStatusPrivacy() {
 		return s.toolOK("set_status_privacy_setting", "", "", "set_status_privacy_setting", "", map[string]any{"success": true, "mode": a.Mode})
 	}))
 }
-
-// -- forward_message --------------------------------------------------------
 
 type forwardMessageArgs struct {
 	ChatJID       string `json:"chat_jid"`

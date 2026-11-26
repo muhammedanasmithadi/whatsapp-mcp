@@ -48,9 +48,8 @@ func runLogin(storeDir string, redactor *security.Redactor, args []string) int {
 	}
 
 	c, err := client.New(ctx, client.Config{
-		StoreDir: storeDir,
-		Store:    st,
-		// login flow logs normally to stderr; the QR itself goes to stdout.
+		StoreDir:   storeDir,
+		Store:      st,
 		Logger:     client.NewStderrLogger("Client", "INFO", true),
 		Redactor:   redactor,
 		DeviceName: deviceName,

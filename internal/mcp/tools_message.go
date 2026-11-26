@@ -12,10 +12,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
-// registerMessageTools wires message-mutation and history tools:
-// edit_message, delete_message, mark_read, mark_chat_read, request_sync,
-// request_status_sync, download_media, recover_media, transcribe_voice_note,
-// archive_chat, unarchive_chat.
 func (s *Server) registerMessageTools() {
 	s.registerEditMessage()
 	s.registerDeleteMessage()
@@ -30,8 +26,6 @@ func (s *Server) registerMessageTools() {
 	s.registerUnarchiveChat()
 	s.registerDeleteChat()
 }
-
-// -- edit_message -----------------------------------------------------------
 
 type editMessageArgs struct {
 	ChatJID   string `json:"chat_jid"`
@@ -66,8 +60,6 @@ func (s *Server) registerEditMessage() {
 	}))
 }
 
-// -- delete_message ---------------------------------------------------------
-
 type deleteMessageArgs struct {
 	ChatJID   string `json:"chat_jid"`
 	MessageID string `json:"message_id"`
@@ -94,8 +86,6 @@ func (s *Server) registerDeleteMessage() {
 		return mcp.NewToolResultText("Message deleted"), nil
 	}))
 }
-
-// -- mark_read --------------------------------------------------------------
 
 type markReadArgs struct {
 	ChatJID    string   `json:"chat_jid"`
@@ -127,8 +117,6 @@ func (s *Server) registerMarkRead() {
 	}))
 }
 
-// -- mark_chat_read ---------------------------------------------------------
-
 type markChatReadArgs struct {
 	ChatJID string `json:"chat_jid"`
 	Limit   int    `json:"limit,omitempty"`
@@ -158,11 +146,6 @@ func (s *Server) registerMarkChatRead() {
 	}))
 }
 
-// -- request_sync -----------------------------------------------------------
-
-// flexInt is an int that also accepts a JSON string, for clients that send
-// numeric arguments as strings (typically when working from a cached tool
-// schema that predates the parameter).
 type flexInt int
 
 func (f *flexInt) UnmarshalJSON(b []byte) error {
@@ -179,8 +162,6 @@ func (f *flexInt) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// flexBool is a bool that also accepts a JSON string ("true"/"false"), for
-// clients sending boolean arguments as strings from a cached tool schema.
 type flexBool bool
 
 func (f *flexBool) UnmarshalJSON(b []byte) error {
@@ -251,8 +232,6 @@ func (s *Server) registerRequestSync() {
 	}))
 }
 
-// -- request_status_sync -------------------------------------------------------
-
 type requestStatusSyncArgs struct {
 	Count flexInt `json:"count,omitempty"`
 }
@@ -279,8 +258,6 @@ func (s *Server) registerRequestStatusSync() {
 		return mcp.NewToolResultText(msg), nil
 	}))
 }
-
-// -- download_media ---------------------------------------------------------
 
 type downloadMediaArgs struct {
 	MessageID  string `json:"message_id"`
@@ -313,8 +290,6 @@ func (s *Server) registerDownloadMedia() {
 	}))
 }
 
-// -- recover_media ----------------------------------------------------------
-
 type recoverMediaArgs struct {
 	MessageID string `json:"message_id"`
 	ChatJID   string `json:"chat_jid"`
@@ -343,8 +318,6 @@ func (s *Server) registerRecoverMedia() {
 		return mcp.NewToolResultText(fmt.Sprintf("Media recovery requested for message %s in chat %s. WhatsApp is re-sending the message with a fresh media URL. Retry download_media shortly.\n%s", a.MessageID, a.ChatJID, msg)), nil
 	}))
 }
-
-// -- transcribe_voice_note ----------------------------------------------------
 
 type transcribeVoiceNoteArgs struct {
 	MessageID string `json:"message_id"`
@@ -378,8 +351,6 @@ func (s *Server) registerTranscribeVoiceNote() {
 	}))
 }
 
-// -- archive_chat -------------------------------------------------------------
-
 type archiveChatArgs struct {
 	ChatJID string `json:"chat_jid"`
 }
@@ -405,8 +376,6 @@ func (s *Server) registerArchiveChat() {
 		return s.toolOK("archive_chat", a.ChatJID, "", "archive", "archived", map[string]any{"success": true, "chat_jid": a.ChatJID, "archived": true})
 	}))
 }
-
-// -- unarchive_chat -----------------------------------------------------------
 
 type unarchiveChatArgs struct {
 	ChatJID string `json:"chat_jid"`

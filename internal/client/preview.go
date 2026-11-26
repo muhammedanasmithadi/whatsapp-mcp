@@ -114,8 +114,6 @@ func appendUnique(jids []types.JID, extra types.JID) []types.JID {
 }
 
 // participantListHash reproduces whatsmeow's unexported participant-list hash:
-// SHA-256 over the sorted AD strings of every recipient device, truncated to
-// six bytes and base64-encoded the way the message ack's phash is built.
 func participantListHash(participants []types.JID) string {
 	strs := make([]string, len(participants))
 	for i, p := range participants {

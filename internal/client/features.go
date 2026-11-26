@@ -17,9 +17,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// MarkRead marks messageIDs as read for the given chat. senderJID is the
-// original sender (required by WhatsApp for group reads); empty string is
-// treated as the chat JID itself.
 func (c *Client) MarkRead(ctx context.Context, chatJID string, messageIDs []string, senderJID string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -47,8 +44,6 @@ func (c *Client) MarkRead(ctx context.Context, chatJID string, messageIDs []stri
 	return c.wa.MarkRead(ctx, ids, time.Now(), chat, sender)
 }
 
-// MarkChatRead acks recent incoming messages in a chat so the phone stops
-// showing unread badges. Returns the number of messages acked.
 func (c *Client) MarkChatRead(ctx context.Context, chatJID string, limit int) (int, error) {
 	if !c.wa.IsConnected() {
 		return 0, errors.New("not connected to WhatsApp")
@@ -64,14 +59,10 @@ func (c *Client) MarkChatRead(ctx context.Context, chatJID string, limit int) (i
 	if len(rawIDs) == 0 {
 		return 0, nil
 	}
-	// Group by sender JID: MarkRead is batched per (chat, sender).
 	bySender := map[string][]types.MessageID{}
 	for i, id := range rawIDs {
 		bySender[rawSenders[i]] = append(bySender[rawSenders[i]], types.MessageID(id))
 	}
-	// Send receipts in a deterministic order: iterating the map would ack an
-	// arbitrary subset first and the failure message would name whatever
-	// sender happened to come up next.
 	senders := make([]string, 0, len(bySender))
 	for senderRaw := range bySender {
 		senders = append(senders, senderRaw)
@@ -87,7 +78,6 @@ func (c *Client) MarkChatRead(ctx context.Context, chatJID string, limit int) (i
 			if err == nil {
 				sender = parsed
 			} else {
-				// Sender stored as bare phone number; fall back to default user server.
 				sender = types.JID{User: senderRaw, Server: types.DefaultUserServer}
 			}
 		}
@@ -102,10 +92,6 @@ func (c *Client) MarkChatRead(ctx context.Context, chatJID string, limit int) (i
 	return count, firstErr
 }
 
-// checkSendWindow applies the daemon-side rate limit to one outbound WhatsApp
-// operation. Both sends and actions (reactions, replies, edits, revokes, poll
-// votes) draw on the same window, so switching to an action cannot bypass the
-// send cap.
 func (c *Client) checkSendWindow(ctx context.Context, chatJID types.JID) error {
 	if c.limiter == nil {
 		return nil
@@ -134,8 +120,6 @@ func (c *Client) checkUsyncWindow(ctx context.Context) error {
 	return nil
 }
 
-// SendReaction adds (or clears, if emoji is empty) a reaction to a message.
-// Rate-limited and cached like other outbound actions.
 func (c *Client) SendReaction(ctx context.Context, chatJID, messageID, senderJID, emoji string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -161,13 +145,10 @@ func (c *Client) SendReaction(ctx context.Context, chatJID, messageID, senderJID
 		return fmt.Errorf("send reaction: %w", err)
 	}
 
-	// Cache the reaction so local history reflects it.
 	c.persistReaction(ctx, chat, resp.ID, messageID, emoji)
 	return nil
 }
 
-// persistReaction stores an outbound reaction in the message cache so it
-// appears in list_messages / get_message_context alongside other history.
 func (c *Client) persistReaction(ctx context.Context, chat types.JID, msgID, targetMessageID, emoji string) {
 	chatJID := chat.String()
 	if !strings.HasSuffix(chatJID, "@g.us") {
@@ -205,8 +186,6 @@ func (c *Client) persistReaction(ctx context.Context, chat types.JID, msgID, tar
 	c.log.Infof("[%s] -> %s [reaction %s]: %s", now.Format("2006-01-02 15:04:05"), c.redactor.JID(chatJID), c.redactor.MsgID(msgID), content)
 }
 
-// SendReply sends a text reply that quotes targetMessageID from chatJID.
-// Rate-limited and cached like other outbound actions.
 func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, targetSenderJID, body string) (string, error) {
 	if !c.wa.IsConnected() {
 		return "", errors.New("not connected to WhatsApp")
@@ -221,7 +200,6 @@ func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, target
 
 	participant := ""
 	if targetSenderJID != "" {
-		// ContextInfo.Participant expects a JID string for group quotes.
 		if sender, perr := types.ParseJID(targetSenderJID); perr == nil {
 			participant = sender.ToNonAD().String()
 		} else {
@@ -249,13 +227,10 @@ func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, target
 		return "", fmt.Errorf("send reply: %w", err)
 	}
 
-	// Cache the reply so local history stays complete.
 	c.persistSent(ctx, chat, resp.ID, body, "", msg)
 	return resp.ID, nil
 }
 
-// EditMessage edits a previously-sent message. The new body becomes the new
-// conversation text. Rate-limited.
 func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody string) (string, error) {
 	if !c.wa.IsConnected() {
 		return "", errors.New("not connected to WhatsApp")
@@ -276,17 +251,12 @@ func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody st
 	if err != nil {
 		return "", fmt.Errorf("send edit: %w", err)
 	}
-	// WhatsApp replaces the message body in place. The cache must match, or
-	// list_messages shows the old text forever.
 	if err := c.store.UpdateMessage(ctx, messageID, chat.String(), newBody); err != nil {
 		c.log.Warnf("Cache edit of %s: %v", messageID, err)
 	}
 	return resp.ID, nil
 }
 
-// DeleteMessage revokes a message for everyone. senderJID is required only
-// when revoking someone else's message as a group admin; for your own
-// messages pass "". Rate-limited because this is destructive.
 func (c *Client) DeleteMessage(ctx context.Context, chatJID, messageID, senderJID string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -310,19 +280,12 @@ func (c *Client) DeleteMessage(ctx context.Context, chatJID, messageID, senderJI
 	if _, err := c.wa.SendMessage(ctx, chat, revoke); err != nil {
 		return fmt.Errorf("send revoke: %w", err)
 	}
-	// The message is gone for everyone; the cache must stop serving its body.
 	if err := c.store.RevokeMessage(ctx, messageID, chat.String()); err != nil {
 		c.log.Warnf("Cache revoke of %s: %v", messageID, err)
 	}
 	return nil
 }
 
-// ForwardMessage forwards a message from sourceChatJID to targetChatJID. The
-// original message must be cached locally (use list_messages first). The
-// forwarded message carries ContextInfo linking back to the original message,
-// marking it as forwarded with a forwarding score of 1. Rate-limited because
-// forwarding is a send. Currently supports text messages; media messages are
-// forwarded as text references.
 func (c *Client) ForwardMessage(ctx context.Context, targetChatJID, sourceChatJID, messageID string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -348,9 +311,6 @@ func (c *Client) ForwardMessage(ctx context.Context, targetChatJID, sourceChatJI
 		return fmt.Errorf("message %s not found in chat %s", messageID, sourceChatJID)
 	}
 
-	// Build ContextInfo linking back to the original message, marking it as
-	// forwarded with a forwarding score of 1. ContextInfo lives on
-	// ExtendedTextMessage, not directly on Message.
 	msg := &waE2E.Message{
 		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 			Text: proto.String(cached.Content),
@@ -377,9 +337,6 @@ func (c *Client) ForwardMessage(ctx context.Context, targetChatJID, sourceChatJI
 	return nil
 }
 
-// SendTyping sets chat presence to "composing" when active is true, or
-// "paused" when false. kind may be "audio" to indicate a voice recording.
-// Rate-limited because presence spam can trigger abuse flags.
 func (c *Client) SendTyping(ctx context.Context, chatJID string, active bool, kind string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -404,8 +361,6 @@ func (c *Client) SendTyping(ctx context.Context, chatJID string, active bool, ki
 	return c.wa.SendChatPresence(ctx, chat, state, media)
 }
 
-// IsOnWhatsApp checks whether each phone number (digits only) is registered
-// on WhatsApp. Returns a map keyed by the input phone string.
 func (c *Client) IsOnWhatsApp(ctx context.Context, phones []string) (map[string]bool, error) {
 	if !c.wa.IsConnected() {
 		return nil, errors.New("not connected to WhatsApp")
@@ -418,7 +373,6 @@ func (c *Client) IsOnWhatsApp(ctx context.Context, phones []string) (map[string]
 		return nil, err
 	}
 
-	// WhatsApp expects a leading '+' on phone queries.
 	queries := make([]string, len(phones))
 	for i, p := range phones {
 		if strings.HasPrefix(p, "+") {
@@ -434,12 +388,10 @@ func (c *Client) IsOnWhatsApp(ctx context.Context, phones []string) (map[string]
 	}
 
 	result := make(map[string]bool, len(phones))
-	// Pre-seed every input to false so callers always get an entry.
 	for _, p := range phones {
 		result[p] = false
 	}
 	for _, r := range resp {
-		// Match by the query string used, then fall back to JID.User.
 		key := strings.TrimPrefix(r.Query, "+")
 		if _, ok := result[key]; ok {
 			result[key] = r.IsIn

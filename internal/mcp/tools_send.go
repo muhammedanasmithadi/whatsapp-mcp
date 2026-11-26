@@ -11,9 +11,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
-// registerSendTools wires outbound-message tools: send_message, send_file,
-// send_audio_message, send_reaction, send_reply, send_contact_card,
-// send_typing, send_location, send_sticker.
 func (s *Server) registerSendTools() {
 	s.registerSendMessage()
 	s.registerBatchSendMessages()
@@ -25,8 +22,6 @@ func (s *Server) registerSendTools() {
 	s.registerSendLocation()
 	s.registerSendSticker()
 }
-
-// -- send_message -----------------------------------------------------------
 
 type sendMessageArgs struct {
 	Recipient    string `json:"recipient"`
@@ -66,8 +61,6 @@ func (s *Server) registerSendMessage() {
 	}))
 }
 
-// -- batch_send_messages ----------------------------------------------------
-
 type batchSendMessageArgs struct {
 	Messages []sendMessageArgs `json:"messages"`
 }
@@ -93,8 +86,6 @@ func (s *Server) registerBatchSendMessages() {
 		if len(a.Messages) == 0 {
 			return errorResult(ErrInvalidParameter("messages", "non-empty array", "empty array")), nil
 		}
-		// The override rides on the request, not the batch, so an operator
-		// bypass reaches every message in this call as it does for send_message.
 		ctx = withRateLimitOverride(ctx, req)
 		if len(a.Messages) > 50 {
 			return errorResult(ErrInvalidParameter("messages", "at most 50 messages", fmt.Sprintf("%d messages", len(a.Messages)))), nil
@@ -130,8 +121,6 @@ func (s *Server) registerBatchSendMessages() {
 		return resultJSON(results)
 	}))
 }
-
-// -- send_file --------------------------------------------------------------
 
 type sendFileArgs struct {
 	Recipient    string `json:"recipient"`
@@ -183,8 +172,6 @@ func (s *Server) registerSendFile() {
 	}))
 }
 
-// -- send_audio_message -----------------------------------------------------
-
 type sendAudioArgs struct {
 	Recipient    string `json:"recipient"`
 	MediaPath    string `json:"media_path"`
@@ -215,9 +202,6 @@ func (s *Server) registerSendAudioMessage() {
 		}
 		path := safePath
 		if !strings.HasSuffix(strings.ToLower(path), ".ogg") {
-			// The converted file must land inside the media root: every send
-			// re-validates media_path against it, so a temp file elsewhere
-			// would be rejected and the send could never succeed.
 			converted, err := s.client.ConvertAudioForSending(ctx, safePath)
 			if err != nil {
 				return errorResult(ErrInvalidParameter("media_path", "convertible audio file", err.Error())), nil
@@ -243,8 +227,6 @@ func (s *Server) registerSendAudioMessage() {
 		return result, nil
 	}))
 }
-
-// -- send_reaction ----------------------------------------------------------
 
 type sendReactionArgs struct {
 	ChatJID   string `json:"chat_jid"`
@@ -274,8 +256,6 @@ func (s *Server) registerSendReaction() {
 		return mcp.NewToolResultText("Reaction sent"), nil
 	}))
 }
-
-// -- send_reply -------------------------------------------------------------
 
 type sendReplyArgs struct {
 	ChatJID         string `json:"chat_jid"`
@@ -312,8 +292,6 @@ func (s *Server) registerSendReply() {
 	}))
 }
 
-// -- send_typing ------------------------------------------------------------
-
 type sendTypingArgs struct {
 	ChatJID string `json:"chat_jid"`
 	Active  bool   `json:"active"`
@@ -344,8 +322,6 @@ func (s *Server) registerSendTyping() {
 		return mcp.NewToolResultText(fmt.Sprintf("Presence %s for %s", state, a.ChatJID)), nil
 	}))
 }
-
-// -- send_sticker ------------------------------------------------------------
 
 type sendStickerArgs struct {
 	Recipient    string `json:"recipient"`

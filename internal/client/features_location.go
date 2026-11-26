@@ -9,9 +9,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// SendLocation sends a map pin to a chat. Live location is not supported: it
-// needs a continuous update stream that the multidevice protocol library does
-// not expose.
 func (c *Client) SendLocation(ctx context.Context, recipient string, latitude, longitude float64, name, address string) SendResult {
 	if !c.wa.IsConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}

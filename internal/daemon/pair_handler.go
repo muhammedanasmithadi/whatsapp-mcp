@@ -34,27 +34,21 @@ const (
 	qrPNGSize = 256
 )
 
-// pairPageData is the template context for pair pages.
 type pairPageData struct {
 	CSRFToken string
 	AuthToken string // bearer token for sub-resource requests, empty when unauthenticated
 	State     string // current pairing state
 }
 
-// resetter is the dependency `handlePairReset` needs. Production wiring
-// satisfies it via *client.Client; tests substitute a fake.
 type resetter interface {
 	Logout(ctx context.Context) error
 	Download(ctx context.Context, messageID, chatJID string) client.DownloadResult
 }
 
-// pairCoder is the dependency `handlePairCode` needs. Production wiring
-// satisfies it via *client.Client; tests substitute a fake.
 type pairCoder interface {
 	PairPhone(ctx context.Context, phone string) (string, error)
 }
 
-// csrfTokenState is the explicit lifecycle of the single-use CSRF token.
 type csrfTokenState int
 
 const (
@@ -63,22 +57,16 @@ const (
 	csrfTokenConsumed
 )
 
-// csrfToken holds the current token together with its lifecycle state.
 type csrfToken struct {
 	state csrfTokenState
 	value string
 }
 
-// pairHandlers bundles the three pair endpoints against a shared cache and
-// a resetter. Wire to an *http.ServeMux via mount.
 type pairHandlers struct {
 	cache *PairCache
 	reset resetter
-	// coder may be nil: drivers that do not support phone-number pairing
-	// leave it unset and /pair/code returns 501 Not Implemented.
 	coder pairCoder
 
-	// One rate limiter per endpoint.
 	pairGetLimiter   *Limiter
 	pairQRLimiter    *Limiter
 	pairResetLimiter *Limiter
@@ -88,7 +76,6 @@ type pairHandlers struct {
 
 	driver pairDriver
 
-	// Metrics counters (Prometheus text format at /metrics).
 	metrics struct {
 		messagesIn  int64
 		messagesOut int64
@@ -97,41 +84,30 @@ type pairHandlers struct {
 		rateLimited int64
 	}
 
-	// CSRF protection for the reset endpoint.
 	csrfMu    sync.Mutex
 	csrf      csrfToken
 	publishWS func(evType, data string)
 
-	// Webhook HMAC secret for verifying incoming webhook signatures.
-	// If non-empty, the X-Hub-Signature-256 header is required on POST /webhook/.
 	webhookSecret []byte
 	authToken     string
 
-	// Webhook rate limiter - limits webhook POSTs per second.
 	webhookLimiter *Limiter
 }
 
-// newPairHandlers constructs handlers with default rate limiters.
 func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishWS func(evType, data string), webhookSecret []byte, authToken string) *pairHandlers {
 	handlers := &pairHandlers{
-		cache: cache,
-		reset: reset,
-		coder: coder,
-		// The pairing page polls its QR image every 5s while unpaired, so the
-		// GET and QR limiters must refill faster than that or a single viewer
-		// rate-limits itself once the burst is spent.
+		cache:            cache,
+		reset:            reset,
+		coder:            coder,
 		pairGetLimiter:   NewLimiter(15.0/60.0, 5),  // 15/min, burst 5
 		pairQRLimiter:    NewLimiter(15.0/60.0, 10), // 15/min, burst 10
 		pairResetLimiter: NewLimiter(1.0/60.0, 1),   // 1/min, burst 1
 		pairCodeLimiter:  NewLimiter(3.0/60.0, 1),   // 3/min, burst 1; WhatsApp limits code requests server-side too
-		// SSE connections are long-lived, so allow a modest burst for the
-		// initial handshake and let the TCP keep-alive carry the stream.
-		// Webhook requests: allow 10 per second with burst of 20.
-		webhookLimiter: NewLimiter(10.0, 20),
-		startedAt:      time.Now(),
-		publishWS:      publishWS,
-		webhookSecret:  webhookSecret,
-		authToken:      authToken,
+		webhookLimiter:   NewLimiter(10.0, 20),
+		startedAt:        time.Now(),
+		publishWS:        publishWS,
+		webhookSecret:    webhookSecret,
+		authToken:        authToken,
 	}
 	if driver, ok := reset.(pairDriver); ok {
 		handlers.driver = driver
@@ -139,12 +115,9 @@ func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishW
 	return handlers
 }
 
-// generateCSRFToken creates a new random CSRF token, stores it in the
-// handler, and returns it. Thread-safe.
 func (h *pairHandlers) generateCSRFToken() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback should never be reached in practice.
 		panic(fmt.Sprintf("crypto/rand.Read failed: %v", err))
 	}
 	token := hex.EncodeToString(b)
@@ -154,8 +127,6 @@ func (h *pairHandlers) generateCSRFToken() string {
 	return token
 }
 
-// validCSRFToken checks whether the supplied token matches the stored one.
-// A match consumes the token (single-use). Thread-safe.
 func (h *pairHandlers) validCSRFToken(token string) bool {
 	h.csrfMu.Lock()
 	defer h.csrfMu.Unlock()
@@ -181,14 +152,11 @@ func (h *pairHandlers) mount(mux *http.ServeMux) {
 	mux.HandleFunc("/webhook/", h.handleWebhook)
 }
 
-// mediaDownloadRequest parses the /media/download/{message_id}/{chat_jid} path.
 type mediaDownloadRequest struct {
 	messageID string
 	chatJID   string
 }
 
-// parseMediaDownloadRequest extracts message_id and chat_jid from the URL path.
-// Expected path: /media/download/{message_id}/{chat_jid}
 func parseMediaDownloadRequest(r *http.Request) (mediaDownloadRequest, bool) {
 	path := r.URL.Path
 	prefix := "/media/download/"
@@ -206,8 +174,6 @@ func parseMediaDownloadRequest(r *http.Request) (mediaDownloadRequest, bool) {
 	}, true
 }
 
-// handleMediaDownload downloads media and serves it directly over HTTP.
-// This allows remote MCP clients to retrieve media without filesystem access.
 func (h *pairHandlers) handleMediaDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "GET required", http.StatusMethodNotAllowed)
@@ -232,7 +198,6 @@ func (h *pairHandlers) handleMediaDownload(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "failed to read media file", http.StatusInternalServerError)
 		return
 	}
-	// Determine content type.
 	contentType := http.DetectContentType(data)
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
@@ -241,7 +206,6 @@ func (h *pairHandlers) handleMediaDownload(w http.ResponseWriter, r *http.Reques
 	_, _ = w.Write(data)
 }
 
-// healthzResponse is the JSON body of /healthz.
 type healthzResponse struct {
 	Connected bool   `json:"connected"`
 	Paired    bool   `json:"paired"`
@@ -250,12 +214,6 @@ type healthzResponse struct {
 	Detail    string `json:"detail,omitempty"`
 }
 
-// handleHealth reports daemon liveness and pairing state. Intentionally
-// lightweight and always available (no auth, no rate limit) so systemd,
-// load balancers, and MCP clients can probe it cheaply.
-// connected reports whether the WhatsApp socket is live. The pairing cache
-// cannot answer that: a paired device whose socket dropped still says paired,
-// and every tool would fail while healthz claimed otherwise.
 func (h *pairHandlers) connected() bool {
 	if h.driver == nil {
 		return false
@@ -280,7 +238,6 @@ func (h *pairHandlers) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// handleMetrics exposes Prometheus-format metrics for scraping.
 func (h *pairHandlers) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "GET required", http.StatusMethodNotAllowed)
@@ -331,10 +288,6 @@ func (h *pairHandlers) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "whatsapp_mcp_uptime_seconds %d\n", uptime)
 }
 
-// handleWebhook receives incoming WhatsApp webhook events from a reverse
-// webhook setup (e.g. via a ngrok tunnel or public URL). It parses the JSON
-// payload and forwards new messages to WebSocket subscribers via SSE so the
-// agent can react instantly instead of polling.
 func (h *pairHandlers) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST required", http.StatusMethodNotAllowed)
@@ -352,8 +305,6 @@ func (h *pairHandlers) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// Verify HMAC signature if a webhook secret is configured.
-	// WhatsApp sends the signature as "sha256=<hex>" in X-Hub-Signature-256.
 	if len(h.webhookSecret) > 0 {
 		sig := r.Header.Get("X-Hub-Signature-256")
 		if sig == "" {
@@ -389,7 +340,6 @@ func (h *pairHandlers) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broadcast to WebSocket subscribers.
 	data, _ := json.Marshal(map[string]any{
 		"type":       payload.Type,
 		"message_id": payload.MessageID,
@@ -404,27 +354,22 @@ func (h *pairHandlers) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"status":"ok","message_id":"%s"}`, payload.MessageID)
 }
 
-// incMessagesIn increments the incoming message counter.
 func (h *pairHandlers) incMessagesIn() {
 	atomic.AddInt64(&h.metrics.messagesIn, 1)
 }
 
-// incMessagesOut increments the outgoing message counter.
 func (h *pairHandlers) incMessagesOut() {
 	atomic.AddInt64(&h.metrics.messagesOut, 1)
 }
 
-// incSends increments the send tool invocation counter.
 func (h *pairHandlers) incSends() {
 	atomic.AddInt64(&h.metrics.sendsTotal, 1)
 }
 
-// incErrors increments the error counter.
 func (h *pairHandlers) incErrors() {
 	atomic.AddInt64(&h.metrics.errorsTotal, 1)
 }
 
-// incRateLimited increments the rate-limited counter.
 func (h *pairHandlers) incRateLimited() {
 	atomic.AddInt64(&h.metrics.rateLimited, 1)
 }
@@ -452,11 +397,6 @@ func (h *pairHandlers) handlePairPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handlePairEventSource is an SSE endpoint that pushes pairing state
-// transitions to the /pair page as they happen (event-driven, no polling).
-// The browser keeps a long-lived connection open; whenever SetQR/SetPaired/
-// Reset/SetError is called on the shared cache, every subscriber gets the
-// new state and can update the QR image / "scanning" status live.
 func (h *pairHandlers) handlePairQR(w http.ResponseWriter, r *http.Request) {
 	if !h.pairQRLimiter.Allow() {
 		w.Header().Set("Retry-After", "4")
@@ -498,7 +438,6 @@ func (h *pairHandlers) handlePairEventSource(w http.ResponseWriter, r *http.Requ
 	sub := h.cache.Subscribe()
 	defer h.cache.Unsubscribe(sub)
 
-	// Send an immediate "connected" comment so clients know the stream is up.
 	fmt.Fprintf(w, ": connected\n\n")
 	flusher.Flush()
 
@@ -528,7 +467,6 @@ func (h *pairHandlers) handlePairReset(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
-	// Validate the CSRF token from the form submission.
 	if !h.validCSRFToken(r.FormValue("csrf_token")) {
 		http.Error(w, "invalid or missing CSRF token", http.StatusForbidden)
 		return
@@ -541,16 +479,12 @@ func (h *pairHandlers) handlePairReset(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/pair", http.StatusSeeOther)
 }
 
-// pairCodePageData is the template context for the pairing-code result page.
 type pairCodePageData struct {
 	Code    string // formatted code, empty on error
 	Phone   string
 	Message string // non-empty on failure
 }
 
-// normalizePairingPhone strips formatting characters and sanity-checks the
-// remaining digits. Returns the cleaned international number (digits only,
-// no leading plus) or an empty string when the input is unusable.
 func normalizePairingPhone(raw string) string {
 	var b strings.Builder
 	for _, r := range raw {
@@ -559,8 +493,6 @@ func normalizePairingPhone(raw string) string {
 		}
 	}
 	digits := b.String()
-	// whatsmeow itself rejects short numbers and leading-zero (non-
-	// international) numbers; mirror that here with a friendly check.
 	if len(digits) < 7 || len(digits) > 15 || strings.HasPrefix(digits, "0") {
 		return ""
 	}
@@ -585,8 +517,6 @@ func (h *pairHandlers) handlePairCode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "phone-number pairing not supported by this driver", http.StatusNotImplemented)
 		return
 	}
-	// Reuse the CSRF token minted on the /pair page so a drive-by POST
-	// cannot request codes on the user's behalf.
 	if !h.validCSRFToken(r.FormValue("csrf_token")) {
 		http.Error(w, "invalid or missing CSRF token", http.StatusForbidden)
 		return

@@ -28,8 +28,6 @@ func TestRetryableSendFailure(t *testing.T) {
 }
 
 func TestScheduleRetryBudget(t *testing.T) {
-	// The retry budget must be finite and the backoff must grow, so a message
-	// that can never send still lands in 'failed' rather than looping forever.
 	if maxScheduleAttempts <= 0 {
 		t.Fatalf("maxScheduleAttempts = %d, want a positive bound", maxScheduleAttempts)
 	}

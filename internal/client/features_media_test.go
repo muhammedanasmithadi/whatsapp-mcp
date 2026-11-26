@@ -40,7 +40,6 @@ func TestBuildVCard_EmptyPhone(t *testing.T) {
 
 func TestBuildVCard_EmptyName(t *testing.T) {
 	got := buildVCard("", "447700900000")
-	// Phone-only fallback: FN/N contain +<digits>.
 	if !strings.Contains(got, "FN:+447700900000\r\n") {
 		t.Fatalf("buildVCard(empty name) missing FN:+<phone>: %q", got)
 	}
@@ -50,16 +49,11 @@ func TestBuildVCard_EmptyName(t *testing.T) {
 }
 
 func TestBuildVCard_EscapesSpecials(t *testing.T) {
-	// Name with every special char the RFC 6350 text-value grammar reserves,
-	// plus a CR and LF.
 	got := buildVCard("a,b;c\\d\ne\rf", "")
-	// Check that escaping produced the right sequence in the FN line.
-	// Expected inside FN: a\,b\;c\\d\ne f  (CR is stripped entirely, LF -> \n)
 	wantFN := "FN:a\\,b\\;c\\\\d\\nef\r\n"
 	if !strings.Contains(got, wantFN) {
 		t.Fatalf("buildVCard escaping wrong.\n got: %q\nwant substring: %q", got, wantFN)
 	}
-	// And the N line: same escaped form followed by ";;;;".
 	wantN := "N:a\\,b\\;c\\\\d\\nef;;;;\r\n"
 	if !strings.Contains(got, wantN) {
 		t.Fatalf("buildVCard N escaping wrong.\n got: %q\nwant substring: %q", got, wantN)
@@ -78,8 +72,6 @@ func TestSendPoll_NotConnected(t *testing.T) {
 }
 
 func TestSendPoll_TooFewOptions(t *testing.T) {
-	// The options-count guard runs before the connection gate so we can
-	// exercise it without a live whatsmeow client.
 	c := newDisconnectedClient()
 	r := c.SendPoll(context.Background(), "447700000001", "Q?", []string{"only"}, 1)
 	if r.Success {
@@ -113,8 +105,6 @@ func TestSendPollVote_NotConnected(t *testing.T) {
 }
 
 func TestGetPollResults_NotConnected(t *testing.T) {
-	// GetPollResults hits the local store only (no whatsmeow). The guard we
-	// exercise here is input validation + the nil-store fallback.
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("GetPollResults on disconnected client panicked: %v", r)
@@ -127,7 +117,6 @@ func TestGetPollResults_NotConnected(t *testing.T) {
 	if _, err := c.GetPollResults(context.Background(), "447700000001@s.whatsapp.net", ""); err == nil {
 		t.Fatalf("expected error for empty poll_message_id, got nil")
 	}
-	// With both args set but no store, must error cleanly instead of panicking.
 	if _, err := c.GetPollResults(context.Background(), "447700000001@s.whatsapp.net", "POLL1"); err == nil {
 		t.Fatalf("expected error for nil store, got nil")
 	}

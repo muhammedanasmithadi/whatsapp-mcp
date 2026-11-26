@@ -9,20 +9,15 @@ import (
 	"strconv"
 )
 
-// VideoInfo holds basic metadata extracted from a video file.
 type VideoInfo struct {
 	Duration uint32 // seconds, rounded up
 	Width    uint32
 	Height   uint32
 }
 
-// AnalyzeVideo probes a video file with ffprobe and extracts a JPEG thumbnail
-// (a frame near the start) with ffmpeg. Returns the info, the thumbnail bytes
-// (nil on failure), and any error from probing.
 func AnalyzeVideo(ctx context.Context, path string) (VideoInfo, []byte, error) {
 	info := VideoInfo{}
 
-	// Probe metadata.
 	safePath := sanitizeFFmpegInputPath(path)
 	cmd := exec.CommandContext(ctx, "ffprobe",
 		"-v", "error",
@@ -59,7 +54,6 @@ func AnalyzeVideo(ctx context.Context, path string) (VideoInfo, []byte, error) {
 		info.Height = uint32(p.Streams[0].Height)
 	}
 	if d, err := strconv.ParseFloat(p.Format.Duration, 64); err == nil {
-		// round up
 		secs := uint32(d)
 		if float64(secs) < d {
 			secs++
@@ -73,7 +67,6 @@ func AnalyzeVideo(ctx context.Context, path string) (VideoInfo, []byte, error) {
 		info.Duration = 1
 	}
 
-	// Extract a thumbnail frame.
 	thumbCmd := exec.CommandContext(ctx, "ffmpeg",
 		"-y",
 		"-ss", "1",
@@ -87,9 +80,7 @@ func AnalyzeVideo(ctx context.Context, path string) (VideoInfo, []byte, error) {
 	thumbCmd.Env = minimalEnv()
 	var thumbBuf bytes.Buffer
 	thumbCmd.Stdout = &thumbBuf
-	// discard stderr
 	if err := thumbCmd.Run(); err != nil {
-		// thumbnail optional; don't fail the whole call
 		return info, nil, nil
 	}
 	thumb := thumbBuf.Bytes()

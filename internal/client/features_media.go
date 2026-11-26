@@ -14,8 +14,6 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-// SendPoll sends a poll message. options are presented in the order given.
-// selectableCount is clamped to 1 when <= 0. Rate-limited.
 func (c *Client) SendPoll(ctx context.Context, recipient, question string, options []string, selectableCount int) SendResult {
 	if len(options) < 2 {
 		return SendResult{Success: false, Message: "poll needs at least 2 options"}
@@ -35,8 +33,6 @@ func (c *Client) SendPoll(ctx context.Context, recipient, question string, optio
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
-	// BuildPollCreation generates the 32-byte MessageSecret and wires it onto
-	// MessageContextInfo so that votes on the poll can be decrypted later.
 	msg := c.wa.BuildPollCreation(question, options, selectableCount)
 
 	resp, err := c.wa.SendMessage(ctx, recipientJID, msg)
@@ -46,7 +42,6 @@ func (c *Client) SendPoll(ctx context.Context, recipient, question string, optio
 
 	c.persistSent(ctx, recipientJID, resp.ID, question, "", msg)
 
-	// Cache option names locally so incoming vote SHA-256 hashes can be reversed.
 	if err := c.store.StorePollMetadata(ctx, resp.ID, recipientJID.String(), options); err != nil {
 		c.log.Warnf("Failed to store poll metadata for %s: %v", resp.ID, err)
 	}
@@ -58,9 +53,6 @@ func (c *Client) SendPoll(ctx context.Context, recipient, question string, optio
 	}
 }
 
-// SendPollVote casts a vote on a previously-seen poll. pollMessageID is the
-// original poll's message ID. options must exactly match the option names
-// on the poll creation message. Rate-limited.
 func (c *Client) SendPollVote(ctx context.Context, chatJID, pollMessageID string, options []string) SendResult {
 	if !c.wa.IsConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
@@ -80,7 +72,6 @@ func (c *Client) SendPollVote(ctx context.Context, chatJID, pollMessageID string
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
-	// Look up the original sender so we can rebuild the MessageInfo BuildPollVote needs.
 	creator, err := c.store.GetPollCreator(ctx, pollMessageID, chat.String())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -113,8 +104,6 @@ func (c *Client) SendPollVote(ctx context.Context, chatJID, pollMessageID string
 		return SendResult{Success: false, Message: fmt.Sprintf("Error sending poll vote: %v", err)}
 	}
 
-	// WhatsApp does not relay our own vote back to the device that cast it, so
-	// the local tally would never count it. Record it here instead.
 	ownJID := chat.String()
 	if c.wa.Store.ID != nil {
 		ownJID = c.wa.Store.ID.ToNonAD().String()
@@ -130,16 +119,12 @@ func (c *Client) SendPollVote(ctx context.Context, chatJID, pollMessageID string
 	}
 }
 
-// PollResults is the shape returned by GetPollResults.
 type PollResults struct {
 	PollMessageID string         `json:"poll_message_id"`
 	ChatJID       string         `json:"chat_jid"`
 	Tally         map[string]int `json:"tally"` // option name -> vote count
 }
 
-// GetPollResults returns the tally of votes on a poll we have metadata for.
-// Returns sql.ErrNoRows wrapped if the poll is not in the local cache yet.
-// Does not require an active connection — reads strictly from the local cache.
 func (c *Client) GetPollResults(ctx context.Context, chatJID, pollMessageID string) (*PollResults, error) {
 	if chatJID == "" {
 		return nil, errors.New("chat_jid is required")
@@ -168,10 +153,6 @@ func (c *Client) GetPollResults(ctx context.Context, chatJID, pollMessageID stri
 	}, nil
 }
 
-// resolvePollSenderJID reconstructs the original sender JID of a poll from the
-// `sender` column we persisted at message-ingest time. For direct chats the
-// sender column holds the bare phone (user part). For groups it may be either
-// a bare phone or a full JID (e.g. LID form). We normalise both to a JID.
 func resolvePollSenderJID(sender string, chat types.JID) (types.JID, error) {
 	if sender == "" {
 		return types.JID{}, errors.New("poll creator JID not known — wait for message sync")
@@ -183,8 +164,6 @@ func resolvePollSenderJID(sender string, chat types.JID) (types.JID, error) {
 		}
 		return jid, nil
 	}
-	// Bare user part: construct a default-server JID unless the chat itself is
-	// a direct chat with a different server (e.g. lid-only).
 	server := types.DefaultUserServer
 	if chat.Server != types.GroupServer && chat.Server != "" {
 		server = chat.Server
@@ -192,9 +171,6 @@ func resolvePollSenderJID(sender string, chat types.JID) (types.JID, error) {
 	return types.JID{User: sender, Server: server}, nil
 }
 
-// SendContactCard sends a contact vCard. If vcardOverride is non-empty, it is
-// sent verbatim; otherwise buildVCard(name, phone) synthesises a vCard 3.0.
-// Rate-limited.
 func (c *Client) SendContactCard(ctx context.Context, recipient, name, phone, vcardOverride string) SendResult {
 	if !c.wa.IsConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}

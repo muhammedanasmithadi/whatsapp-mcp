@@ -2,11 +2,6 @@ package mcp
 
 import "testing"
 
-// TestNormalizeRecipientToChatJID documents the chat-JID derivation used by
-// the post-send MarkChatRead path. It mirrors parseRecipient's leading-`+`
-// stripping so a successful send (which already accepted `+447…`) is followed
-// by a valid chat-JID lookup rather than `+447…@s.whatsapp.net` which the
-// store cannot resolve.
 func TestNormalizeRecipientToChatJID(t *testing.T) {
 	cases := []struct {
 		name string

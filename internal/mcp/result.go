@@ -11,7 +11,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
-// resultJSON serialises v to JSON and wraps it in a text tool result.
 func resultJSON(v any) (*mcp.CallToolResult, error) {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
@@ -20,24 +19,8 @@ func resultJSON(v any) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultText(string(b)), nil
 }
 
-// inlineMediaMaxBytes is the size cap for embedding decrypted media bytes
-// directly in a download_media tool result. Anything larger stays reachable
-// through the returned Path but is not embedded so we don't blow up the
-// LLM context (or the transport frame).
 const inlineMediaMaxBytes = 5 * 1024 * 1024
 
-// downloadMediaResult builds the CallToolResult returned by the download_media
-// tool. The first content block is always the JSON summary (backwards
-// compatible with callers that read content[0].text). For successful image
-// or audio downloads whose file is at most inlineMediaMaxBytes, a second
-// ImageContent / AudioContent block is appended with the base64-encoded
-// bytes so remote MCP clients can view the payload without SCPing from the
-// daemon host.
-//
-// Videos and documents are not embedded (too large or not renderable inline).
-// If the file is missing or oversized, the call still succeeds with just the
-// JSON block — the tool is still useful and the caller can fetch the file
-// out of band via Path.
 func downloadMediaResult(r client.DownloadResult) (*mcp.CallToolResult, error) {
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
@@ -54,12 +37,6 @@ func downloadMediaResult(r client.DownloadResult) (*mcp.CallToolResult, error) {
 	return &mcp.CallToolResult{Content: contents}, nil
 }
 
-// readInlineMedia returns an ImageContent or AudioContent block for the file
-// at path, or (nil, false) if the file is missing, unreadable, or larger
-// than inlineMediaMaxBytes. The MIME type is sniffed via sniffResourceMIME
-// (resources.go) so we get the real format regardless of the filename
-// WhatsApp assigns (all photos are named `.jpg` even when the underlying
-// bytes are WebP, and all voice notes are named `.ogg`).
 func readInlineMedia(path, mediaType string) (mcp.Content, bool) {
 	info, err := os.Stat(path)
 	if err != nil {

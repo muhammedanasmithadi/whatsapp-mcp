@@ -34,7 +34,6 @@ func TestHTTP_ListTools(t *testing.T) {
 		t.Fatalf("status %d: %s", resp.StatusCode, raw)
 	}
 	body2 := string(raw)
-	// Handle possible SSE framing.
 	if strings.Contains(body2, "data: ") {
 		for _, line := range strings.Split(body2, "\n") {
 			line = strings.TrimSpace(line)
@@ -52,9 +51,6 @@ func TestHTTP_ListTools(t *testing.T) {
 	}
 }
 
-// TestHTTP_Stateless2026 speaks the 2026-07-28 revision: no initialize, the
-// protocol version rides in _meta and the Mcp-Protocol-Version header. It
-// discovers, lists and calls a tool.
 func TestHTTP_Stateless2026(t *testing.T) {
 	h := newHarness(t)
 	meta := map[string]any{

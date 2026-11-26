@@ -20,7 +20,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// messageKind is the explicit classification of an incoming message.
 type messageKind int
 
 const (
@@ -28,8 +27,6 @@ const (
 	messageKindEdit
 )
 
-// handleCallOffer records an incoming call so it is visible to the operator,
-// and stores it as a system row in the call's chat so list_messages shows it.
 func (c *Client) handleCallOffer(evt *events.CallOffer) {
 	chat := evt.From.ToNonAD().String()
 	if !evt.GroupJID.IsEmpty() {
@@ -63,8 +60,6 @@ func (c *Client) handleCallOffer(evt *events.CallOffer) {
 	}
 }
 
-// StartEventHandler registers the event handler on the underlying whatsmeow
-// client. Must be called before Connect().
 func (c *Client) StartEventHandler() {
 	if c.handlerState == handlerInstalled {
 		return
@@ -108,9 +103,6 @@ func (c *Client) StartEventHandler() {
 	c.handlerState = handlerInstalled
 }
 
-// normalizedMessage holds the result of normalizeIncomingMessage: the
-// store-ready Message plus the raw media crypto fields and the full
-// post-LID-resolution sender JID (used for poll-vote keying).
 type normalizedMessage struct {
 	msg           store.Message
 	mediaKey      []byte
@@ -121,22 +113,6 @@ type normalizedMessage struct {
 	chatJID       string // post-LID-normalised chat JID
 }
 
-// normalizeIncomingMessage resolves sender and chat JIDs (LID → phone),
-// extracts text/media content, and returns a store-ready normalizedMessage.
-// It covers the logic shared between handleMessage and handleHistorySync.
-//
-// Parameters:
-//   - rawChatJID: the raw chat JID string (may be @lid for DMs).
-//   - rawSenderJID: the raw sender JID string (may be @lid).
-//   - senderUser: the user-part of the sender JID (fallback when no
-//     participant is available).
-//   - isGroup: true when rawChatJID ends with @g.us.
-//   - isFromMe: whether the message was sent by the local device.
-//   - ownID: the local device's user-part (used when isFromMe is true and
-//     no participant is set).
-//   - msgID: the message ID.
-//   - timestamp: the message timestamp.
-//   - raw: the protobuf Message payload.
 func (c *Client) normalizeIncomingMessage(
 	rawChatJID, rawSenderJID, senderUser string,
 	isGroup, isFromMe bool,
@@ -145,7 +121,6 @@ func (c *Client) normalizeIncomingMessage(
 	timestamp time.Time,
 	raw *waProto.Message,
 ) normalizedMessage {
-	// Normalise chat JID: convert LID to standard JID for direct chats.
 	chatJID := rawChatJID
 	if !isGroup {
 		chatJID = c.store.ResolveLIDToJID(rawChatJID)
@@ -154,7 +129,6 @@ func (c *Client) normalizeIncomingMessage(
 		}
 	}
 
-	// Normalise sender (may be in LID form inside groups).
 	sender := senderUser
 	normalizedSender := c.store.ResolveLIDToJID(rawSenderJID)
 	if normalizedSender != rawSenderJID {
@@ -162,7 +136,6 @@ func (c *Client) normalizeIncomingMessage(
 		c.log.Infof("Normalized sender: %s -> %s", c.redactor.JID(senderUser), c.redactor.JID(sender))
 	}
 
-	// If the message is from us and we have no better sender, use ownID.
 	if isFromMe && sender == "" && ownID != "" {
 		sender = ownID
 	}
@@ -192,7 +165,6 @@ func (c *Client) normalizeIncomingMessage(
 	}
 }
 
-// handleMessage persists an incoming message and its chat metadata.
 func (c *Client) handleMessage(msg *events.Message) {
 	nm := c.normalizeIncomingMessage(
 		msg.Info.Chat.String(),
@@ -206,7 +178,6 @@ func (c *Client) handleMessage(msg *events.Message) {
 		msg.Message,
 	)
 
-	// Record LID<->PN evidence from message alt fields.
 	if msg.Info.SenderAlt.String() != "" && msg.Info.SenderAlt.String() != msg.Info.Sender.String() {
 		senderLID := msg.Info.Sender.String()
 		senderPN := msg.Info.SenderAlt.String()
@@ -232,9 +203,6 @@ func (c *Client) handleMessage(msg *events.Message) {
 		c.log.Warnf("Failed to store chat: %v", err)
 	}
 
-	// Poll vote — a signal-only event with no user-visible content. Decrypt,
-	// tally into the local cache, and return. We pass the post-LID-resolution
-	// full JID so StorePollVote's primary key never collides across servers.
 	if msg.Message != nil && msg.Message.GetPollUpdateMessage() != nil {
 		voterFullJID := nm.senderFullJID
 		if voterFullJID == "" {
@@ -244,8 +212,6 @@ func (c *Client) handleMessage(msg *events.Message) {
 		return
 	}
 
-	// Poll creation — store a "[poll] <question>" row for readability and
-	// cache the option names so we can decode vote SHA-256 hashes later.
 	var pollOptions []string
 	if msg.Message != nil {
 		if pc := msg.Message.GetPollCreationMessage(); pc != nil {
@@ -256,19 +222,14 @@ func (c *Client) handleMessage(msg *events.Message) {
 		}
 	}
 
-	// Classify the incoming message kind explicitly instead of branching
-	// on the raw IsEdit flag inline.
 	messageKind := messageKindNormal
 	if msg.IsEdit {
 		messageKind = messageKindEdit
 	}
 
-	// WhatsApp wraps edited messages in EditedMessage and sets IsEdit. When
-	// we see one, update the stored row instead of inserting a duplicate.
 	if messageKind == messageKindEdit {
 		if err := c.store.UpdateMessage(context.Background(), msg.Info.ID, nm.chatJID, nm.msg.Content); err != nil {
 			if err == sql.ErrNoRows {
-				// No cached row to update — fall through and insert fresh.
 				c.log.Warnf("Edit for unknown message %s in chat %s, inserting as new",
 					c.redactor.MsgID(msg.Info.ID), c.redactor.JID(nm.chatJID))
 			} else {
@@ -285,11 +246,6 @@ func (c *Client) handleMessage(msg *events.Message) {
 	}
 
 	if nm.msg.Content == "" && nm.msg.MediaType == "" {
-		// Store messages from status@broadcast even if decryption failed
-		// (empty content/media type). WhatsApp delivers Status (Stories)
-		// updates to status@broadcast, but some may be encrypted with sender
-		// keys we don't have. We still store a placeholder so the user knows
-		// a status was posted.
 		if nm.msg.ChatJID == store.StatusBroadcastJID {
 			nm.msg.Content = "[status update]"
 			nm.msg.MediaType = "status"
@@ -314,7 +270,6 @@ func (c *Client) handleMessage(msg *events.Message) {
 			}
 		}
 
-		// Auto-transcribe incoming voice notes in the background.
 		if nm.msg.MediaType == "audio" && c.sttClient != nil {
 			msgID := msg.Info.ID
 			chatJID := nm.chatJID
@@ -327,7 +282,6 @@ func (c *Client) handleMessage(msg *events.Message) {
 				if text == "" {
 					return
 				}
-				// Append the transcript to the stored message content.
 				updated := nm.msg.Content
 				if updated != "" {
 					updated += "\n"
@@ -341,10 +295,6 @@ func (c *Client) handleMessage(msg *events.Message) {
 			}()
 		}
 
-		// Auto-responder: reply to incoming 1:1 text messages when enabled.
-		// Runs in a goroutine so a slow or rate-limited send never blocks
-		// message handling. WhatsApp push delivers the incoming message, so
-		// this is event-driven — no polling.
 		chatJID := nm.chatJID
 		content := nm.msg.Content
 		isFromMe := msg.Info.IsFromMe
@@ -369,7 +319,6 @@ func (c *Client) handleMessage(msg *events.Message) {
 			if strings.TrimSpace(content) == "" {
 				return
 			}
-			// Get the reply message
 			_, reply, _, _, _, err := c.store.GetAutoResponderWithConfig(context.Background())
 			if err != nil {
 				c.log.Warnf("auto-responder: config check failed: %v", err)
@@ -409,7 +358,6 @@ func (c *Client) handleMessage(msg *events.Message) {
 	}
 }
 
-// handleHistorySync processes a bulk history payload from WhatsApp.
 func (c *Client) handleHistorySync(historySync *events.HistorySync) {
 	syncType := "UNKNOWN"
 	if historySync.Data.SyncType != nil {
@@ -440,9 +388,6 @@ func (c *Client) handleHistorySync(historySync *events.HistorySync) {
 
 		isGroup := strings.HasSuffix(rawChatJID, "@g.us")
 
-		// Resolve the chat JID once for the conversation header. We
-		// normalise it here so GetChatName and StoreChat use the
-		// phone-number-based JID.
 		chatJID := rawChatJID
 		if !isGroup {
 			chatJID = c.store.ResolveLIDToJID(rawChatJID)
@@ -479,7 +424,6 @@ func (c *Client) handleHistorySync(historySync *events.HistorySync) {
 			}
 			timestamp := time.Unix(int64(msgTS), 0)
 
-			// Determine sender and isFromMe from the message key.
 			var rawSenderJID, senderUser string
 			isFromMe := false
 			if msg.Message.Key != nil {
@@ -514,11 +458,6 @@ func (c *Client) handleHistorySync(historySync *events.HistorySync) {
 
 			c.log.Infof("Message content: %s, Media Type: %s", c.redactor.Body(nm.msg.Content), nm.msg.MediaType)
 			if nm.msg.Content == "" && nm.msg.MediaType == "" {
-				// Store messages from status@broadcast even if decryption failed
-				// (empty content/media type). WhatsApp delivers Status (Stories)
-				// updates to status@broadcast, but some may be encrypted with sender
-				// keys we don't have. We still store a placeholder so the user knows
-				// a status was posted.
 				if nm.msg.ChatJID == store.StatusBroadcastJID {
 					nm.msg.Content = "[status update]"
 					nm.msg.MediaType = "status"
@@ -527,8 +466,6 @@ func (c *Client) handleHistorySync(historySync *events.HistorySync) {
 				}
 			}
 
-			// Override chatJID to the already-resolved one from the
-			// conversation header — avoids re-resolving per message.
 			nm.msg.ChatJID = chatJID
 
 			if err := c.store.StoreMessage(ctx, nm.msg, nm.mediaKey, nm.fileSHA256, nm.fileEncSHA256, nm.fileLength); err != nil {
@@ -548,27 +485,16 @@ func (c *Client) handleHistorySync(historySync *events.HistorySync) {
 		}
 	}
 
-	// Status (Stories) updates travel in their own HistorySync field, not as
-	// conversations. The INITIAL_STATUS_V3 sync uses this field exclusively,
-	// so ignoring it drops every status the phone includes in that chunk.
 	statusCount := c.importStatusV3Messages(ctx, ownID, historySync.Data.GetStatusV3Messages())
 
 	c.log.Infof("History sync complete. Stored %d messages and %d status updates.", syncedCount, statusCount)
 }
 
-// importStatusV3Messages persists the Status (Stories) updates carried in a
-// history-sync payload. WhatsApp separates these from conversations
 // (HistorySync.statusV3Messages, field 3), and the INITIAL_STATUS_V3 sync
-// populates only that field. A handler that walks conversations alone drops
-// the whole chunk. Returns the number of status rows stored.
 func (c *Client) importStatusV3Messages(ctx context.Context, ownID string, messages []*waWeb.WebMessageInfo) int {
 	if len(messages) == 0 {
 		return 0
 	}
-	// Messages carry a foreign key to chats. The status conversation header is
-	// usually created by live handling, but a fresh link can receive
-	// INITIAL_STATUS_V3 before any status message arrives, so guarantee the row
-	// exists without overwriting a name learned from live traffic.
 	if err := c.store.EnsureChat(store.StatusBroadcastJID, "Status"); err != nil {
 		c.log.Warnf("Failed to ensure status chat row: %v", err)
 		c.incErrors()
@@ -594,9 +520,6 @@ func (c *Client) importStatusV3Messages(ctx context.Context, ownID string, messa
 		timestamp := time.Unix(int64(ts), 0)
 		isFromMe := key.GetFromMe()
 
-		// The poster lives in key.participant for status messages. Some
-		// payloads put it in WebMessageInfo.participant instead, and a few
-		// use the key's remoteJID. Try each in order.
 		rawSender := key.GetParticipant()
 		if rawSender == "" {
 			rawSender = wm.GetParticipant()
@@ -626,18 +549,12 @@ func (c *Client) importStatusV3Messages(ctx context.Context, ownID string, messa
 			timestamp,
 			wm.Message,
 		)
-		// Status rows always live under the fixed broadcast JID, whatever the
-		// payload put in the key's remoteJID.
 		nm.msg.ChatJID = store.StatusBroadcastJID
 		if nm.msg.Sender == "" {
-			// Senderless rows cannot be grouped or receipted; drop them rather
-			// than invent a sender.
 			c.log.Warnf("Skipping status history message %s with no sender", c.redactor.MsgID(msgID))
 			continue
 		}
 		if nm.msg.Content == "" && nm.msg.MediaType == "" {
-			// The payload can hold a status whose media was pruned. Keep a
-			// placeholder so the post is still visible.
 			nm.msg.Content = "[status update]"
 			nm.msg.MediaType = "status"
 		}
@@ -655,11 +572,6 @@ func (c *Client) importStatusV3Messages(ctx context.Context, ownID string, messa
 	return stored
 }
 
-// GetChatName determines the appropriate name for a chat. It checks the
-// existing database entry first, then falls back to conversation metadata
-// (for history sync), contact store lookups, and finally the JID.
-// The conversation parameter is the typed whatsmeow Conversation from a
-// history-sync payload; pass nil for live messages.
 func (c *Client) GetChatName(jid types.JID, chatJID string, conversation *waHistorySync.Conversation, sender string) string {
 	if existing := c.store.FindChatName(chatJID); existing != "" {
 		c.log.Infof("Using existing chat name for %s: %s", c.redactor.JID(chatJID), existing)
@@ -695,11 +607,6 @@ func (c *Client) GetChatName(jid types.JID, chatJID string, conversation *waHist
 	return name
 }
 
-// resolveChatNameFallback looks up a chat's name via GetGroupInfo (for
-// groups) or the contact store (for DMs), falling back to sender (if given)
-// and finally jid.User. This is the shared tail of GetChatName's group and
-// contact branches, also used directly by persistSent (which has no
-// conversation metadata to check first).
 func (c *Client) resolveChatNameFallback(ctx context.Context, jid types.JID, sender string) string {
 	if jid.Server == "g.us" {
 		if gi, err := c.wa.GetGroupInfo(ctx, jid); err == nil && gi.Name != "" {
@@ -716,7 +623,6 @@ func (c *Client) resolveChatNameFallback(ctx context.Context, jid types.JID, sen
 	return jid.User
 }
 
-// extractTextContent returns the plain-text body of a Message, if any.
 func extractTextContent(msg *waProto.Message) string {
 	if msg == nil {
 		return ""
@@ -729,7 +635,6 @@ func extractTextContent(msg *waProto.Message) string {
 			return t
 		}
 	}
-	// Media messages may carry a caption; keep it so it is stored and searchable.
 	if img := msg.GetImageMessage(); img != nil {
 		if c := img.GetCaption(); c != "" {
 			return c
@@ -745,7 +650,6 @@ func extractTextContent(msg *waProto.Message) string {
 			return c
 		}
 	}
-	// Incoming contact cards: store them as text so they are searchable.
 	if cm := msg.GetContactMessage(); cm != nil {
 		name := ""
 		if cm.DisplayName != nil {
@@ -800,10 +704,7 @@ func extractTextContent(msg *waProto.Message) string {
 	return ""
 }
 
-// extractMediaInfo pulls out the storable media fields from a Message.
-// directPath is captured verbatim from the media protobuf and includes the
 // signed `?ccb=&oh=&oe=&_nc_sid=` CDN auth query, so the download path can
-// hand it straight to whatsmeow without any URL string manipulation.
 func extractMediaInfo(msg *waProto.Message) (mediaType, filename, url, directPath string, mediaKey, fileSHA256, fileEncSHA256 []byte, fileLength uint64) {
 	if msg == nil {
 		return "", "", "", "", nil, nil, nil, 0
@@ -835,9 +736,6 @@ func extractMediaInfo(msg *waProto.Message) (mediaType, filename, url, directPat
 			sticker.GetURL(), sticker.GetDirectPath(),
 			sticker.GetMediaKey(), sticker.GetFileSHA256(), sticker.GetFileEncSHA256(), sticker.GetFileLength()
 	}
-	// Location, reaction, and payment messages carry no downloadable payload,
-	// so they stay text-only placeholders and must not appear in
-	// list_media_messages.
 
 	return "", "", "", "", nil, nil, nil, 0
 }
@@ -850,8 +748,6 @@ func generatedMediaFilename(prefix string, fileSHA256 []byte, extension string) 
 	return prefix + "_" + digest + extension
 }
 
-// extractPollOptionNames pulls the option names out of a PollCreationMessage.
-// Returns nil if the input is nil or the options list is empty.
 func extractPollOptionNames(pc *waProto.PollCreationMessage) []string {
 	if pc == nil {
 		return nil
@@ -867,7 +763,6 @@ func extractPollOptionNames(pc *waProto.PollCreationMessage) []string {
 	return out
 }
 
-// handleLabelEdit stores a label edit event (label created/updated/deleted).
 func (c *Client) handleLabelEdit(evt *events.LabelEdit) {
 	c.incMessagesIn()
 	labelID := evt.LabelID
@@ -889,7 +784,6 @@ func (c *Client) handleLabelEdit(evt *events.LabelEdit) {
 	c.log.Infof("[label] %s: name=%s color=%s", labelID, labelName, color)
 }
 
-// handleLabelAssociationChat stores a label association event (chat labeled/unlabeled).
 func (c *Client) handleLabelAssociationChat(evt *events.LabelAssociationChat) {
 	c.incMessagesIn()
 	chatJID := evt.JID.String()
@@ -912,13 +806,9 @@ func (c *Client) handleLabelAssociationChat(evt *events.LabelAssociationChat) {
 	c.log.Infof("[label] %s: %s with label %s", actionStr, c.redactor.JID(chatJID), labelID)
 }
 
-// handleContact processes a contact app-state mutation from another linked
-// device. On REMOVE (Action == nil) the contact is marked stale in the bridge
-// profile table. On SET the name and username are upserted.
 func (c *Client) handleContact(evt *events.Contact) {
 	jid := c.store.ResolveLIDToJID(evt.JID.String())
 	if evt.Action == nil {
-		// Contact removed on another device.
 		if err := c.store.MarkContactStale(jid); err != nil {
 			c.log.Warnf("Failed to mark contact stale %s: %v", jid, err)
 		} else {
@@ -930,7 +820,6 @@ func (c *Client) handleContact(evt *events.Contact) {
 	if evt.Action != nil {
 		username = evt.Action.GetUsername()
 	}
-	// Record LID<->PN evidence from contact mutations that carry both.
 	if evt.Action != nil {
 		lidJID := evt.Action.GetLidJID()
 		pnJID := evt.Action.GetPnJID()
@@ -949,16 +838,10 @@ func (c *Client) handleContact(evt *events.Contact) {
 	c.log.Debugf("[contact] updated on another device: %s username=%s", c.redactor.JID(jid), username)
 }
 
-// handlePushName processes a push-name change event.
 func (c *Client) handlePushName(evt *events.PushName) {
 	c.log.Debugf("[pushname] %s -> %s", c.redactor.JID(evt.JID.String()), evt.NewPushName)
 }
 
-// handlePollVote decrypts an incoming PollUpdateMessage, reverses its
-// SelectedOptions SHA-256 hashes against the cached option names, and records
-// the voter's current selection. Failures are logged (without poll content)
-// and swallowed so a broken vote never blocks the rest of message handling.
-// voterJID must be the full post-LID-resolution JID string.
 func (c *Client) handlePollVote(msg *events.Message, chatJID, voterJID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -977,12 +860,8 @@ func (c *Client) handlePollVote(msg *events.Message, chatJID, voterJID string) {
 		return
 	}
 
-	// Scope lookup to our locally-observed chatJID; ignore key.RemoteJID to
-	// prevent a crafted update from another chat polluting this chat's tally.
 	options, err := c.store.GetPollOptions(ctx, pollID, chatJID)
 	if err != nil {
-		// No cached metadata — we've probably never seen the poll creation
-		// message. Log without listing option text and bail.
 		c.log.Warnf("Poll vote for unknown poll %s in %s: %v", pollID, chatJID, err)
 		return
 	}
@@ -999,8 +878,6 @@ func (c *Client) handlePollVote(msg *events.Message, chatJID, voterJID string) {
 		}
 	}
 
-	// Clamp the peer-supplied timestamp to now so a malicious far-future value
-	// can't permanently suppress later legitimate updates via the replay guard.
 	ts := msg.Info.Timestamp
 	if now := time.Now(); ts.After(now) {
 		ts = now

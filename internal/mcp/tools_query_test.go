@@ -13,8 +13,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// newTestServerWithStore builds an MCP server backed by a real store seeded
-// with a handful of messages, so the query tools can be exercised end to end.
 func newTestServerWithStore(t *testing.T) (*Server, *store.Store, string) {
 	t.Helper()
 
@@ -25,8 +23,6 @@ func newTestServerWithStore(t *testing.T) (*Server, *store.Store, string) {
 	}
 	ctx := context.Background()
 
-	// Seed two chats with messages spanning several days, including one media
-	// message for list_media_messages coverage.
 	now := time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)
 	insertMsg := func(id, chatJID, sender, content string, ts time.Time, isFromMe bool, mediaType string) {
 		_, err := s.DB().ExecContext(ctx,
@@ -167,14 +163,11 @@ func messageID(m any) string {
 	return id
 }
 
-// -- list_messages format=json + cursor -------------------------------------
-
 func TestListMessages_JSONCursorRoundTrip(t *testing.T) {
 	s, _, _ := newTestServerWithStore(t)
 
 	alice := "447700000001@s.whatsapp.net"
 
-	// Page 1: 2 messages, JSON format.
 	p1 := callListMessagesJSON(t, s, map[string]any{
 		"chat_jid": alice,
 		"limit":    2,
@@ -192,7 +185,6 @@ func TestListMessages_JSONCursorRoundTrip(t *testing.T) {
 		t.Fatal("expected non-empty next_cursor on page 1")
 	}
 
-	// Page 2: resume from the cursor.
 	p2 := callListMessagesJSON(t, s, map[string]any{
 		"chat_jid": alice,
 		"limit":    2,
@@ -203,7 +195,6 @@ func TestListMessages_JSONCursorRoundTrip(t *testing.T) {
 	if len(msgs2) != 2 {
 		t.Fatalf("expected 2 messages on page 2, got %d", len(msgs2))
 	}
-	// Alice has 5 messages; page 1 took 2, page 2 takes 2, one (m1) remains.
 	if !p2["has_more"].(bool) {
 		t.Fatal("expected has_more=true on page 2 (one message remains)")
 	}
@@ -212,7 +203,6 @@ func TestListMessages_JSONCursorRoundTrip(t *testing.T) {
 		t.Fatal("expected non-empty next_cursor on page 2")
 	}
 
-	// Page 3: fetch the last remaining message.
 	p3 := callListMessagesJSON(t, s, map[string]any{
 		"chat_jid": alice,
 		"limit":    10,
@@ -230,7 +220,6 @@ func TestListMessages_JSONCursorRoundTrip(t *testing.T) {
 		t.Fatalf("expected nil next_cursor on last page, got %v", p3["next_cursor"])
 	}
 
-	// No overlap across all three pages.
 	seen := map[string]bool{}
 	for _, m := range append(append(msgs, msgs2...), msgs3...) {
 		id := messageID(m)
@@ -240,7 +229,6 @@ func TestListMessages_JSONCursorRoundTrip(t *testing.T) {
 		seen[id] = true
 	}
 
-	// DESC ordering across both pages.
 	all := append(msgs, msgs2...)
 	for i := 1; i < len(all); i++ {
 		prev := all[i-1].(map[string]any)["timestamp"].(string)
@@ -255,10 +243,6 @@ func TestListMessages_TextDefaultUnchanged(t *testing.T) {
 	s, _, _ := newTestServerWithStore(t)
 
 	alice := "447700000001@s.whatsapp.net"
-	// Without format=json we still get a JSON map back because the handler
-	// serializes the result; but list_messages in text mode returns formatted
-	// text. The test helper always decodes JSON, so here we just verify the
-	// legacy path still works by calling without format.
 	tool := s.MCP().GetTool("list_messages")
 	res, err := tool.Handler(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]any{"chat_jid": alice, "limit": 50}}})
 	if err != nil {
@@ -290,7 +274,6 @@ func TestListMessages_InvalidCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list_messages handler: %v", err)
 	}
-	// The handler returns an error result (IsError=true) for an invalid cursor.
 	if !res.IsError {
 		t.Fatal("expected error result for invalid cursor")
 	}
@@ -306,20 +289,16 @@ func TestListMessages_InvalidCursor(t *testing.T) {
 	}
 }
 
-// -- read positions ----------------------------------------------------------
-
 func TestReadPosition_GetThenMark(t *testing.T) {
 	s, _, _ := newTestServerWithStore(t)
 
 	alice := "447700000001@s.whatsapp.net"
 
-	// No position yet.
 	pos, found := callGetReadPosition(t, s, alice)
 	if found {
 		t.Fatalf("expected not-found for unset position, got %v", pos)
 	}
 
-	// Mark m4 as read.
 	out := callMarkReadPosition(t, s, alice, "m4")
 	chatJID, _ := out["chat_jid"].(string)
 	if chatJID != alice {
@@ -330,7 +309,6 @@ func TestReadPosition_GetThenMark(t *testing.T) {
 		t.Fatalf("expected last_read_message_id m4, got %q", lastID)
 	}
 
-	// Read it back.
 	pos2, found := callGetReadPosition(t, s, alice)
 	if !found {
 		t.Fatal("expected read position after marking")
@@ -340,14 +318,12 @@ func TestReadPosition_GetThenMark(t *testing.T) {
 		t.Fatalf("expected m4 on read-back, got %q", lastID2)
 	}
 
-	// Mark m5 (newer) as read.
 	out = callMarkReadPosition(t, s, alice, "m5")
 	lastID, _ = out["last_read_message_id"].(string)
 	if lastID != "m5" {
 		t.Fatalf("expected upserted last_read_message_id m5, got %q", lastID)
 	}
 
-	// Invalid timestamp.
 	tool := s.MCP().GetTool("mark_read_position")
 	res, err := tool.Handler(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: map[string]any{"chat_jid": alice, "message_id": "m1", "timestamp": "not-a-time"}}})
 	if err != nil {
@@ -358,8 +334,6 @@ func TestReadPosition_GetThenMark(t *testing.T) {
 		t.Fatal("expected error output for invalid timestamp")
 	}
 }
-
-// -- list_media_messages -----------------------------------------------------
 
 func TestListMediaMessages_EndToEnd(t *testing.T) {
 	s, _, _ := newTestServerWithStore(t)
@@ -385,13 +359,11 @@ func TestListMediaMessages_EndToEnd(t *testing.T) {
 		t.Fatal("expected has_more=false")
 	}
 
-	// Global: only m4 has media across both chats.
 	global := callListMediaMessages(t, s, map[string]any{"limit": 10})
 	if len(messagesList(global)) != 1 {
 		t.Fatalf("expected 1 media message globally, got %d", len(messagesList(global)))
 	}
 
-	// Bob has no media.
 	bobOut := callListMediaMessages(t, s, map[string]any{
 		"chat_jid": "447700000002@s.whatsapp.net",
 		"limit":    10,
@@ -406,7 +378,6 @@ func TestListMediaMessages_Cursor(t *testing.T) {
 
 	alice := "447700000001@s.whatsapp.net"
 
-	// Add a second media message so cursor pagination has something to page over.
 	ctx := context.Background()
 	now := time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)
 	_, err := store.DB().ExecContext(ctx, `
@@ -448,14 +419,11 @@ func TestListMediaMessages_Cursor(t *testing.T) {
 		t.Fatalf("expected nil next_cursor on last page, got %v", p2["next_cursor"])
 	}
 
-	// The two pages must return different messages.
 	if messageID(messagesList(p1)[0]) == messageID(messagesList(p2)[0]) {
 		t.Fatal("same message on both cursor pages")
 	}
 }
 
-// fakePairCache is a minimal pairingCache for exercising pairing_status
-// without standing up the daemon's real PairCache.
 type fakePairCache struct {
 	paired bool
 	qr     string
@@ -464,8 +432,6 @@ type fakePairCache struct {
 func (f fakePairCache) Paired() bool { return f.paired }
 func (f fakePairCache) QR() string   { return f.qr }
 
-// callPairingStatus invokes the pairing_status handler and decodes its JSON
-// "setup_state" envelope into a map.
 func callPairingStatus(t *testing.T, s *Server) map[string]any {
 	t.Helper()
 	tool, ok := s.MCP().ListTools()["pairing_status"]
@@ -493,22 +459,17 @@ func callPairingStatus(t *testing.T, s *Server) map[string]any {
 	return env
 }
 
-// A nil pairing cache (smoke/tests) yields the error envelope without touching
-// the WhatsApp client — so passing a nil client here must not panic.
 func TestPairingStatus_NilCache(t *testing.T) {
 	env := callPairingStatus(t, NewServer(nil, nil, nil))
 	if env["state"] != "disconnected" {
 		t.Errorf("state = %v, want disconnected", env["state"])
 	}
-	// The stdio transport owns no pairing flow, so the detail must say where
-	// pairing happens rather than blaming a missing cache.
 	detail, _ := env["detail"].(string)
 	if !strings.Contains(detail, "no pairing flow") {
 		t.Errorf("detail = %q, want the transport explanation", detail)
 	}
 }
 
-// An unpaired cache with a pending QR yields awaiting_qr carrying the payload.
 func TestPairingStatus_AwaitingQRWithPayload(t *testing.T) {
 	env := callPairingStatus(t, NewServer(nil, nil, fakePairCache{qr: "2@QRPAYLOAD"}))
 	if env["state"] != "awaiting_qr" {
@@ -522,8 +483,6 @@ func TestPairingStatus_AwaitingQRWithPayload(t *testing.T) {
 	}
 }
 
-// An unpaired cache with no QR yet yields the generating-code envelope and
-// omits qr_payload.
 func TestPairingStatus_AwaitingQRGenerating(t *testing.T) {
 	env := callPairingStatus(t, NewServer(nil, nil, fakePairCache{}))
 	if env["state"] != "awaiting_qr" {

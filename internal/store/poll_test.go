@@ -16,8 +16,6 @@ func TestStorePollMetadata_RoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// Insert a placeholder message first so StorePollMetadata does an UPDATE
-	// instead of falling back to the INSERT path.
 	m := Message{
 		ID:        "poll1",
 		ChatJID:   "447700000001@s.whatsapp.net",
@@ -60,10 +58,6 @@ func TestGetPollOptions_Unknown(t *testing.T) {
 }
 
 func TestStorePollMetadata_NoOpWhenNoMessageRow(t *testing.T) {
-	// When no message row exists for (id, chat_jid), StorePollMetadata must be
-	// a silent no-op. StoreMessage owns the "no empty content + no media = no
-	// row" invariant and we refuse to punch through it by synthesising a
-	// placeholder row here.
 	s := openTestStore(t)
 	ctx := context.Background()
 
@@ -72,13 +66,10 @@ func TestStorePollMetadata_NoOpWhenNoMessageRow(t *testing.T) {
 		t.Fatalf("StorePollMetadata (no parent row): %v", err)
 	}
 
-	// GetPollOptions on a missing row must report sql.ErrNoRows — not find a
-	// synthesised placeholder.
 	if _, err := s.GetPollOptions(ctx, "poll-orphan", "447700000001@s.whatsapp.net"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected sql.ErrNoRows for orphaned poll metadata, got %v", err)
 	}
 
-	// Confirm no row was created in the messages table.
 	var count int
 	if err := s.db.QueryRow(
 		"SELECT COUNT(*) FROM messages WHERE id = ? AND chat_jid = ?",
@@ -95,7 +86,6 @@ func TestStorePollVote_Replacement(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// Register a poll with two options first.
 	m := Message{
 		ID:        "poll2",
 		ChatJID:   "123456789@g.us",
@@ -116,7 +106,6 @@ func TestStorePollVote_Replacement(t *testing.T) {
 	if _, err := s.StorePollVote(ctx, "poll2", "123456789@g.us", voter, []string{"beer"}, ts); err != nil {
 		t.Fatalf("first StorePollVote: %v", err)
 	}
-	// Same voter updates their vote.
 	if _, err := s.StorePollVote(ctx, "poll2", "123456789@g.us", voter, []string{"wine"}, ts.Add(time.Minute)); err != nil {
 		t.Fatalf("second StorePollVote: %v", err)
 	}
@@ -152,9 +141,6 @@ func TestStorePollVote_Replacement(t *testing.T) {
 }
 
 func TestStorePollVote_IgnoresReplayOfOlderTimestamp(t *testing.T) {
-	// An attacker (or a stale device) replaying an old PollUpdateMessage must
-	// not be able to erase the voter's current choice. The ON CONFLICT WHERE
-	// clause gates overwrites on excluded.timestamp >= poll_votes.timestamp.
 	s := openTestStore(t)
 	ctx := context.Background()
 
@@ -176,11 +162,9 @@ func TestStorePollVote_IgnoresReplayOfOlderTimestamp(t *testing.T) {
 	t1 := time.Date(2026, 3, 2, 10, 0, 0, 0, time.UTC)
 	t0 := t1.Add(-1 * time.Hour) // older
 
-	// Current vote at T1.
 	if _, err := s.StorePollVote(ctx, "poll-replay", "123456789@g.us", voter, []string{"b"}, t1); err != nil {
 		t.Fatalf("vote at T1: %v", err)
 	}
-	// Replay of an older vote at T0 must be ignored.
 	if _, err := s.StorePollVote(ctx, "poll-replay", "123456789@g.us", voter, []string{"a"}, t0); err != nil {
 		t.Fatalf("vote at T0: %v", err)
 	}
@@ -219,7 +203,6 @@ func TestGetPollResults_TallyWithZeroVoteOptions(t *testing.T) {
 		t.Fatalf("StorePollMetadata: %v", err)
 	}
 
-	// 3 voters, no one picks salad.
 	baseTS := time.Date(2026, 2, 5, 13, 0, 0, 0, time.UTC)
 	if _, err := s.StorePollVote(ctx, "poll3", "123456789@g.us", "voter1@s.whatsapp.net", []string{"pizza"}, baseTS); err != nil {
 		t.Fatalf("vote 1: %v", err)
@@ -267,10 +250,6 @@ func TestGetPollResults_UnknownPoll(t *testing.T) {
 }
 
 func TestGetPollResults_UnknownPollIgnoresOrphanVotes(t *testing.T) {
-	// If a vote row ever lands without matching poll metadata (shouldn't
-	// happen — handlePollVote bails on GetPollOptions ErrNoRows — but we
-	// verify the store still treats the poll as unknown so callers get a
-	// clean "poll not found" signal rather than a phantom empty tally).
 	s := openTestStore(t)
 	ctx := context.Background()
 
@@ -285,13 +264,8 @@ func TestGetPollResults_UnknownPollIgnoresOrphanVotes(t *testing.T) {
 	}
 }
 
-// migrationDBCounter keeps generated DB names unique across parallel runs.
 var migrationDBCounter atomic.Uint64
 
-// TestMigrateSchema_AddsPollOptionsColumn spins up a store whose messages
-// table pre-dates poll_options_json, then verifies migrateSchema adds the
-// column without touching existing data. Running migrateSchema twice must be
-// a no-op.
 func TestMigrateSchema_AddsPollOptionsColumn(t *testing.T) {
 	id := migrationDBCounter.Add(1)
 	dsn := fmt.Sprintf("file:poll_migrate_%d?mode=memory&cache=shared&_foreign_keys=on", id)
@@ -303,7 +277,6 @@ func TestMigrateSchema_AddsPollOptionsColumn(t *testing.T) {
 	t.Cleanup(func() { db.Close() })
 	db.SetMaxOpenConns(1)
 
-	// Pre-v2 schema: messages without poll_options_json, and no poll_votes table.
 	const legacy = `
 	CREATE TABLE chats (
 		jid TEXT PRIMARY KEY,
@@ -336,12 +309,10 @@ func TestMigrateSchema_AddsPollOptionsColumn(t *testing.T) {
 		t.Fatalf("apply legacy schema: %v", err)
 	}
 
-	// Sanity: poll_options_json must be missing before migration.
 	if columnExists(t, db, "messages", "poll_options_json") {
 		t.Fatal("precondition failed: poll_options_json already present before migration")
 	}
 
-	// First migration.
 	if err := migrateSchema(db); err != nil {
 		t.Fatalf("migrateSchema (first): %v", err)
 	}
@@ -349,7 +320,6 @@ func TestMigrateSchema_AddsPollOptionsColumn(t *testing.T) {
 		t.Fatal("poll_options_json not added by first migration")
 	}
 
-	// Existing row should still be intact.
 	var content string
 	if err := db.QueryRow("SELECT content FROM messages WHERE id = ?", "m1").Scan(&content); err != nil {
 		t.Fatalf("query preserved row: %v", err)
@@ -358,11 +328,9 @@ func TestMigrateSchema_AddsPollOptionsColumn(t *testing.T) {
 		t.Fatalf("content mangled by migration: %q", content)
 	}
 
-	// Second migration must be a no-op.
 	if err := migrateSchema(db); err != nil {
 		t.Fatalf("migrateSchema (second): %v", err)
 	}
-	// Column count must not double.
 	if count := columnCount(t, db, "messages", "poll_options_json"); count != 1 {
 		t.Fatalf("expected exactly 1 poll_options_json column, got %d", count)
 	}

@@ -16,8 +16,6 @@ func (s *Server) registerChatStateTools() {
 	s.registerForwardMessage()
 }
 
-// -- mute_chat --------------------------------------------------------------
-
 type muteChatArgs struct {
 	ChatJID         string `json:"chat_jid"`
 	Muted           bool   `json:"muted"`
@@ -61,8 +59,6 @@ func (s *Server) registerMuteChat() {
 	}))
 }
 
-// -- pin_chat ---------------------------------------------------------------
-
 type pinChatArgs struct {
 	ChatJID string `json:"chat_jid"`
 	Pinned  bool   `json:"pinned"`
@@ -91,8 +87,6 @@ func (s *Server) registerPinChat() {
 		return s.toolOK("pin_chat", a.ChatJID, "", "pin_chat", fmt.Sprintf("pinned=%v", a.Pinned), map[string]any{"success": true, "chat_jid": a.ChatJID, "pinned": a.Pinned})
 	}))
 }
-
-// -- star_message -----------------------------------------------------------
 
 type starMessageArgs struct {
 	ChatJID   string `json:"chat_jid"`
@@ -131,8 +125,6 @@ func (s *Server) registerStarMessage() {
 		return s.toolOK("star_message", a.ChatJID, a.MessageID, "star_message", fmt.Sprintf("starred=%v", starred), map[string]any{"success": true, "chat_jid": a.ChatJID, "message_id": a.MessageID, "starred": starred})
 	}))
 }
-
-// -- set_disappearing_timer -------------------------------------------------
 
 type setDisappearingTimerArgs struct {
 	ChatJID string `json:"chat_jid"`

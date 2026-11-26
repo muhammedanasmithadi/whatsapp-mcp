@@ -1,5 +1,3 @@
-// Package client wraps go.mau.fi/whatsmeow and persists messages to the local
-// message cache in internal/store. All logs are written to stderr.
 package client
 
 import (
@@ -13,7 +11,6 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
-// logEvent is a single structured log entry emitted in JSON mode.
 type logEvent struct {
 	Time   string `json:"ts"`
 	Level  string `json:"level"`
@@ -36,8 +33,6 @@ var (
 	}
 )
 
-// stderrLogger is a copy of whatsmeow's stdout logger that writes to an
-// io.Writer (typically os.Stderr) instead of os.Stdout.
 type stderrLogger struct {
 	out   io.Writer
 	mod   string
@@ -45,8 +40,6 @@ type stderrLogger struct {
 	min   int
 }
 
-// NewStderrLogger returns a waLog.Logger that writes to os.Stderr. The API
-// mirrors waLog.Stdout so callers can substitute it freely.
 func NewStderrLogger(module string, level string, colorful bool) waLog.Logger {
 	return &stderrLogger{
 		out:   os.Stderr,
@@ -87,8 +80,6 @@ func (s *stderrLogger) Sub(mod string) waLog.Logger {
 	}
 }
 
-// jsonLogger emits structured JSON log entries to stderr. Each line is a
-// self-contained JSON object suitable for ingestion by log collectors.
 type jsonLogger struct {
 	mod string
 	min int
@@ -136,7 +127,6 @@ func (j *jsonLogger) Sub(mod string) waLog.Logger {
 	}
 }
 
-// NewJSONLogger returns a waLog.Logger that writes structured JSON to stderr.
 func NewJSONLogger(module string, level string) waLog.Logger {
 	return newJSONLogger(module, level)
 }

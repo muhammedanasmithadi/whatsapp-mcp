@@ -19,13 +19,8 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// statusEphemeralSecs is the lifetime of a Status (Story) update. Statuses are
-// ephemeral (24h) and the phone client expects the message-level ephemeral
-// context to be set; without it a posted video can fail to play.
 const statusEphemeralSecs uint32 = 86400
 
-// applyStatusEphemeral marks each media submessage of a status update with the
-// 24h expiration the phone client expects on the media itself.
 func applyStatusEphemeral(msg *waProto.Message) {
 	expiration := proto.Uint32(statusEphemeralSecs)
 	if msg.VideoMessage != nil {
@@ -36,24 +31,15 @@ func applyStatusEphemeral(msg *waProto.Message) {
 	}
 }
 
-// SendResult is the public return value from Send/SendMediaWithOptions.
 type SendResult struct {
-	Success bool
-	Message string
-	ID      string
-	// Warning is set when WhatsApp accepted the send but flagged something the
-	// caller must know. A warning is never a reason to retry: the message is
-	// already on its way.
-	Warning string
-	// PHash is the participant-list hash this client declared; ExpectedPHash is
-	// the hash WhatsApp returned in the ack. Both are empty for sends where the
-	// server did not echo a hash.
+	Success       bool
+	Message       string
+	ID            string
+	Warning       string
 	PHash         string
 	ExpectedPHash string
 }
 
-// SendMediaOptions bundles the inputs to SendMediaWithOptions so callers can
-// add per-message flags (view_once, etc.) without growing the argument list.
 type SendMediaOptions struct {
 	Recipient string
 	Caption   string
@@ -61,12 +47,10 @@ type SendMediaOptions struct {
 	ViewOnce  bool
 }
 
-// Send sends a text message.
 func (c *Client) Send(ctx context.Context, recipient, message string) SendResult {
 	return c.send(ctx, recipient, message, "", false)
 }
 
-// SendMediaWithOptions is the extensible entry point for media sends.
 func (c *Client) SendMediaWithOptions(ctx context.Context, opts SendMediaOptions) SendResult {
 	return c.send(ctx, opts.Recipient, opts.Caption, opts.MediaPath, opts.ViewOnce)
 }
@@ -77,10 +61,6 @@ type outboundPlan struct {
 	preview SendPreview
 }
 
-// planOutbound resolves a send target and builds the exact protocol message
-// the send path would transmit, together with the dry-run summary of it. When
-// upload is false no media bytes leave the machine: the media is read, typed
-// and probed, but never uploaded, so the message keeps its local shape only.
 func (c *Client) planOutbound(ctx context.Context, recipient, message, mediaPath string, viewOnce, upload bool) (*outboundPlan, error) {
 	recipientJID, err := parseRecipient(recipient)
 	if err != nil {
@@ -135,7 +115,6 @@ func (c *Client) planOutbound(ctx context.Context, recipient, message, mediaPath
 	return &outboundPlan{jid: recipientJID, message: msg, preview: preview}, nil
 }
 
-// send is the unified implementation shared by Send and SendMediaWithOptions.
 func (c *Client) send(ctx context.Context, recipient, message, mediaPath string, viewOnce bool) SendResult {
 	if !c.wa.IsConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
@@ -157,10 +136,6 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 	resp, err := c.wa.SendMessage(ctx, plan.jid, plan.message)
 	if err != nil {
 		c.incErrors()
-		// The send never reached WhatsApp, so give the budget back rather than
-		// letting a flapping socket consume messages the operator can never
-		// send. Whatsmeow writes the frame before it waits for the ack, so a
-		// cancelled context is excluded: there the outcome is unknown.
 		if !unknownOutcome(err.Error()) && c.limiter != nil {
 			c.limiter.RefundSend(rateWasContact)
 		}
@@ -169,9 +144,6 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 
 	c.incMessagesOut()
 
-	// WhatsApp delivered the message; a cache failure must not flip the
-	// result, because a caller that reads failure retries and sends a second
-	// copy. Report it as a warning and keep the id so the operator can act.
 	if err := c.persistSent(ctx, plan.jid, resp.ID, message, mediaPath, plan.message); err != nil {
 		c.log.Errorf("sent message not cached: %v", err)
 		result := sendResultFor(recipient, resp)
@@ -186,10 +158,6 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 	return sendResultFor(recipient, resp)
 }
 
-// sendResultFor turns a whatsmeow ack into the public SendResult. When the
-// server returns a participant-list hash that differs from the one this client
-// declared, WhatsApp did not accept the fan-out, so the send is reported as a
-// failure carrying both hashes and the message id instead of a blind success.
 func unknownOutcome(msg string) bool {
 	lower := strings.ToLower(msg)
 	return strings.Contains(lower, "context canceled") ||
@@ -206,11 +174,6 @@ func sendResultFor(recipient string, resp whatsmeow.SendResponse) SendResult {
 		ExpectedPHash: resp.ExpectedPHash,
 	}
 	if resp.ExpectedPHash != "" && resp.ExpectedPHash != resp.PHash {
-		// WhatsApp acknowledged the send (error=0, a server id), so the message
-		// is delivered. The hash it echoes back describes the audience it
-		// computed, which for a Status broadcast is not the set this device can
-		// derive from its own contact table. That is a delivery caveat, not a
-		// failed send: retrying would post the story a second time.
 		result.Warning = fmt.Sprintf(
 			"WhatsApp accepted the send but did not recognize this fan-out: the server expects participant-list hash %s, this client computed %s, so some recipients may not have received it",
 			resp.ExpectedPHash, resp.PHash)
@@ -218,9 +181,6 @@ func sendResultFor(recipient string, resp whatsmeow.SendResponse) SendResult {
 	return result
 }
 
-// ConvertAudioForSending converts an audio file to an Ogg Opus voice note
-// inside the configured media root, so the converted file passes the same
-// media-root check as the original. The caller removes it when done.
 func (c *Client) ConvertAudioForSending(ctx context.Context, mediaPath string) (string, error) {
 	safePath, err := c.ValidateMediaPath(mediaPath)
 	if err != nil {
@@ -229,9 +189,6 @@ func (c *Client) ConvertAudioForSending(ctx context.Context, mediaPath string) (
 	return media.ConvertToOpusOggIn(ctx, safePath, c.mediaRootDir())
 }
 
-// mediaRootDir is the directory the media allowlist resolves to. An empty
-// result means no root is configured, in which case conversion falls back to
-// the OS temp dir.
 func (c *Client) mediaRootDir() string {
 	if c.allowedMediaRoot == "" {
 		return ""
@@ -242,7 +199,6 @@ func (c *Client) mediaRootDir() string {
 	return c.allowedMediaRoot
 }
 
-// chatKind names the class of chat a JID addresses, for the dry-run summary.
 func chatKind(jid types.JID) string {
 	switch jid.Server {
 	case types.GroupServer:
@@ -271,17 +227,12 @@ func mediaKindName(kind whatsmeow.MediaType) string {
 	}
 }
 
-// ephemeralContextInfo returns the MessageContextInfo carrying the group's
-// disappearing-message timer for chat, or nil if chat isn't a group,
-// GetGroupInfo fails, or no timer is set. Shared by send and SendReply.
 func (c *Client) ephemeralContextInfo(ctx context.Context, chat types.JID) *waProto.MessageContextInfo {
 	if chat.Server != "g.us" {
 		return nil
 	}
 	gi, err := c.wa.GetGroupInfo(ctx, chat)
 	if err != nil {
-		// The send still goes out; the message just never expires as the group
-		// setting says. Say so instead of failing silently.
 		c.log.Warnf("Read disappearing timer for %s: %v", chat, err)
 		return nil
 	}
@@ -294,11 +245,6 @@ func (c *Client) ephemeralContextInfo(ctx context.Context, chat types.JID) *waPr
 	}
 }
 
-// IsKnownContact classifies a send target for the rate limiter. Groups we can
-// send to are inherently known contexts, so they are never treated as cold.
-// For 1:1 recipients, "known" means we have prior inbound history from that
-// JID in the cache. On a store error we fail closed — treat the target as a
-// non-contact so the stricter limit applies.
 func (c *Client) IsKnownContact(jid types.JID) bool {
 	if jid.Server == types.GroupServer {
 		return true
@@ -311,7 +257,6 @@ func (c *Client) IsKnownContact(jid types.JID) bool {
 	return known
 }
 
-// parseRecipient normalizes a phone number or JID string into types.JID.
 func parseRecipient(recipient string) (types.JID, error) {
 	canonical, err := NormalizeRecipient(recipient)
 	if err != nil {
@@ -327,9 +272,6 @@ func parseRecipient(recipient string) (types.JID, error) {
 	return types.JID{User: canonical, Server: types.DefaultUserServer}, nil
 }
 
-// mediaAsset is a media file resolved for sending: validated on disk, typed by
-// extension, probed for its playable shape, and — on a real send only —
-// uploaded to WhatsApp's media servers.
 type mediaAsset struct {
 	path        string
 	data        []byte
@@ -360,10 +302,6 @@ func (a *mediaAsset) preview() *MediaPreview {
 	return p
 }
 
-// loadMedia validates mediaPath against the configured media root, reads and
-// types it, and probes its playable shape. When upload is true it also uploads
-// the file (and a video's thumbnail) to WhatsApp, which is the only step that
-// touches the network.
 func (c *Client) loadMedia(ctx context.Context, mediaPath string, upload bool) (*mediaAsset, error) {
 	safePath, err := c.ValidateMediaPath(mediaPath)
 	if err != nil {
@@ -412,10 +350,6 @@ func (c *Client) loadMedia(ctx context.Context, mediaPath string, upload bool) (
 	return asset, nil
 }
 
-// fillMediaMessage populates the media submessage of msg from a loaded asset.
-// When viewOnce is true the Image/Video/Audio submessage is flagged view-once;
-// DocumentMessage has no view-once support in WhatsApp clients, so the flag is
-// silently ignored for documents.
 func (c *Client) fillMediaMessage(msg *waProto.Message, asset *mediaAsset, caption string, viewOnce bool) {
 	resp := asset.upload
 	if resp == nil {
@@ -503,7 +437,6 @@ func (c *Client) fillMediaMessage(msg *waProto.Message, asset *mediaAsset, capti
 	}
 }
 
-// mediaTypeFromExt maps a file extension to a whatsmeow MediaType + mime type.
 func mediaTypeFromExt(path string) (whatsmeow.MediaType, string) {
 	ext := ""
 	if idx := strings.LastIndex(path, "."); idx >= 0 {
@@ -531,10 +464,6 @@ func mediaTypeFromExt(path string) (whatsmeow.MediaType, string) {
 	}
 }
 
-// documentMimes maps common document extensions to their real MIME types.
-// WhatsApp clients use the Mimetype of a DocumentMessage to decide which app
-// opens the file; "application/octet-stream" shows up on phones as an
-// unopenable "BIN" file, so documents must carry an accurate type.
 var documentMimes = map[string]string{
 	"pdf":  "application/pdf",
 	"doc":  "application/msword",
@@ -556,9 +485,6 @@ var documentMimes = map[string]string{
 	"apk":  "application/vnd.android.package-archive",
 }
 
-// documentMimeType returns the MIME type for a document extension (lower
-// case, no dot), falling back to the system mime database and finally to
-// application/octet-stream.
 func documentMimeType(ext string) string {
 	if m, ok := documentMimes[ext]; ok {
 		return m
@@ -571,8 +497,6 @@ func documentMimeType(ext string) string {
 	return "application/octet-stream"
 }
 
-// persistSent writes a cache row for a message we sent so the local history
-// stays complete regardless of device multiplexing.
 func (c *Client) persistSent(ctx context.Context, recipientJID types.JID, msgID, message, mediaPath string, msg *waProto.Message) error {
 	chatJID := recipientJID.String()
 	if !strings.HasSuffix(chatJID, "@g.us") {

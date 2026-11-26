@@ -20,9 +20,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/stt"
 )
 
-// parseEnabledTools resolves the -enabled-tools flag against its environment
-// variable. Flag values win; empty entries are dropped so a trailing comma
-// cannot register a tool with an empty name.
 func parseEnabledTools(flagValue string) []string {
 	v := strings.TrimSpace(flagValue)
 	if v == "" {
@@ -46,11 +43,6 @@ func readOnlyFromEnv() bool {
 	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
 }
 
-// runStdio serves MCP over stdin/stdout. It is the transport used by MCPB
-// desktop extensions, which launch the binary themselves and cannot open the
-// HTTP pairing page. Pair once with the `login` subcommand before using it.
-//
-// Every diagnostic goes to stderr: stdout carries JSON-RPC frames only.
 func runStdio(storeDir string, redactor *security.Redactor, args []string) int {
 	var (
 		readOnly     bool

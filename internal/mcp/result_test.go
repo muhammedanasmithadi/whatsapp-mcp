@@ -13,17 +13,10 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
-// jpegMagic is the minimum prefix (SOI + APP0 marker) that
-// http.DetectContentType recognises as image/jpeg.
 var jpegMagic = []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00}
 
-// oggMagic is the "OggS" capture pattern for an Ogg container. The
-// http.DetectContentType sniff table matches this even without a Vorbis /
-// Opus payload following it.
 var oggMagic = []byte("OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00")
 
-// writeFile writes bytes to a fresh path under t.TempDir() and returns the
-// absolute path. Fatals the test on any I/O error.
 func writeFile(t *testing.T, name string, data []byte) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
@@ -33,8 +26,6 @@ func writeFile(t *testing.T, name string, data []byte) string {
 	return path
 }
 
-// firstText returns the Text field of the first content block, which the
-// downloadMediaResult contract guarantees is a JSON summary.
 func firstText(t *testing.T, res *mcp.CallToolResult) string {
 	t.Helper()
 	if len(res.Content) == 0 {
@@ -47,9 +38,6 @@ func firstText(t *testing.T, res *mcp.CallToolResult) string {
 	return txt.Text
 }
 
-// assertJSONSummary parses the first (text) content block and checks the
-// key fields are what we expected. Any mismatch fatals — this is the
-// backwards-compat contract with pre-inline callers.
 func assertJSONSummary(t *testing.T, res *mcp.CallToolResult, want client.DownloadResult) {
 	t.Helper()
 	var got client.DownloadResult
@@ -61,9 +49,6 @@ func assertJSONSummary(t *testing.T, res *mcp.CallToolResult, want client.Downlo
 	}
 }
 
-// TestDownloadMediaResult_ImageInlined: a successful image download whose
-// file is on disk and under the size cap should yield two content blocks
-// — the JSON summary and an ImageContent with base64 bytes.
 func TestDownloadMediaResult_ImageInlined(t *testing.T) {
 	path := writeFile(t, "img.jpg", jpegMagic)
 	r := client.DownloadResult{
@@ -99,8 +84,6 @@ func TestDownloadMediaResult_ImageInlined(t *testing.T) {
 	}
 }
 
-// TestDownloadMediaResult_AudioInlined: successful audio download inlines
-// bytes as AudioContent with the sniffed MIME.
 func TestDownloadMediaResult_AudioInlined(t *testing.T) {
 	path := writeFile(t, "voice.ogg", oggMagic)
 	r := client.DownloadResult{
@@ -127,9 +110,6 @@ func TestDownloadMediaResult_AudioInlined(t *testing.T) {
 	}
 }
 
-// TestDownloadMediaResult_DocumentPathOnly: documents aren't renderable
-// inline, so the result carries only the JSON summary. The caller still
-// gets Path and can fetch the file out of band.
 func TestDownloadMediaResult_DocumentPathOnly(t *testing.T) {
 	path := writeFile(t, "spec.pdf", []byte("%PDF-1.4"))
 	r := client.DownloadResult{
@@ -150,8 +130,6 @@ func TestDownloadMediaResult_DocumentPathOnly(t *testing.T) {
 	assertJSONSummary(t, res, r)
 }
 
-// TestDownloadMediaResult_VideoPathOnly: same as document — not embedded,
-// caller must fetch via Path.
 func TestDownloadMediaResult_VideoPathOnly(t *testing.T) {
 	path := writeFile(t, "clip.mp4", []byte{0x00, 0x00, 0x00, 0x20, 'f', 't', 'y', 'p'})
 	r := client.DownloadResult{
@@ -171,9 +149,6 @@ func TestDownloadMediaResult_VideoPathOnly(t *testing.T) {
 	}
 }
 
-// TestDownloadMediaResult_FailurePathOnly: a failed download still returns
-// a well-formed CallToolResult with the JSON error, and no inline attempt
-// is made (there's no file to read).
 func TestDownloadMediaResult_FailurePathOnly(t *testing.T) {
 	r := client.DownloadResult{
 		Success: false,
@@ -190,9 +165,6 @@ func TestDownloadMediaResult_FailurePathOnly(t *testing.T) {
 	assertJSONSummary(t, res, r)
 }
 
-// TestDownloadMediaResult_MissingFileFallsBack: if the daemon says success
-// but the file has vanished (unlikely race), the tool still returns the
-// JSON summary rather than propagating the read error.
 func TestDownloadMediaResult_MissingFileFallsBack(t *testing.T) {
 	r := client.DownloadResult{
 		Success:   true,
@@ -211,13 +183,7 @@ func TestDownloadMediaResult_MissingFileFallsBack(t *testing.T) {
 	}
 }
 
-// TestDownloadMediaResult_OversizedNotInlined: files above the inline cap
-// stay reachable via Path but are NOT embedded. This protects the
-// transport frame and the LLM context from multi-megabyte payloads.
 func TestDownloadMediaResult_OversizedNotInlined(t *testing.T) {
-	// One byte over the cap. Prefix with jpegMagic so http.DetectContentType
-	// would return image/jpeg if we did read it — proving the size check is
-	// what suppresses embedding, not the sniffer.
 	oversized := make([]byte, inlineMediaMaxBytes+1)
 	copy(oversized, jpegMagic)
 	path := writeFile(t, "huge.jpg", oversized)

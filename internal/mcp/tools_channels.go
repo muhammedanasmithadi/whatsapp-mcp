@@ -9,8 +9,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
-// registerChannelReadTools wires WhatsApp Channels (protocol name:
-// newsletters). All are read-only and safe in read-only mode.
 func (s *Server) registerChannelReadTools() {
 	s.registerListChannels()
 	s.registerGetChannelInfo()
@@ -24,8 +22,6 @@ func (s *Server) registerChannelActionTools() {
 	s.registerSendChannelMessage()
 	s.registerCreateChannel()
 }
-
-// -- list_channels ----------------------------------------------------------
 
 func (s *Server) registerListChannels() {
 	tool := mcp.NewTool("list_channels",
@@ -46,8 +42,6 @@ func (s *Server) registerListChannels() {
 		return s.toolOK("list_channels", "", "", "list_channels", "", channels)
 	})
 }
-
-// -- get_channel_info -------------------------------------------------------
 
 type getChannelInfoArgs struct {
 	Channel string `json:"channel"`
@@ -73,8 +67,6 @@ func (s *Server) registerGetChannelInfo() {
 		return s.toolOK("get_channel_info", a.Channel, "", "get_channel_info", "", info)
 	}))
 }
-
-// -- list_channel_messages --------------------------------------------------
 
 type listChannelMessagesArgs struct {
 	Channel        string `json:"channel"`
@@ -107,8 +99,6 @@ func (s *Server) registerListChannelMessages() {
 		return s.toolOK("list_channel_messages", a.Channel, "", "list_channel_messages", "", msgs)
 	}))
 }
-
-// -- follow_channel / unfollow_channel --------------------------------------
 
 type channelMutationArgs struct {
 	Channel string `json:"channel"`
@@ -154,8 +144,6 @@ func (s *Server) registerUnfollowChannel() {
 		return s.toolOK("unfollow_channel", a.Channel, "", "unfollow_channel", "", map[string]any{"success": true, "channel": a.Channel})
 	}))
 }
-
-// -- mute_channel -----------------------------------------------------------
 
 type muteChannelArgs struct {
 	Channel string `json:"channel"`

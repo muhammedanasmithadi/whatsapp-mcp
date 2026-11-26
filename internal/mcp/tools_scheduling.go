@@ -13,20 +13,14 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// registerSchedulingReadTools wires the read-only view of the local outbox.
-// Registered in read-only mode too: listing queued messages changes nothing.
 func (s *Server) registerSchedulingReadTools() {
 	s.registerListScheduledMessages()
 }
 
-// registerSchedulingActionTools wires queue mutations. These do not talk to
-// WhatsApp at enqueue time; the daemon scheduler sends them when due.
 func (s *Server) registerSchedulingActionTools() {
 	s.registerScheduleMessage()
 	s.registerCancelScheduledMessage()
 }
-
-// -- schedule_message -------------------------------------------------------
 
 type scheduleMessageArgs struct {
 	ChatJID      string `json:"chat_jid"`
@@ -107,9 +101,6 @@ func (s *Server) registerScheduleMessage() {
 		if chatJID == "" {
 			return errorResult(ErrInvalidParameter("chat_jid", "a phone number or WhatsApp JID", a.ChatJID)), nil
 		}
-		// scheduled_messages has a foreign key to chats. Ensure a brand-new
-		// recipient gets a row without clobbering an existing chat's name,
-		// timestamp, or archive flag.
 		if err := s.scheduling.EnsureChat(chatJID, s.messages.FindChatName(chatJID)); err != nil {
 			return s.toolErr("schedule_message", chatJID, "", "schedule", err), nil
 		}
@@ -131,8 +122,6 @@ func (s *Server) registerScheduleMessage() {
 		})
 	}))
 }
-
-// -- list_scheduled_messages ------------------------------------------------
 
 type listScheduledMessagesArgs struct {
 	Status string `json:"status,omitempty"`
@@ -185,8 +174,6 @@ func (s *Server) registerListScheduledMessages() {
 		return s.toolOK("list_scheduled_messages", "", "", "list_scheduled_messages", "", out)
 	}))
 }
-
-// -- cancel_scheduled_message ----------------------------------------------
 
 type cancelScheduledMessageArgs struct {
 	ID string `json:"id"`

@@ -32,7 +32,6 @@ func TestExtractTextContent_ExtendedText(t *testing.T) {
 }
 
 func TestExtractTextContent_ConversationWinsOverExtendedText(t *testing.T) {
-	// Conversation is checked first, so when both present the conversation wins.
 	msg := &waProto.Message{
 		Conversation: proto.String("primary"),
 		ExtendedTextMessage: &waProto.ExtendedTextMessage{
@@ -122,10 +121,6 @@ func TestExtractMediaInfo_GeneratedFilenamesAreStable(t *testing.T) {
 	}
 }
 
-// TestPreferredDirectPath: whichever value the download layer hands to
-// whatsmeow as DirectPath, it must prefer the stored protobuf DirectPath
-// when one is present, and only fall back to string-parsing the URL for
-// legacy rows written before the direct_path column existed.
 func TestPreferredDirectPath(t *testing.T) {
 	const storedCanonical = "/v/t62.7118-24/new.enc?ccb=11-4&oh=SIG&oe=EXP&_nc_sid=SID"
 	const legacyURL = "https://mmg.whatsapp.net/v/t62.7118-24/legacy.enc?ccb=x"
@@ -134,10 +129,6 @@ func TestPreferredDirectPath(t *testing.T) {
 		t.Errorf("with stored: got %q, want %q (stored wins)", got, storedCanonical)
 	}
 
-	// Empty stored → fall back to URL parse. Exact expected value here is
-	// whatever extractDirectPathFromURL currently returns; verify by
-	// comparing against a fresh call to keep this test tolerant of PR-#22
-	// behaviour changes.
 	want := extractDirectPathFromURL(legacyURL)
 	if got := preferredDirectPath("", legacyURL); got != want {
 		t.Errorf("empty stored: got %q, want extractDirectPathFromURL result %q", got, want)
@@ -151,11 +142,7 @@ func TestExtractDirectPathFromURL(t *testing.T) {
 		want string
 	}{
 		{
-			// WhatsApp's CDN URLs carry the signed auth params in the query
 			// (ccb/oh/oe/_nc_sid). They MUST be preserved: whatsmeow builds
-			// the download URL as `https://<host><directPath>&hash=…`, which
-			// assumes directPath already ends in `?…`. Stripping the query
-			// yields a malformed URL that the CDN answers with HTTP 403.
 			name: "cdn url with query — query preserved for signed CDN auth",
 			in:   "https://mmg.whatsapp.net/v/t62.7118-24/abc.enc?ccb=11-4&oh=01_Q5xx&oe=6A6220F0&_nc_sid=5e03e0&mms3=true",
 			want: "/v/t62.7118-24/abc.enc?ccb=11-4&oh=01_Q5xx&oe=6A6220F0&_nc_sid=5e03e0&mms3=true",

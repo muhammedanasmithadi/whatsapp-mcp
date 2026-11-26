@@ -8,16 +8,11 @@ import (
 	"time"
 )
 
-// PollResult is one row of a poll tally.
 type PollResult struct {
 	Option string `json:"option"`
 	Votes  int    `json:"votes"`
 }
 
-// StorePollMetadata attaches option names to an existing poll message row so
-// incoming vote SHA-256 hashes can be reversed. If the message row does not
-// exist it is a silent no-op — StoreMessage owns the "no empty content + no
-// media = no row" invariant, and we refuse to punch through it here.
 func (s *Store) StorePollMetadata(ctx context.Context, messageID, chatJID string, options []string) error {
 	if messageID == "" || chatJID == "" {
 		return fmt.Errorf("store poll metadata: message_id and chat_jid required")
@@ -35,8 +30,6 @@ func (s *Store) StorePollMetadata(ctx context.Context, messageID, chatJID string
 	return nil
 }
 
-// GetPollOptions returns the stored option names for a poll, or
-// (nil, sql.ErrNoRows) if we never saw the creation message.
 func (s *Store) GetPollOptions(ctx context.Context, messageID, chatJID string) ([]string, error) {
 	var raw sql.NullString
 	err := s.db.QueryRowContext(ctx,
@@ -56,8 +49,6 @@ func (s *Store) GetPollOptions(ctx context.Context, messageID, chatJID string) (
 	return opts, nil
 }
 
-// GetPollCreator returns the sender JID/user recorded for a poll creation row.
-// Returns sql.ErrNoRows if the row does not exist.
 func (s *Store) GetPollCreator(ctx context.Context, messageID, chatJID string) (string, error) {
 	var sender string
 	err := s.db.QueryRowContext(ctx,
@@ -70,15 +61,6 @@ func (s *Store) GetPollCreator(ctx context.Context, messageID, chatJID string) (
 	return sender, nil
 }
 
-// StorePollVote records a voter's latest selection for a poll. voterJID must
-// be the full normalised JID string. Replays of older PollUpdateMessages are
-// ignored: a vote is only overwritten when the incoming timestamp is >= the
-// stored one.
-// StorePollVote records a voter's latest selection for a poll. voterJID must
-// be the full normalised JID string. Replays of older PollUpdateMessages are
-// ignored: a vote is only overwritten when the incoming timestamp is >= the
-// stored one. Returns accepted=true when the row was inserted or updated,
-// false when a newer-or-equal vote was already stored (stale replay).
 func (s *Store) StorePollVote(ctx context.Context, pollMessageID, pollChatJID, voterJID string, selected []string, timestamp time.Time) (bool, error) {
 	if pollMessageID == "" || pollChatJID == "" || voterJID == "" {
 		return false, fmt.Errorf("store poll vote: poll_message_id, poll_chat_jid, voter_jid required")
@@ -107,8 +89,6 @@ func (s *Store) StorePollVote(ctx context.Context, pollMessageID, pollChatJID, v
 	return n > 0, nil
 }
 
-// GetPollResults returns the stored option names and the per-option vote count
-// for a poll. Returns sql.ErrNoRows if the poll metadata is missing.
 func (s *Store) GetPollResults(ctx context.Context, pollMessageID, pollChatJID string) ([]string, []PollResult, error) {
 	opts, err := s.GetPollOptions(ctx, pollMessageID, pollChatJID)
 	if err != nil {
@@ -134,14 +114,12 @@ func (s *Store) GetPollResults(ctx context.Context, pollMessageID, pollChatJID s
 		}
 		var selected []string
 		if err := json.Unmarshal([]byte(raw), &selected); err != nil {
-			// Skip corrupt rows rather than abort the whole tally.
 			continue
 		}
 		for _, sel := range selected {
 			if _, ok := counts[sel]; ok {
 				counts[sel]++
 			}
-			// Votes for options we don't know about are ignored.
 		}
 	}
 	if err := rows.Err(); err != nil {

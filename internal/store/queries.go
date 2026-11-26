@@ -11,8 +11,6 @@ import (
 
 const listMessageColumns = "messages.timestamp, messages.sender, chats.name, messages.content, messages.is_from_me, chats.jid, messages.id, messages.media_type, messages.is_starred"
 
-// ListMessagesParams holds the filters accepted by ListMessages. Zero values
-// mean "unset" except for Limit, which defaults to 20 when <= 0.
 type ListMessagesParams struct {
 	After          time.Time
 	Before         time.Time
@@ -27,9 +25,6 @@ type ListMessagesParams struct {
 	ContextAfter   int
 }
 
-// ListMessagesResult is the output of ListMessagesCursor: a page of messages
-// plus keyset-pagination metadata so callers can resume walks without offset
-// drift.
 type ListMessagesResult struct {
 	Messages   []Message `json:"messages"`
 	NextCursor string    `json:"next_cursor,omitempty"`
@@ -37,26 +32,16 @@ type ListMessagesResult struct {
 	Count      int       `json:"count"`
 }
 
-// cursorPayload encodes the (timestamp, id) position of the last message in a
-// page so the next call can resume keyset pagination from exactly that point.
-// Timestamps are stored as "2006-01-02 15:04:05" to match the on-disk format;
-// binding a time.Time would append a "+00:00" timezone suffix that breaks the
-// TEXT comparison at the boundary (the stored value becomes a prefix of the
-// bound value and incorrectly compares as less-than).
 type cursorPayload struct {
 	T string `json:"t"` // "2006-01-02 15:04:05" UTC timestamp
 	I string `json:"i"` // message id
 }
 
-// encodeCursor returns an opaque cursor string for the given timestamp + id.
 func encodeCursor(ts time.Time, id string) string {
 	p := cursorPayload{T: ts.UTC().Format("2006-01-02 15:04:05"), I: id}
 	return base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%s", p.T, p.I)))
 }
 
-// decodeCursor reverses encodeCursor, returning the timestamp string and message id.
-// The timestamp is returned as a string (not time.Time) so it can be bound to
-// SQLite without a timezone suffix.
 func decodeCursor(cursor string) (ts string, id string, err error) {
 	raw, err := base64.URLEncoding.DecodeString(cursor)
 	if err != nil {
@@ -69,8 +54,6 @@ func decodeCursor(cursor string) (ts string, id string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// ListMessages returns messages matching the given filters, optionally expanded
-// with surrounding context messages when IncludeContext is true.
 func (s *Store) ListMessages(ctx context.Context, params ListMessagesParams) ([]Message, error) {
 	limit := params.Limit
 	if limit <= 0 {
@@ -139,8 +122,6 @@ func (s *Store) ListMessages(ctx context.Context, params ListMessagesParams) ([]
 	}
 	rows.Close()
 
-	// Resolve sender phones now that rows are closed (avoids connection
-	// deadlock on single-connection stores).
 	for i := range result {
 		result[i].SenderPhone = s.resolveSenderPhone(result[i].Sender)
 	}
@@ -158,7 +139,6 @@ func (s *Store) ListMessages(ctx context.Context, params ListMessagesParams) ([]
 		after = 1
 	}
 
-	// Expand context: before messages (DESC), the match, after messages (ASC).
 	var expanded []Message
 	for _, m := range result {
 		c, err := s.GetMessageContext(ctx, m.ID, before, after)
@@ -172,13 +152,10 @@ func (s *Store) ListMessages(ctx context.Context, params ListMessagesParams) ([]
 	return expanded, nil
 }
 
-// ListChats returns chats matching query. sortBy is "last_active" (default) or "name".
 func (s *Store) ListChats(ctx context.Context, query string, limit, page int, includeLastMessage, includeArchived bool, sortBy string) ([]Chat, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	// Cap like every other paged read: one unbounded call would pull the whole
-	// chat history into the response and the 1 MB body limit.
 	if limit > 200 {
 		limit = 200
 	}
@@ -236,7 +213,6 @@ func (s *Store) ListChats(ctx context.Context, query string, limit, page int, in
 	return result, nil
 }
 
-// GetChat returns a single chat by JID. Returns (nil, nil) when not found.
 func (s *Store) GetChat(ctx context.Context, jid string, includeLastMessage bool) (*Chat, error) {
 	var b strings.Builder
 	b.WriteString(chatSelectSQL("c", includeLastMessage))
@@ -266,8 +242,6 @@ func base64Decode(s string) (string, error) {
 	return string(b), nil
 }
 
-// SearchContactsResult holds a page of contact search results together with
-// pagination metadata.
 type SearchContactsResult struct {
 	Contacts   []Contact `json:"contacts"`
 	NextCursor string    `json:"next_cursor,omitempty"`
@@ -275,13 +249,6 @@ type SearchContactsResult struct {
 	Count      int       `json:"count"`
 }
 
-// SearchContacts searches the synced whatsmeow address book and the
-// bridge-local address book, merges them by person (LID resolution), applies
-// name precedence, filters by an optional query, and returns a page.
-//
-// Channels, groups, status broadcasts and unresolved LID rows are excluded
-// from person results only when they cannot be resolved. Unresolved LIDs are
-// kept as separate rows with an empty phone and status "unmapped".
 func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cursor string) (SearchContactsResult, error) {
 	if limit <= 0 {
 		limit = 50
@@ -292,7 +259,6 @@ func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cur
 
 	q := strings.ToLower(strings.TrimSpace(query))
 
-	// 1. Collect synced contacts from whatsmeow_contacts.
 	type syncedRow struct {
 		jid           string
 		firstName     string
@@ -307,8 +273,6 @@ func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cur
 			SELECT their_jid, first_name, full_name, push_name, business_name, redacted_phone
 			FROM whatsmeow_contacts`)
 		if err != nil {
-			// A failed read is not an empty address book: return it so the
-			// caller can say "lookup failed" instead of "no such contact".
 			return SearchContactsResult{}, fmt.Errorf("read synced contacts: %w", err)
 		}
 		{
@@ -332,7 +296,6 @@ func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cur
 		}
 	}
 
-	// 2. Build Contact rows from synced data.
 	var syncedContacts []Contact
 	for _, r := range synced {
 		name, src := bestName(r.firstName, r.fullName, r.pushName, r.businessName, r.redactedPhone)
@@ -372,8 +335,6 @@ func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cur
 		syncedContacts = append(syncedContacts, c)
 	}
 
-	// 2b. Collect chat-derived contacts as a secondary source. Chat names are
-	// often push names or bare phone numbers, so they get lower precedence.
 	type chatRow struct {
 		jid  string
 		name string
@@ -436,7 +397,6 @@ func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cur
 		syncedContacts = append(syncedContacts, c)
 	}
 
-	// 3. Collect local bridge contacts as overrides.
 	localContacts, _ := s.ListContacts()
 	for i := range localContacts {
 		localContacts[i].NameSource = "local"
@@ -445,10 +405,8 @@ func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cur
 		localContacts[i].Status = "mapped"
 	}
 
-	// 4. Merge by person.
 	merged := s.mergeContacts(localContacts, syncedContacts)
 
-	// 5. Filter by query.
 	if q != "" {
 		filtered := make([]Contact, 0, len(merged))
 		for _, c := range merged {
@@ -462,14 +420,12 @@ func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cur
 		merged = filtered
 	}
 
-	// 6. Decode cursor (format: "rank|name|jid").
 	cursorRank, cursorName, cursorJID := -1, "", ""
 	if cursor != "" {
 		raw, err := base64Decode(cursor)
 		if err == nil {
 			parts := strings.SplitN(raw, "|", 3)
 			if len(parts) == 3 {
-				// ignore parse error; -1 means "before everything"
 				fmt.Sscanf(parts[0], "%d", &cursorRank)
 				cursorName = parts[1]
 				cursorJID = parts[2]
@@ -477,14 +433,10 @@ func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cur
 		}
 	}
 
-	// 7. Apply cursor (skip rows at or before the cursor position).
 	start := 0
 	if cursor != "" {
 		for i, c := range merged {
 			ri := nameSourceRank(c.NameSource)
-			// Sort order is rank DESC, name ASC, jid ASC. An item comes after
-			// the cursor when its rank is lower, or same rank with a greater
-			// name, or same rank and name with a greater jid.
 			if ri < cursorRank ||
 				(ri == cursorRank && c.Name > cursorName) ||
 				(ri == cursorRank && c.Name == cursorName && c.JID > cursorJID) {
@@ -498,7 +450,6 @@ func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cur
 		}
 	}
 
-	// 8. Paginate.
 	hasMore := start+limit < len(merged)
 	end := start + limit
 	if end > len(merged) {
@@ -523,8 +474,6 @@ func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cur
 	}, nil
 }
 
-// GetMessageContext returns the target message together with before/after
-// windows from the same chat.
 func (s *Store) GetMessageContext(ctx context.Context, messageID string, before, after int) (*MessageContext, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT messages.timestamp, messages.sender, chats.name, messages.content, messages.is_from_me, chats.jid, messages.id, messages.chat_jid, messages.media_type, messages.is_starred
@@ -581,10 +530,6 @@ func (s *Store) GetMessageContext(ctx context.Context, messageID string, before,
 	}, nil
 }
 
-// GetSenderName resolves a sender JID to a display name, preferring the
-// synced address book (whatsmeow_contacts) over the chats table — 1:1 chat
-// names are often just the bare phone number. Falls back to the input value
-// if no name is found.
 func (s *Store) GetSenderName(ctx context.Context, senderJID string) string {
 	if name := s.ContactName(senderJID); name != "" {
 		return name
@@ -595,8 +540,6 @@ func (s *Store) GetSenderName(ctx context.Context, senderJID string) string {
 
 	phonePart := jidUser(senderJID)
 
-	// Prefer an exact direct-chat match on phone + @s.whatsapp.net before
-	// falling back to a LIKE — the LIKE can cross-match unrelated rows.
 	if name := s.chatNameByJID(ctx, phonePart+"@s.whatsapp.net"); name != "" {
 		return name
 	}
@@ -610,8 +553,6 @@ func (s *Store) GetSenderName(ctx context.Context, senderJID string) string {
 	return senderJID
 }
 
-// chatNameByJID looks up chats.name for an exact jid match. Returns "" if
-// not found or the stored name is empty.
 func (s *Store) chatNameByJID(ctx context.Context, jid string) string {
 	var name sql.NullString
 	if err := s.db.QueryRowContext(ctx,
@@ -621,8 +562,6 @@ func (s *Store) chatNameByJID(ctx context.Context, jid string) string {
 	return ""
 }
 
-// queryContextWindow fetches `limit` messages in chat either strictly before
-// (ascending=false) or strictly after (ascending=true) the anchor timestamp.
 func (s *Store) queryContextWindow(ctx context.Context, chatJID string, anchor time.Time, limit int, ascending bool) ([]Message, error) {
 	op := "<"
 	order := "DESC"
@@ -663,8 +602,6 @@ func (s *Store) queryContextWindow(ctx context.Context, chatJID string, anchor t
 	return out, nil
 }
 
-// scanListMessageRow scans the 8-column projection used by list_messages and
-// the context window queries.
 func (s *Store) scanListMessageRow(row interface {
 	Scan(dest ...any) error
 }) (Message, error) {
@@ -698,23 +635,14 @@ func (s *Store) scanListMessageRow(row interface {
 	return m, nil
 }
 
-// ListMessagesCursor returns a page of messages using keyset pagination.
-// When cursor is set, only messages strictly older than the cursor's
-// (timestamp, id) are returned. Fetches limit+1 rows to detect has_more.
-// Ordering is always timestamp DESC, id DESC.
 func (s *Store) ListMessagesCursor(ctx context.Context, params ListMessagesParams) (*ListMessagesResult, error) {
 	return s.listMessagesPage(ctx, params, false)
 }
 
-// ListMediaMessages returns the same page of messages restricted to rows that
-// carry media, sharing the pagination pipeline with ListMessagesCursor.
 func (s *Store) ListMediaMessages(ctx context.Context, params ListMessagesParams) (*ListMessagesResult, error) {
 	return s.listMessagesPage(ctx, params, true)
 }
 
-// listMessagesPage is the one keyset-pagination pipeline both message-list
-// tools use; mediaOnly adds the has-media filter and drops the text search,
-// which is the whole difference between them.
 func (s *Store) listMessagesPage(ctx context.Context, params ListMessagesParams, mediaOnly bool) (*ListMessagesResult, error) {
 	limit := params.Limit
 	if limit <= 0 {
@@ -815,10 +743,6 @@ func (s *Store) listMessagesPage(ctx context.Context, params ListMessagesParams,
 	}, nil
 }
 
-// resolveSenderPhone returns a full phone (bare user part) for a message
-// sender. The stored sender may be a LID user part (group participants, and
-// DMs whose LID mapping was unknown when the message arrived), so try the
-// LID map; a phone-number sender simply misses and is returned unchanged.
 func (s *Store) resolveSenderPhone(sender string) string {
 	if sender == "" || sender == "me" {
 		return sender

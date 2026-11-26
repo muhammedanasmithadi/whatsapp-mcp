@@ -6,31 +6,20 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// ErrorCode is a machine-readable error code.
 type ErrorCode string
 
 const (
-	// ErrCodeInvalidRequest - Malformed request or missing required parameters.
-	ErrCodeInvalidRequest ErrorCode = "invalid_request"
-	// ErrCodeInvalidParameter - A specific parameter is invalid or out of range.
+	ErrCodeInvalidRequest   ErrorCode = "invalid_request"
 	ErrCodeInvalidParameter ErrorCode = "invalid_parameter"
-	// ErrCodeNotFound - The requested resource (chat, message, contact) was not found.
-	ErrCodeNotFound ErrorCode = "not_found"
-	// ErrCodeConflict - The resource already exists or is in a conflicting state.
-	ErrCodeConflict ErrorCode = "conflict"
-	// ErrCodeRateLimited - The client has exceeded rate limits.
-	ErrCodeRateLimited ErrorCode = "rate_limited"
-	// ErrCodeWhatsAppAPI - WhatsApp returned an error (network, auth, banned, etc.).
-	ErrCodeWhatsAppAPI ErrorCode = "whatsapp_api"
-	// ErrCodeInternal - Unexpected internal server error.
-	ErrCodeInternal ErrorCode = "internal_error"
-	// ErrCodeUnauthorized - Authentication or authorization failure.
-	ErrCodeUnauthorized ErrorCode = "unauthorized"
-	// ErrCodeUnavailable - The service is temporarily unavailable.
-	ErrCodeUnavailable ErrorCode = "unavailable"
+	ErrCodeNotFound         ErrorCode = "not_found"
+	ErrCodeConflict         ErrorCode = "conflict"
+	ErrCodeRateLimited      ErrorCode = "rate_limited"
+	ErrCodeWhatsAppAPI      ErrorCode = "whatsapp_api"
+	ErrCodeInternal         ErrorCode = "internal_error"
+	ErrCodeUnauthorized     ErrorCode = "unauthorized"
+	ErrCodeUnavailable      ErrorCode = "unavailable"
 )
 
-// ErrorCategory groups errors into broad categories for client-side handling.
 type ErrorCategory string
 
 const (
@@ -40,7 +29,6 @@ const (
 	ErrorCategoryAuth      ErrorCategory = "auth_error"   // Authentication/authorization failure
 )
 
-// ErrorDetail is a structured error detail for MCP tool responses.
 type ErrorDetail struct {
 	Code       ErrorCode     `json:"code"`
 	Category   ErrorCategory `json:"category"`
@@ -50,7 +38,6 @@ type ErrorDetail struct {
 	RetryAfter int           `json:"retry_after,omitempty"` // Seconds to wait before retrying (0 = no specific time)
 }
 
-// MCPError is a structured error that can be converted to an MCP tool result.
 type MCPError struct {
 	Detail ErrorDetail
 }
@@ -72,20 +59,15 @@ func NewMPCError(code ErrorCode, category ErrorCategory, message, detail string,
 	}
 }
 
-// ErrorResult returns an MCP tool result containing the structured error as JSON.
 func (e *MCPError) ErrorResult() *mcp.CallToolResult {
 	return mcp.NewToolResultError(fmt.Sprintf("{\"code\":\"%s\",\"category\":\"%s\",\"message\":\"%s\",\"detail\":\"%s\",\"retryable\":%v,\"retry_after\":%d}",
 		e.Detail.Code, e.Detail.Category, e.Detail.Message, e.Detail.Detail, e.Detail.Retryable, e.Detail.RetryAfter))
 }
 
-// Helper constructors for common error patterns.
-
-// ErrInvalidRequest creates an invalid_request error.
 func ErrInvalidRequest(message, detail string) *MCPError {
 	return NewMPCError(ErrCodeInvalidRequest, ErrorCategoryClient, message, detail, false, 0)
 }
 
-// ErrInvalidParameter creates an invalid_parameter error.
 func ErrInvalidParameter(field, expected, got string) *MCPError {
 	return NewMPCError(ErrCodeInvalidParameter, ErrorCategoryClient,
 		fmt.Sprintf("invalid value for %s", field),
@@ -93,7 +75,6 @@ func ErrInvalidParameter(field, expected, got string) *MCPError {
 		false, 0)
 }
 
-// ErrNotFound creates a not_found error.
 func ErrNotFound(resourceType, resourceID string) *MCPError {
 	return NewMPCError(ErrCodeNotFound, ErrorCategoryClient,
 		fmt.Sprintf("%s not found: %s", resourceType, resourceID),
@@ -101,13 +82,11 @@ func ErrNotFound(resourceType, resourceID string) *MCPError {
 		false, 0)
 }
 
-// ErrConflict creates a conflict error.
 func ErrConflict(message string) *MCPError {
 	return NewMPCError(ErrCodeConflict, ErrorCategoryClient, message,
 		"the resource already exists or is in a conflicting state", false, 0)
 }
 
-// ErrRateLimited creates a rate_limited error.
 func ErrRateLimited(retryAfter int, detail string) *MCPError {
 	return NewMPCError(ErrCodeRateLimited, ErrorCategoryRateLimit,
 		"rate limit exceeded",
@@ -115,39 +94,32 @@ func ErrRateLimited(retryAfter int, detail string) *MCPError {
 		true, retryAfter)
 }
 
-// ErrWhatsAppAPI creates a whatsapp_api error.
 func ErrWhatsAppAPI(message, detail string, retryable bool) *MCPError {
 	return NewMPCError(ErrCodeWhatsAppAPI, ErrorCategoryServer, message, detail, retryable, 0)
 }
 
-// ErrInternal creates an internal_error.
 func ErrInternal(message string) *MCPError {
 	return NewMPCError(ErrCodeInternal, ErrorCategoryServer, message,
 		"an internal server error occurred", false, 0)
 }
 
-// ErrUnauthorized creates an unauthorized error.
 func ErrUnauthorized(message string) *MCPError {
 	return NewMPCError(ErrCodeUnauthorized, ErrorCategoryAuth, message,
 		"authentication or authorization required", false, 0)
 }
 
-// ErrUnavailable creates an unavailable error.
 func ErrUnavailable(message string, retryAfter int) *MCPError {
 	return NewMPCError(ErrCodeUnavailable, ErrorCategoryServer, message,
 		"service temporarily unavailable", true, retryAfter)
 }
 
-// errorResult wraps an MCPError into a CallToolResult.
 func errorResult(err error) *mcp.CallToolResult {
 	if mcpErr, ok := err.(*MCPError); ok {
 		return mcpErr.ErrorResult()
 	}
-	// Fallback for non-MCP errors
 	return mcp.NewToolResultError(err.Error())
 }
 
-// wrapError wraps a Go error into an MCPError with best-effort categorization.
 func wrapError(err error) *MCPError {
 	if mcpErr, ok := err.(*MCPError); ok {
 		return mcpErr

@@ -12,9 +12,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// fakePairDriver lets us drive the Server state machine without a real
-// whatsmeow client. Methods are called by Server; channels let the test
-// simulate events.
 type fakePairDriver struct {
 	loggedIn bool
 	logoutFn func(context.Context) error
@@ -134,9 +131,6 @@ func waitFor(t *testing.T, pred func() bool, msg string) {
 	t.Fatalf("timed out waiting for: %s", msg)
 }
 
-// newTestServer constructs a Server wired to a fake driver, binding to an
-// OS-assigned loopback port so tests can run in parallel without port
-// collisions.
 func newTestServer(t *testing.T, drv pairDriver) *Server {
 	t.Helper()
 	s, err := New(Config{
@@ -176,9 +170,6 @@ func TestServer_PairedStartThenLoggedOut(t *testing.T) {
 
 	waitFor(t, func() bool { return s.Cache().Paired() }, "started paired")
 
-	// Give the Connect goroutine time to install its outCh handler before
-	// we fire the logout event. Without this, the send races with goroutine
-	// scheduling and the handler may not be listening yet.
 	time.Sleep(50 * time.Millisecond)
 
 	drv.outCh <- struct{}{}
@@ -201,7 +192,6 @@ func TestServer_AuthTokenGatesMCPAndPair(t *testing.T) {
 	<-s.listenerOK
 	base := "http://" + s.BoundAddr()
 
-	// /mcp without Authorization -> 401.
 	resp, err := http.Get(base + "/mcp")
 	if err != nil {
 		t.Fatalf("GET /mcp: %v", err)
@@ -212,7 +202,6 @@ func TestServer_AuthTokenGatesMCPAndPair(t *testing.T) {
 		t.Fatalf("want 401 without token on /mcp, got %d", resp.StatusCode)
 	}
 
-	// /pair without Authorization -> 401.
 	resp, err = http.Get(base + "/pair")
 	if err != nil {
 		t.Fatalf("GET /pair: %v", err)
@@ -223,8 +212,6 @@ func TestServer_AuthTokenGatesMCPAndPair(t *testing.T) {
 		t.Fatalf("want 401 without token on /pair, got %d", resp.StatusCode)
 	}
 
-	// /pair with the right bearer token -> 200 (the Run goroutine marks the
-	// cache paired synchronously because IsLoggedIn starts true).
 	waitFor(t, func() bool { return s.Cache().Paired() }, "initial paired flag set")
 	req, _ := http.NewRequest(http.MethodGet, base+"/pair", nil)
 	req.Header.Set("Authorization", "Bearer secret123")
@@ -238,7 +225,6 @@ func TestServer_AuthTokenGatesMCPAndPair(t *testing.T) {
 		t.Fatalf("want 200 with correct bearer, got %d", resp.StatusCode)
 	}
 
-	// /pair with the wrong bearer token -> 401.
 	req, _ = http.NewRequest(http.MethodGet, base+"/pair", nil)
 	req.Header.Set("Authorization", "Bearer not-the-token")
 	resp, err = http.DefaultClient.Do(req)

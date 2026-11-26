@@ -10,10 +10,6 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-// newDisconnectedClient returns a Client whose wa field is nil. That makes
-// (*whatsmeow.Client).IsConnected return false — which all feature methods
-// gate on — so we can exercise the "not-connected" error branch without
-// dragging in sqlite, sockets, or upstream mocks.
 func newDisconnectedClient() *Client {
 	return &Client{log: NewStderrLogger("test", "ERROR", false)}
 }
@@ -66,11 +62,6 @@ func TestParseParticipantJID_NonDigit(t *testing.T) {
 	}
 }
 
-// NOTE: whatsmeow's types.ParseJID is intentionally lenient and does not
-// reject odd inputs (it silently accepts multiple @ signs, leading @, etc.),
-// so we don't try to assert on "malformed JID" rejection here — the only way
-// to enforce stricter validation would be to duplicate whatsmeow's parsing.
-
 func TestParseParticipantJIDs_Mixed(t *testing.T) {
 	got, err := parseParticipantJIDs([]string{"447700000001", "447700000002@s.whatsapp.net"})
 	if err != nil {
@@ -120,10 +111,6 @@ func TestParseParticipantAction_Invalid(t *testing.T) {
 	}
 }
 
-// The remaining tests exercise the "not connected" guard at the top of every
-// feature method. When c.wa is nil, (*whatsmeow.Client).IsConnected reports
-// false, so every method should bail out with that specific error before
-// touching anything else.
 func TestCreateGroup_NotConnected(t *testing.T) {
 	c := newDisconnectedClient()
 	_, _, err := c.CreateGroup(context.Background(), "ignored", []string{"447700000001"})
@@ -154,9 +141,6 @@ func TestUpdateGroupParticipants_NotConnected(t *testing.T) {
 	assertNotConnected(t, err)
 }
 
-// Fixtures for the participant-update helpers. The group mixes a
-// phone-number-addressed admin (us), a LID-addressed member, and a plain
-// phone-number member.
 var (
 	testSelfPN   = types.NewJID("447700000001", types.DefaultUserServer)
 	testSelfLID  = types.NewJID("111111111111111", types.HiddenUserServer)
@@ -166,10 +150,8 @@ var (
 	testOutsider = types.NewJID("447700000009", types.DefaultUserServer)
 )
 
-// noLID is a planParticipantChange resolver that knows no LID mappings.
 func noLID(types.JID) types.JID { return types.EmptyJID }
 
-// lidMap returns a resolver backed by a fixed phone→LID map.
 func lidMap(m map[types.JID]types.JID) func(types.JID) types.JID {
 	return func(pn types.JID) types.JID { return m[pn] }
 }
@@ -416,9 +398,6 @@ func TestJoinGroupWithLink_NotConnected(t *testing.T) {
 }
 
 func TestJoinGroupWithLink_RejectsEmpty(t *testing.T) {
-	// Guarded by a specific empty-input check that runs after the connection
-	// gate, so we can't easily hit it without a live client — but we can at
-	// least assert the connection gate fires for a whitespace input.
 	c := newDisconnectedClient()
 	_, err := c.JoinGroupWithLink(context.Background(), "   ")
 	assertNotConnected(t, err)
@@ -435,8 +414,6 @@ func assertNotConnected(t *testing.T, err error) {
 }
 
 func TestPlanParticipantChange_HiddenNumberMember(t *testing.T) {
-	// In LID groups a member's number can be hidden (empty PhoneNumber); the
-	// stored phone→LID mapping still finds them.
 	hiddenLID := types.NewJID("333333333333333", types.HiddenUserServer)
 	hiddenPN := types.NewJID("447700000004", types.DefaultUserServer)
 	info := testGroupInfo(true)

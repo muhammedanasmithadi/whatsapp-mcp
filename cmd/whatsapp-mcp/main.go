@@ -1,10 +1,3 @@
-// Command whatsapp-mcp is a single-binary WhatsApp bridge that runs as an
-// HTTP MCP daemon (default 127.0.0.1:8765). Subcommands:
-//
-//	login  — one-shot interactive QR pairing (writes session to store/whatsapp.db)
-//	serve  — long-running HTTP daemon: serves MCP at /mcp and pairing UI at /pair
-//	stdio  — MCP over stdin/stdout for MCPB and desktop clients
-//	smoke  — non-interactive boot-check used by CI (no network, no listener)
 package main
 
 import (
@@ -17,7 +10,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
 )
 
-// Version is overridden at build time via -ldflags "-X main.Version=...".
 var Version = "dev"
 
 const usage = `whatsapp-mcp: WhatsApp bridge over MCP
@@ -46,15 +38,11 @@ Serve-specific flags (after 'serve'):
 func main() {
 	mcpsrv.Version = strings.TrimPrefix(Version, "v")
 
-	// Handle -version / --version before subcommand dispatch so it works
-	// regardless of the command that follows (or if none is given).
 	for _, a := range os.Args[1:] {
 		if a == "-version" || a == "--version" {
 			fmt.Printf("whatsapp-mcp %s\n", Version)
 			os.Exit(0)
 		}
-		// Stop scanning at the first non-flag token: that's the subcommand,
-		// and a later `-version` belongs to the subcommand's FlagSet.
 		if len(a) == 0 || a[0] != '-' {
 			break
 		}

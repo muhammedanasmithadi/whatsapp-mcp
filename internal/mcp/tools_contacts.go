@@ -13,10 +13,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// Local contacts are a bridge-side address book. Linked devices cannot write
-// the phone's address book over the multidevice protocol, so these rows stay in
-// the bridge database and only influence name resolution inside this bridge.
-
 func (s *Server) registerContactsReadTools() {
 	s.registerListContacts()
 }
@@ -26,8 +22,6 @@ func (s *Server) registerContactActionTools() {
 	s.registerUpdateContact()
 	s.registerDeleteContact()
 }
-
-// -- resolve_contacts --------------------------------------------------------
 
 type resolveContactsArgs struct {
 	Inputs []string `json:"inputs"`
@@ -76,10 +70,8 @@ func (s *Server) registerResolveContacts() {
 				continue
 			}
 
-			// Determine if it's a JID, LID, phone, or name.
 			jid := raw
 			if !strings.Contains(raw, "@") {
-				// Could be phone digits or a name.
 				trimmed := strings.TrimPrefix(raw, "+")
 				allDigits := true
 				for _, r := range trimmed {
@@ -91,7 +83,6 @@ func (s *Server) registerResolveContacts() {
 				if allDigits && trimmed != "" {
 					jid = trimmed + "@s.whatsapp.net"
 				} else {
-					// Treat as a name: search contacts.
 					if s.client != nil && s.client.Store() != nil {
 						res, err := s.client.Store().SearchContacts(ctx, raw, 5, "")
 						if err == nil && len(res.Contacts) > 0 {
@@ -115,10 +106,8 @@ func (s *Server) registerResolveContacts() {
 				}
 			}
 
-			// Canonicalize.
 			if s.client != nil && s.client.Store() != nil {
 				canon := s.client.Store().CanonicalJID(jid)
-				// Look up name from synced contacts.
 				res, err := s.client.Store().SearchContacts(ctx, "", 200, "")
 				if err != nil {
 					e.Status = "error"
@@ -144,7 +133,6 @@ func (s *Server) registerResolveContacts() {
 					e.Status = found.Status
 					e.Source = "synced"
 				} else {
-					// Resolve LID if applicable.
 					if strings.HasSuffix(canon, "@lid") {
 						resolved := s.client.Store().ResolveLIDToJID(canon)
 						if resolved != canon {
@@ -175,7 +163,6 @@ func (s *Server) registerResolveContacts() {
 				e.Error = "client not connected"
 			}
 
-			// Look up username from contact_profiles.
 			if s.contacts != nil {
 				prof, _ := s.contacts.GetContactProfile(e.JID)
 				if prof != nil {
@@ -189,8 +176,6 @@ func (s *Server) registerResolveContacts() {
 		return s.toolOK("resolve_contacts", "", "", "resolve_contacts", "", results)
 	}))
 }
-
-// -- diagnose_contacts ------------------------------------------------------
 
 func (s *Server) registerDiagnoseContacts() {
 	tool := mcp.NewTool("diagnose_contacts",
@@ -226,13 +211,11 @@ func (s *Server) registerDiagnoseContacts() {
 			}
 		}
 
-		// Evidence counts by source.
 		if s.contacts != nil {
 			staleList, _ := s.contacts.ListStaleContacts()
 			diag["stale_contacts"] = len(staleList)
 		}
 
-		// Last sync time.
 		s.syncMu.Lock()
 		if !s.lastSync.IsZero() {
 			diag["last_sync"] = s.lastSync.UTC().Format(time.RFC3339)
@@ -246,8 +229,6 @@ func (s *Server) registerDiagnoseContacts() {
 		return s.toolOK("diagnose_contacts", "", "", "diagnose_contacts", "", diag)
 	}))
 }
-
-// -- sync_contacts ----------------------------------------------------------
 
 func (s *Server) registerSyncContacts() {
 	tool := mcp.NewTool("sync_contacts",
@@ -287,7 +268,6 @@ func (s *Server) registerSyncContacts() {
 	}))
 }
 
-// resyncAppStateArgs selects which app-state patch to resync.
 type resyncAppStateArgs struct {
 	Patch string `json:"patch,omitempty"`
 }
@@ -340,8 +320,6 @@ func (s *Server) registerResyncAppState() {
 	}))
 }
 
-// canonicalContactJID normalizes a phone number or JID and rejects non-user
-// JIDs (groups, broadcasts) that do not belong in a personal address book.
 func canonicalContactJID(raw string) (string, error) {
 	jid := normalizeRecipientToChatJID(raw)
 	if jid == "" {
@@ -356,8 +334,6 @@ func canonicalContactJID(raw string) (string, error) {
 	}
 	return jid, nil
 }
-
-// -- list_contacts ----------------------------------------------------------
 
 type listContactsArgs struct {
 	Query  string `json:"query,omitempty"`
@@ -400,7 +376,6 @@ func (s *Server) registerListContacts() {
 			}
 			return s.toolOK("list_contacts", "", "", "list_contacts", "", payload)
 		}
-		// Fallback: bridge-local address book only when no client is available.
 		contacts, err := s.contacts.ListContacts()
 		if err != nil {
 			return s.toolErr("list_contacts", "", "", "list_contacts", err), nil
@@ -411,8 +386,6 @@ func (s *Server) registerListContacts() {
 		return s.toolOK("list_contacts", "", "", "list_contacts", "", contacts)
 	}))
 }
-
-// -- create_contact ---------------------------------------------------------
 
 type createContactArgs struct {
 	JID         string `json:"jid"`
@@ -459,8 +432,6 @@ func (s *Server) registerCreateContact() {
 		return s.toolOK("create_contact", jid, "", "create_contact", "", store.Contact{JID: jid, Name: strings.TrimSpace(a.Name), PhoneNumber: phone})
 	}))
 }
-
-// -- update_contact ---------------------------------------------------------
 
 type updateContactArgs struct {
 	JID         string  `json:"jid"`
@@ -517,8 +488,6 @@ func (s *Server) registerUpdateContact() {
 		return s.toolOK("update_contact", jid, "", "update_contact", "", store.Contact{JID: jid, Name: name, PhoneNumber: phone})
 	}))
 }
-
-// -- delete_contact ---------------------------------------------------------
 
 type deleteContactArgs struct {
 	JID string `json:"jid"`

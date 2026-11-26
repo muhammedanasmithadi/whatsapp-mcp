@@ -4,9 +4,6 @@ import (
 	"testing"
 )
 
-// TestParseMediaURI exercises every parseMediaURI branch: successful decode
-// of an individual JID (with `@`) and a group JID (with both `@` and `-`),
-// plus the rejection cases the handler relies on to surface a clean error.
 func TestParseMediaURI(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -78,26 +75,18 @@ func TestParseMediaURI(t *testing.T) {
 	}
 }
 
-// TestSniffResourceMIME_AudioOverride: application/ogg (what
-// http.DetectContentType returns for the Ogg container) is promoted to
-// audio/ogg when the media type is audio, so MCP clients render it.
 func TestSniffResourceMIME_AudioOverride(t *testing.T) {
-	// OggS capture pattern with a minimal Vorbis-shaped trailer. The Go
-	// sniffer classifies this as application/ogg.
 	oggPrefix := []byte("OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00")
 
 	if got := sniffResourceMIME(oggPrefix, "audio"); got != "audio/ogg" {
 		t.Errorf("audio Ogg: sniff = %q, want audio/ogg", got)
 	}
 
-	// Video Ogg (Theora) should NOT be promoted — we only override for the
-	// audio media type. This matches the inline-media path in result.go.
 	if got := sniffResourceMIME(oggPrefix, "video"); got != "application/ogg" {
 		t.Errorf("video Ogg: sniff = %q, want application/ogg (no override)", got)
 	}
 }
 
-// TestSniffResourceMIME_ImagePassThrough: image MIME types survive as-is.
 func TestSniffResourceMIME_ImagePassThrough(t *testing.T) {
 	jpegMagic := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00}
 	if got := sniffResourceMIME(jpegMagic, "image"); got != "image/jpeg" {
@@ -105,9 +94,6 @@ func TestSniffResourceMIME_ImagePassThrough(t *testing.T) {
 	}
 }
 
-// TestRegisterResources_NewServerDoesNotPanic: registerResources is wired
-// into NewServer, and both nil client and nil pairing cache must be tolerated
-// so smoke tests and this test can keep running without a real bridge.
 func TestRegisterResources_NewServerDoesNotPanic(t *testing.T) {
 	s := NewServer(nil, nil, nil)
 	if s == nil {
@@ -118,8 +104,6 @@ func TestRegisterResources_NewServerDoesNotPanic(t *testing.T) {
 	}
 }
 
-// contains is a small helper — the standard library's strings.Contains
-// would work but we avoid the import so this file's imports stay minimal.
 func contains(haystack, needle string) bool {
 	for i := 0; i+len(needle) <= len(haystack); i++ {
 		if haystack[i:i+len(needle)] == needle {

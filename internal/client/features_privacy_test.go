@@ -47,7 +47,6 @@ func TestSetPrivacySetting_InvalidName(t *testing.T) {
 			t.Errorf("error %q missing allowed name %q", msg, want)
 		}
 	}
-	// The value list should NOT appear when the name is the offending arg.
 	if strings.Contains(msg, "contact_allowlist") {
 		t.Errorf("error %q leaked value list while rejecting a bad name", msg)
 	}

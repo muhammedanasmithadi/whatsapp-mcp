@@ -12,7 +12,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
-// registerGroupTools wires every group-management MCP tool.
 func (s *Server) registerGroupTools() {
 	s.registerCreateGroup()
 	s.registerLeaveGroup()
@@ -151,8 +150,6 @@ func (s *Server) registerUpdateGroupParticipants() {
 		mcp.WithString("invite_message", mcp.Description("optional caption shown on the invite card (defaults to none); ignored unless an invite is sent")),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
-		// Not idempotent: repeating an add re-sends invites to anyone who
-		// has not joined yet.
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
@@ -302,8 +299,6 @@ func (s *Server) registerGetGroupInviteLink() {
 		mcp.WithDescription("Return a group's current invite link, or revoke and mint a fresh one when `reset=true`. Warning: `reset=true` permanently invalidates the previous link — anyone holding a previously-shared copy can no longer use it to join, and there is no undo. Prerequisite: admin. Use join_group_with_link to consume an invite. Returns a JSON object `{link}` containing the active invite URL."),
 		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
 		mcp.WithBoolean("reset", mcp.DefaultBool(false), mcp.Description("if true, permanently revoke the existing invite link and mint a new one (defaults to false); previously-shared copies stop working")),
-		// Hints reflect the worst case: reset=true permanently revokes the
-		// old link, so this is not read-only and is destructive.
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),

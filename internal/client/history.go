@@ -11,39 +11,18 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-// AnchorMode is the explicit history-sync anchor mode.
 type AnchorMode string
 
-// History-sync anchor modes accepted by RequestHistorySync.
 const (
-	// AnchorNewest walks back from the newest cached message. This repairs
-	// recent gaps but cannot extend history further back than the cache
-	// already reaches.
 	AnchorNewest AnchorMode = "newest"
-	// AnchorOldest walks back from the oldest cached message. Repeated calls
-	// extend history backwards a batch at a time.
 	AnchorOldest AnchorMode = "oldest"
 )
 
-// DefaultSyncCount is WhatsApp's usual on-demand history-sync batch size.
 const DefaultSyncCount = 50
 
 type LIDMode bool
 
-// RequestHistorySync asks WhatsApp to backfill messages for chatJID.
-//
 // WhatsApp resolves an on-demand history-sync cursor by message key (id +
-// chat + fromMe), so the anchor must be a message the server can actually
-// find. Every path here therefore anchors on a real cached row:
-//
-//   - anchor "oldest": the earliest cached message, for walking backwards.
-//   - anchor "newest" (default): the latest cached message, to fill recent gaps.
-//   - fromTimestamp set: the newest cached message at or before that time,
-//     falling back to the oldest cached message when the timestamp predates
-//     everything we hold.
-//
-// count bounds the batch size; zero means DefaultSyncCount. Returns a
-// human-readable status.
 func (c *Client) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor AnchorMode, count int, useLID LIDMode) (string, error) {
 	c.log.Infof("[SYNC] Requesting history sync for chat: %s (anchor=%q, from=%v)", chatJID, anchor, fromTimestamp)
 
@@ -69,13 +48,6 @@ func (c *Client) RequestHistorySync(ctx context.Context, chatJID string, fromTim
 	}
 	c.log.Infof("[SYNC] Anchored on %s: ID=%s, timestamp=%v, isFromMe=%v", describe, msgID, timestamp, isFromMe)
 
-	// The phone may use the LID form internally; resolve it for direct chats
-	// so the server can match the chat the anchor key belongs to.
-	//
-	// This is era-sensitive: messages predating WhatsApp's LID migration are
-	// keyed on the phone-number JID, so requesting them with the LID form
-	// yields a conversation with zero messages. Callers walking back past the
-	// migration boundary should set useLID=false.
 	requestJID := jid
 	if useLID && jid.Server == types.DefaultUserServer {
 		if lidJID, lerr := c.wa.Store.LIDs.GetLIDForPN(ctx, jid); lerr == nil && !lidJID.IsEmpty() {
@@ -121,7 +93,6 @@ func (c *Client) RequestHistorySync(ctx context.Context, chatJID string, fromTim
 		chatJID, count, timestamp.Format(time.RFC3339), describe), nil
 }
 
-// resolveAnchor picks a real cached message to use as the sync cursor.
 func (c *Client) resolveAnchor(chatJID string, fromTimestamp time.Time, anchor AnchorMode) (id string, ts time.Time, isFromMe bool, describe string, err error) {
 	switch {
 	case anchor == AnchorOldest:
@@ -131,8 +102,6 @@ func (c *Client) resolveAnchor(chatJID string, fromTimestamp time.Time, anchor A
 		id, ts, isFromMe, err = c.store.GetMessageAtOrBefore(chatJID, fromTimestamp)
 		describe = "newest at or before the requested timestamp"
 		if errors.Is(err, sql.ErrNoRows) {
-			// Nothing cached that far back; the oldest row we hold is the
-			// closest valid cursor to the requested point in time.
 			c.log.Infof("[SYNC] No cached message at or before %v; falling back to oldest", fromTimestamp)
 			id, ts, isFromMe, err = c.store.GetOldestMessage(chatJID)
 			describe = "oldest (nothing cached at or before the requested timestamp)"
@@ -151,14 +120,6 @@ func (c *Client) resolveAnchor(chatJID string, fromTimestamp time.Time, anchor A
 	return id, ts, isFromMe, describe, nil
 }
 
-// RequestStatusSync requests missed Status (Stories) updates using the
-// INITIAL_STATUS_V3 history sync type (mode=1). Unlike RequestHistorySync,
-// this does not require a cached anchor message — WhatsApp should return
-// statuses posted while the linked device was offline, if the server supports
-// backfill for linked devices.
-//
-// Returns a human-readable status. Delivery is asynchronous; re-query
-// list_status_updates shortly.
 func (c *Client) RequestStatusSync(ctx context.Context, count int) (string, error) {
 	if c.wa == nil || !c.wa.IsConnected() {
 		return "", fmt.Errorf("client not connected")

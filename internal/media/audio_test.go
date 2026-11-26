@@ -9,13 +9,9 @@ import (
 	"testing"
 )
 
-// fixturePath is populated by TestMain if ffmpeg is available. Empty otherwise.
 var fixturePath string
 
 func TestMain(m *testing.M) {
-	// Try to generate a 3-second 440Hz ogg/opus sample for AnalyzeOggOpus /
-	// ConvertToOpusOgg tests. If ffmpeg isn't present, leave fixturePath
-	// empty and tests will skip.
 	if _, err := exec.LookPath("ffmpeg"); err == nil {
 		tmpDir, err := os.MkdirTemp("", "mcp-whatsapp-media-test-*")
 		if err == nil {
@@ -94,21 +90,10 @@ func TestAnalyzeOggOpus_InvalidBytes(t *testing.T) {
 }
 
 func TestAnalyzeOggOpus_TruncatedHeader(t *testing.T) {
-	// "OggS" alone passes the initial 4-byte signature check but is too
-	// short for the 27-byte page header scan. Due to current implementation,
-	// the parse loop immediately breaks and duration falls back to the
-	// length-based estimate.
-	//
-	// The task spec asserts this should return an error; with the code as
-	// written it does not. Run the call to confirm behaviour.
 	dur, wf, err := AnalyzeOggOpus([]byte("OggS"))
 	if err != nil {
-		// Desired behaviour per spec: truncated header errors out.
 		return
 	}
-	// Document actual behaviour: no error, returns clamped duration (>=1)
-	// and a 64-byte waveform. We flag this via t.Log so the test still
-	// passes against the current code, but the spec's expectation is noted.
 	if dur < 1 {
 		t.Fatalf("expected clamped duration >= 1, got %d", dur)
 	}
@@ -159,10 +144,6 @@ func TestSanitizeFFmpegInputPath(t *testing.T) {
 }
 
 func TestConvertToOpusOgg_RejectsFlagLikeBasename(t *testing.T) {
-	// End-to-end: create a temp file whose basename begins with `-`. If
-	// ffmpeg is available and we did NOT sanitise the path, ffmpeg would
-	// reject it with "Unrecognized option"; with the sanitiser it reads
-	// the file normally.
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg not available; skipping flag-injection guard test")
 	}
@@ -178,8 +159,6 @@ func TestConvertToOpusOgg_RejectsFlagLikeBasename(t *testing.T) {
 		t.Fatalf("mktemp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
-	// Use a relative path so the leading dash is actually at the
-	// beginning of the arg ffmpeg sees.
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -209,8 +188,6 @@ func TestConvertToOpusOgg_RejectsFlagLikeBasename(t *testing.T) {
 func TestConvertToOpusOgg(t *testing.T) {
 	ctx := context.Background()
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		// Without ffmpeg, ConvertToOpusOgg must error out with a message
-		// mentioning ffmpeg.
 		_, convErr := ConvertToOpusOgg(ctx, "/nonexistent/input.mp3")
 		if convErr == nil {
 			t.Fatal("expected error when ffmpeg is missing")

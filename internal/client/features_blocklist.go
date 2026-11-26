@@ -15,11 +15,6 @@ type blockedContact struct {
 	Phone string `json:"phone,omitempty"`
 }
 
-// blocklistJSON keeps the DHash/JIDs shape the tool has always returned and
-// adds a Contacts list with each JID's phone number where known. The server
-// returns blocked users as @lid JIDs, which mean nothing to a caller alone;
-// whatsmeow now carries the phone as the item's PN when the server sends one,
-// and toPhone (our LID map) covers the items where it does not.
 func blocklistJSON(list *types.Blocklist, toPhone func(string) string) any {
 	jids := list.LIDs()
 	contacts := make([]blockedContact, 0, len(list.Items))
@@ -37,7 +32,6 @@ func blocklistJSON(list *types.Blocklist, toPhone func(string) string) any {
 	}{list.DHash, jids, contacts}
 }
 
-// GetBlocklist returns the user's current blocklist as JSON.
 func (c *Client) GetBlocklist(ctx context.Context) (string, error) {
 	if !c.wa.IsConnected() {
 		return "", errors.New("not connected to WhatsApp")
@@ -53,12 +47,10 @@ func (c *Client) GetBlocklist(ctx context.Context) (string, error) {
 	return string(b), nil
 }
 
-// BlockContact blocks the given contact JID or phone number.
 func (c *Client) BlockContact(ctx context.Context, jidRaw string) error {
 	return c.updateBlocklist(ctx, jidRaw, events.BlocklistChangeActionBlock)
 }
 
-// UnblockContact unblocks the given contact JID or phone number.
 func (c *Client) UnblockContact(ctx context.Context, jidRaw string) error {
 	return c.updateBlocklist(ctx, jidRaw, events.BlocklistChangeActionUnblock)
 }

@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// FormatMessage renders a single message in the legacy textual format expected
-// by downstream Claude clients.
 func (s *Store) FormatMessage(ctx context.Context, m Message, showChatInfo bool) string {
 	var b strings.Builder
 
@@ -44,8 +42,6 @@ func (s *Store) FormatMessage(ctx context.Context, m Message, showChatInfo bool)
 	return b.String()
 }
 
-// FormatMessagesList renders a slice of messages. Returns the literal string
-// "No messages to display." when the slice is empty.
 func (s *Store) FormatMessagesList(ctx context.Context, msgs []Message, showChatInfo bool) string {
 	if len(msgs) == 0 {
 		return "No messages to display."

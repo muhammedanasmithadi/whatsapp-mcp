@@ -55,8 +55,6 @@ func TestHandlePairPage_Unpaired(t *testing.T) {
 	if !strings.Contains(body, `/pair/qr.png`) {
 		t.Fatal("unpaired body should reference /pair/qr.png")
 	}
-	// The QR and the SSE stream are browser sub-resources: a browser attaches
-	// no Authorization header to them, so the page must carry the token itself.
 	if !strings.Contains(body, `access_token=`) {
 		t.Fatal("pairing page must pass the token to its sub-resources")
 	}
@@ -105,7 +103,6 @@ func TestHandlePairQR_NoQR(t *testing.T) {
 
 func TestHandlePairReset_POST_CallsLogoutAndRedirects(t *testing.T) {
 	h, rst := newTestHandlers(true, "", nil)
-	// Generate a valid CSRF token (as the GET handler would).
 	token := h.generateCSRFToken()
 	body := strings.NewReader("csrf_token=" + token)
 	req := httptest.NewRequest(http.MethodPost, "/pair/reset", body)
@@ -158,7 +155,6 @@ func TestHandlePairReset_POST_CSRFTokenIsSingleUse(t *testing.T) {
 	h, _ := newTestHandlers(true, "", nil)
 	token := h.generateCSRFToken()
 
-	// First use should succeed.
 	body := strings.NewReader("csrf_token=" + token)
 	req := httptest.NewRequest(http.MethodPost, "/pair/reset", body)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -168,7 +164,6 @@ func TestHandlePairReset_POST_CSRFTokenIsSingleUse(t *testing.T) {
 		t.Fatalf("first POST: want 303, got %d", w.Code)
 	}
 
-	// Replaying the same token should fail. Need fresh rate-limit bucket.
 	h.pairResetLimiter = NewLimiter(100, 100)
 	body = strings.NewReader("csrf_token=" + token)
 	req = httptest.NewRequest(http.MethodPost, "/pair/reset", body)
@@ -204,7 +199,6 @@ func TestHandlePairReset_LogoutErrorSurfaces(t *testing.T) {
 
 func TestPairGet_RateLimited(t *testing.T) {
 	h, _ := newTestHandlers(false, "abc", nil)
-	// Exhaust the burst of 5.
 	for i := 0; i < 5; i++ {
 		w := httptest.NewRecorder()
 		h.handlePairPage(w, httptest.NewRequest(http.MethodGet, "/pair", nil))
@@ -212,7 +206,6 @@ func TestPairGet_RateLimited(t *testing.T) {
 			t.Fatalf("request %d: want 200, got %d", i, w.Code)
 		}
 	}
-	// 6th should be rate-limited.
 	w := httptest.NewRecorder()
 	h.handlePairPage(w, httptest.NewRequest(http.MethodGet, "/pair", nil))
 	if w.Code != http.StatusTooManyRequests {
@@ -225,7 +218,6 @@ func TestPairGet_RateLimited(t *testing.T) {
 
 func TestPairReset_RateLimited(t *testing.T) {
 	h, _ := newTestHandlers(true, "", nil)
-	// First POST should succeed (burst=1).
 	token := h.generateCSRFToken()
 	body := strings.NewReader("csrf_token=" + token)
 	req := httptest.NewRequest(http.MethodPost, "/pair/reset", body)
@@ -235,7 +227,6 @@ func TestPairReset_RateLimited(t *testing.T) {
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("first POST: want 303, got %d", w.Code)
 	}
-	// Second should be rate-limited (rate limiter fires before CSRF check).
 	token2 := h.generateCSRFToken()
 	body2 := strings.NewReader("csrf_token=" + token2)
 	req2 := httptest.NewRequest(http.MethodPost, "/pair/reset", body2)
@@ -255,24 +246,19 @@ func TestPairTemplate_EscapesToken(t *testing.T) {
 	cache.SetPaired()
 	h := newPairHandlers(cache, &fakeResetter{}, nil, nil, nil, "")
 
-	// Inject a CSRFToken containing a script tag to verify html/template escapes it.
-	// We need to call the template directly since the handler doesn't set CSRFToken yet.
 	w := httptest.NewRecorder()
 	data := pairPageData{CSRFToken: `<script>alert("xss")</script>`}
 	if err := pairedTmpl.Execute(w, data); err != nil {
 		t.Fatalf("template execute: %v", err)
 	}
 	body := w.Body.String()
-	// html/template should escape < and > in the value attribute.
 	if strings.Contains(body, "<script>") {
 		t.Fatalf("template did not escape <script> tag in CSRFToken: %s", body)
 	}
-	// The escaped form should be present.
 	if !strings.Contains(body, "&lt;script&gt;") {
 		t.Fatalf("expected escaped script tag in output, got: %s", body)
 	}
 
-	// Sanity: the handler still works.
 	_ = h
 }
 
@@ -304,8 +290,6 @@ func TestHandlePairCode_Success(t *testing.T) {
 func TestHandlePairCode_RateLimited(t *testing.T) {
 	cache := NewPairCache()
 	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{}, nil, nil, "")
-	// Burst is 1; the first request consumes it (it fails CSRF first, but the
-	// limiter has already allowed and spent its token), so the next is 429.
 	w := httptest.NewRecorder()
 	h.handlePairCode(w, httptest.NewRequest(http.MethodPost, "/pair/code", strings.NewReader("phone=919876543210")))
 	w = httptest.NewRecorder()
@@ -362,21 +346,17 @@ func TestFormatPairingCode(t *testing.T) {
 	}
 }
 
-// TestPairCacheBroadcast verifies that PairCache fans state transitions to
-// SSE subscribers in real time.
 func TestPairCacheBroadcast(t *testing.T) {
 	cache := NewPairCache()
 
 	sub := cache.Subscribe()
 	defer cache.Unsubscribe(sub)
 
-	// Initial state should be unpaired.
 	ev := <-sub
 	if ev.State != PairStateUnpaired {
 		t.Fatalf("initial state: want unpaired, got %q", ev.State)
 	}
 
-	// SetQR should emit awaiting_qr.
 	cache.SetQR("test-qr-payload")
 	ev = <-sub
 	if ev.State != PairStateAwaitingQR {
@@ -386,7 +366,6 @@ func TestPairCacheBroadcast(t *testing.T) {
 		t.Fatalf("after SetQR: want QR=%q, got %q", "test-qr-payload", ev.QR)
 	}
 
-	// SetPaired should emit paired.
 	cache.SetPaired()
 	ev = <-sub
 	if ev.State != PairStatePaired {
@@ -396,7 +375,6 @@ func TestPairCacheBroadcast(t *testing.T) {
 		t.Fatalf("after SetPaired: want empty QR, got %q", ev.QR)
 	}
 
-	// Reset should go back to unpaired.
 	cache.Reset()
 	ev = <-sub
 	if ev.State != PairStateUnpaired {
@@ -404,8 +382,6 @@ func TestPairCacheBroadcast(t *testing.T) {
 	}
 }
 
-// TestPairCacheSubscribersMultiple verifies that multiple SSE subscribers
-// all receive the same state transitions.
 func TestPairCacheMultipleSubscribers(t *testing.T) {
 	cache := NewPairCache()
 
@@ -414,7 +390,6 @@ func TestPairCacheMultipleSubscribers(t *testing.T) {
 	defer cache.Unsubscribe(sub1)
 	defer cache.Unsubscribe(sub2)
 
-	// Consume initial snapshot from both subscribers.
 	<-sub1
 	<-sub2
 
@@ -430,8 +405,6 @@ func TestPairCacheMultipleSubscribers(t *testing.T) {
 	}
 }
 
-// TestPairCacheSlowSubscriber verifies that a slow subscriber does not block
-// other subscribers (dropped message behavior).
 func TestPairCacheSlowSubscriber(t *testing.T) {
 	cache := NewPairCache()
 
@@ -443,10 +416,8 @@ func TestPairCacheSlowSubscriber(t *testing.T) {
 	cache.subscribers[fast] = struct{}{}
 	cache.mu.Unlock()
 
-	// This should not block even though slow subscriber can't receive.
 	cache.SetQR("test-qr")
 
-	// Fast subscriber should still get the event.
 	select {
 	case ev := <-fast:
 		if ev.QR != "test-qr" {
@@ -456,7 +427,6 @@ func TestPairCacheSlowSubscriber(t *testing.T) {
 		t.Fatal("fast subscriber did not receive event")
 	}
 
-	// Clean up
 	cache.mu.Lock()
 	delete(cache.subscribers, slow)
 	delete(cache.subscribers, fast)
@@ -465,10 +435,6 @@ func TestPairCacheSlowSubscriber(t *testing.T) {
 	cache.mu.Unlock()
 }
 
-// TestSSE_HandlerMounted verifies the SSE endpoint is mounted on the mux.
-// The SSE connection is long-lived, so we can't fully test streaming in a
-// unit test without cancelling the request context. PairCache tests cover
-// the state transition logic.
 func TestSSE_HandlerMounted(t *testing.T) {
 	cache := NewPairCache()
 	h := newPairHandlers(cache, &fakeResetter{}, nil, nil, nil, "")
@@ -476,7 +442,6 @@ func TestSSE_HandlerMounted(t *testing.T) {
 	mux := http.NewServeMux()
 	h.mount(mux)
 
-	// Verify the SSE endpoint is registered.
 	req := httptest.NewRequest(http.MethodGet, "/pair/events", nil)
 	if _, pattern := mux.Handler(req); pattern != "/pair/events" {
 		t.Fatalf("SSE endpoint /pair/events should be mounted, got pattern %q", pattern)

@@ -38,7 +38,6 @@ func TestHTTP_ResolveContacts(t *testing.T) {
 		t.Fatalf("status %d: %s", resp.StatusCode, raw)
 	}
 	if !strings.Contains(string(raw), "inputs") && !strings.Contains(string(raw), "canonical_jid") && !strings.Contains(string(raw), "resolved") {
-		// The tool should return an array of entries.
 		t.Logf("response: %s", raw)
 	}
 }

@@ -186,7 +186,6 @@ func TestValidateOutputPath_SymlinkParentEscape(t *testing.T) {
 	if err := os.Symlink(outside, link); err != nil {
 		t.Skipf("symlink unsupported on this platform: %v", err)
 	}
-	// Parent (the symlink) resolves outside the root.
 	_, err := ValidateOutputPath(filepath.Join(link, "x.jpg"), root)
 	if err == nil {
 		t.Fatal("expected symlinked-parent escape to be rejected")

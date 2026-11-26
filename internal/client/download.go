@@ -20,7 +20,6 @@ import (
 	"go.mau.fi/whatsmeow"
 )
 
-// cacheState is the explicit lifecycle state of a cached media file on disk.
 type cacheState int
 
 const (
@@ -29,7 +28,6 @@ const (
 	cacheStateInvalid
 )
 
-// DownloadResult is the public return value from Download.
 type DownloadResult struct {
 	Success   bool
 	Message   string
@@ -38,7 +36,6 @@ type DownloadResult struct {
 	Path      string
 }
 
-// MediaDownloader implements whatsmeow.DownloadableMessage for cached media.
 type MediaDownloader struct {
 	URL           string
 	DirectPath    string
@@ -59,9 +56,6 @@ func (d *MediaDownloader) GetMediaType() whatsmeow.MediaType {
 	return d.MediaType
 }
 
-// IsMediaExpired reports whether err is a WhatsApp CDN expiry error (403,
-// 404, or 410) meaning the media URL has expired and must be refreshed by
-// re-syncing the chat (see RecoverMedia).
 func IsMediaExpired(err error) bool {
 	var dhe whatsmeow.DownloadHTTPError
 	if errors.As(err, &dhe) && dhe.Response != nil {
@@ -70,7 +64,6 @@ func IsMediaExpired(err error) bool {
 			return true
 		}
 	}
-	// Also match by error value for the package-level sentinel errors.
 	for _, sample := range []error{
 		whatsmeow.ErrMediaDownloadFailedWith403,
 		whatsmeow.ErrMediaDownloadFailedWith404,
@@ -83,8 +76,6 @@ func IsMediaExpired(err error) bool {
 	return false
 }
 
-// inspectCache reports whether the cached media file at path is missing, valid
-// (size + SHA-256 match), or invalid.
 func inspectCache(path string, fileLength uint64, fileSHA256 []byte) cacheState {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -114,9 +105,6 @@ func inspectCache(path string, fileLength uint64, fileSHA256 []byte) cacheState 
 }
 
 func (c *Client) Download(ctx context.Context, messageID, chatJID, outputPath string) DownloadResult {
-	// Validate output_path first so a bad path fails the call before any DB
-	// or network work. The skip-if-exists check waits until after we have
-	// the media metadata (so the success response carries the right fields).
 	var resolvedOutput string
 	if outputPath != "" {
 		var err error
@@ -126,7 +114,6 @@ func (c *Client) Download(ctx context.Context, messageID, chatJID, outputPath st
 		}
 	}
 
-	// Look up the cached media fields.
 	mediaType, filename, url, directPath, mediaKey, fileSHA256, fileEncSHA256, fileLength, err :=
 		c.store.GetMediaInfo(messageID, chatJID)
 	if err != nil {
@@ -142,8 +129,6 @@ func (c *Client) Download(ctx context.Context, messageID, chatJID, outputPath st
 		}
 	}
 
-	// Skip-if-exists at the caller's destination: symmetric with the cache
-	// short-circuit below. Idempotent re-calls are a no-op.
 	if resolvedOutput != "" {
 		if _, statErr := os.Stat(resolvedOutput); statErr == nil {
 			return DownloadResult{
@@ -177,19 +162,14 @@ func (c *Client) Download(ctx context.Context, messageID, chatJID, outputPath st
 		return DownloadResult{Success: false, Message: fmt.Sprintf("failed to get absolute path: %v", err)}
 	}
 
-	// Short-circuit if we already have the file in cache. If output_path is
-	// set, materialise it there from the cache (cheap hardlink + copy
-	// fallback) and return the output path instead.
 	switch inspectCache(localPath, fileLength, fileSHA256) {
 	case cacheStateValid:
 		return finalizeDownload(localPath, absPath, resolvedOutput, mediaType, filename)
 	case cacheStateInvalid:
 		c.log.Warnf("Ignoring invalid cached media for message %s", c.redactor.MsgID(messageID))
 	case cacheStateMissing:
-		// fall through to download
 	default:
 	}
-	// Surface unexpected stat errors (not missing) before downloading.
 	if _, statErr := os.Stat(localPath); statErr != nil && !os.IsNotExist(statErr) {
 		return DownloadResult{Success: false, Message: fmt.Sprintf("failed to inspect media cache: %v", statErr)}
 	}
@@ -209,8 +189,6 @@ func (c *Client) Download(ctx context.Context, messageID, chatJID, outputPath st
 	case "audio":
 		waMediaType = whatsmeow.MediaAudio
 	case "sticker":
-		// WhatsApp stores stickers as WebP images; whatsmeow maps
-		// StickerMessage to MediaImage.
 		waMediaType = whatsmeow.MediaImage
 	case "document":
 		waMediaType = whatsmeow.MediaDocument
@@ -291,10 +269,6 @@ func replaceCacheFile(dir, path string, data []byte) error {
 	return os.Rename(tmpPath, path)
 }
 
-// finalizeDownload materialises the cached file at resolvedOutput (if set)
-// and builds the success DownloadResult. Shared by the cache-hit and
-// fresh-download paths in Download, which differ only in the log line
-// emitted just before this call.
 func finalizeDownload(localPath, absPath, resolvedOutput, mediaType, filename string) DownloadResult {
 	returnPath := absPath
 	if resolvedOutput != "" {
@@ -312,10 +286,6 @@ func finalizeDownload(localPath, absPath, resolvedOutput, mediaType, filename st
 	}
 }
 
-// placeAtOutput materialises src at dst. Prefers a hard link (zero-copy, O(1))
-// and falls back to a stream copy on cross-device (EXDEV). If dst already
-// exists, returns nil — the caller has already cleared the skip-if-exists
-// check, so EEXIST here is a benign race and the file satisfies the request.
 func placeAtOutput(src, dst string) error {
 	if err := os.Link(src, dst); err == nil {
 		return nil
@@ -324,7 +294,6 @@ func placeAtOutput(src, dst string) error {
 	} else if !errors.Is(err, syscall.EXDEV) {
 		return err
 	}
-	// Cross-device — fall back to a copy.
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -344,13 +313,7 @@ func placeAtOutput(src, dst string) error {
 	return out.Close()
 }
 
-// RecoverMedia requests a fresh history sync for the chat containing the
-// given message so WhatsApp re-sends it with a current media URL. After the
-// sync completes, the cached media URL/direct_path are refreshed and
-// download_media can be retried. Returns a description of what was requested.
 func (c *Client) RecoverMedia(ctx context.Context, messageID, chatJID string) (string, error) {
-	// Ask WhatsApp to backfill from the oldest cached message up to and
-	// including the target message, so the media URL is refreshed.
 	msg, err := c.RequestHistorySync(ctx, chatJID, time.Time{}, "oldest", 50, true)
 	if err != nil {
 		return "", fmt.Errorf("request history sync for media recovery: %w", err)
@@ -358,12 +321,7 @@ func (c *Client) RecoverMedia(ctx context.Context, messageID, chatJID string) (s
 	return msg, nil
 }
 
-// preferredDirectPath picks the value handed to whatsmeow as the download's
-// DirectPath. New rows carry a stored directPath captured verbatim from the
 // media protobuf (including the signed `?ccb=&oh=&oe=&_nc_sid=` CDN auth
-// query), which is authoritative. Legacy rows written before the
-// direct_path column existed fall back to parsing URL — the same behaviour
-// prior daemon builds had.
 func preferredDirectPath(stored, url string) string {
 	if stored != "" {
 		return stored
@@ -371,14 +329,7 @@ func preferredDirectPath(stored, url string) string {
 	return extractDirectPathFromURL(url)
 }
 
-// extractDirectPathFromURL turns a CDN URL into the /direct/path/form that
-// whatsmeow's Download requires when the URL does not already contain it.
-//
-// The query string MUST be preserved: whatsmeow builds the request URL as
-// `https://<host><directPath>&hash=…&mms-type=…&__wa-mms=`, which assumes
 // directPath already ends in `?ccb=…&oh=…&oe=…&_nc_sid=…` (WhatsApp's signed
-// CDN auth params). Stripping the query yields a malformed URL and every
-// download returns 403.
 func extractDirectPathFromURL(url string) string {
 	parts := strings.SplitN(url, ".net/", 2)
 	if len(parts) < 2 {
@@ -387,16 +338,11 @@ func extractDirectPathFromURL(url string) string {
 	return "/" + parts[1]
 }
 
-// TranscribeVoiceNote downloads the media for a voice-note message, converts
-// it to 16kHz mono WAV, and sends it to the configured STT endpoint.
-// Returns the transcribed text. Requires WHATSAPP_MCP_STT_ENDPOINT to be set
-// and the message must be an audio message.
 func (c *Client) TranscribeVoiceNote(ctx context.Context, messageID, chatJID string) (string, error) {
 	if c.sttClient == nil {
 		return "", fmt.Errorf("voice-note transcription not configured: set WHATSAPP_MCP_STT_ENDPOINT")
 	}
 
-	// Download the media.
 	r := c.Download(ctx, messageID, chatJID, "")
 	if !r.Success {
 		return "", fmt.Errorf("stt: download failed: %s", r.Message)
@@ -405,19 +351,16 @@ func (c *Client) TranscribeVoiceNote(ctx context.Context, messageID, chatJID str
 		return "", fmt.Errorf("stt: message %s is not an audio message (type: %s)", messageID, r.MediaType)
 	}
 
-	// Read the downloaded file.
 	audioData, err := os.ReadFile(r.Path)
 	if err != nil {
 		return "", fmt.Errorf("stt: read downloaded file: %w", err)
 	}
 
-	// Convert to WAV for the STT endpoint.
 	wavData, err := media.ConvertToWAV(ctx, audioData, "ogg")
 	if err != nil {
 		return "", fmt.Errorf("stt: convert to WAV: %w", err)
 	}
 
-	// Transcribe.
 	text, err := c.sttClient.Transcribe(ctx, wavData, "voice.ogg")
 	if err != nil {
 		return "", fmt.Errorf("stt: transcribe: %w", err)

@@ -7,9 +7,6 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// TestFlexInt_UnmarshalJSON covers request_sync's count argument, which must
-// accept both a JSON number and a JSON string (clients working from a cached
-// tool schema that predates the parameter send it as a string).
 func TestFlexInt_UnmarshalJSON(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -43,8 +40,6 @@ func TestFlexInt_UnmarshalJSON(t *testing.T) {
 	}
 }
 
-// TestFlexBool_UnmarshalJSON covers request_sync's use_lid argument, same
-// string-tolerant contract as flexInt above.
 func TestFlexBool_UnmarshalJSON(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -78,10 +73,6 @@ func TestFlexBool_UnmarshalJSON(t *testing.T) {
 	}
 }
 
-// TestRequestSync_ArgValidation exercises the handler's own guards (anchor
-// enum, non-negative count, required chat_jid) directly through the
-// registered tool. All cases here must be rejected before the handler
-// reaches s.client, so a nil client is safe.
 func TestRequestSync_ArgValidation(t *testing.T) {
 	cases := []struct {
 		name string

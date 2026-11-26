@@ -12,8 +12,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// runSmoke boots the store + client (without connecting to WhatsApp servers)
-// and constructs the MCP server. Used by CI to catch wire-up regressions.
 func runSmoke(storeDir string, redactor *security.Redactor, args []string) int {
 	fs := flag.NewFlagSet("smoke", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)

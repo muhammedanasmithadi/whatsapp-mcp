@@ -10,8 +10,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 )
 
-// callGroupAdminTool resolves a registered tool by name and runs its handler
-// with the given arguments.
 func callGroupAdminTool(t *testing.T, s *Server, name string, args map[string]any) *mcp.CallToolResult {
 	t.Helper()
 	tool, ok := s.MCP().ListTools()[name]

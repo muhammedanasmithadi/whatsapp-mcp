@@ -15,9 +15,6 @@ import (
 
 func TestSchemaIdempotent(t *testing.T) {
 	s := openTestStore(t)
-	// openTestStore already applied seed.sql (which contains CREATE TABLE
-	// IF NOT EXISTS). Re-apply the store.go `schema` constant to confirm
-	// it's idempotent against a populated DB.
 	if _, err := s.db.Exec(schema); err != nil {
 		t.Fatalf("first re-apply: %v", err)
 	}
@@ -108,7 +105,6 @@ func TestStoreMediaInfo_Update(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// Insert a minimal message first.
 	m := Message{
 		ID:        "media1",
 		ChatJID:   "447700000001@s.whatsapp.net",
@@ -168,7 +164,6 @@ func TestStoreMediaInfo_Update(t *testing.T) {
 func TestGetMediaInfo_Seeded(t *testing.T) {
 	s := openTestStore(t)
 
-	// a4 was seeded with image media + bytes.
 	mt, _, url, _, mk, fs, fe, fl, err := s.GetMediaInfo("a4", "447700000001@s.whatsapp.net")
 	if err != nil {
 		t.Fatalf("GetMediaInfo: %v", err)
@@ -187,10 +182,6 @@ func TestGetMediaInfo_Seeded(t *testing.T) {
 	}
 }
 
-// TestStoreMessage_DirectPathRoundTrip: a Message written with DirectPath
-// set must come back through GetMediaInfo with the same value. This is
-// what the download path relies on to skip the URL-parsing fallback and
-// hand whatsmeow the CDN path the protobuf gave us.
 func TestStoreMessage_DirectPathRoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
@@ -224,17 +215,10 @@ func TestStoreMessage_DirectPathRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMigrateSchema_AddsDirectPath: an existing database that predates the
-// direct_path column should have it added by Open (via migrateSchema),
-// with existing rows preserved and direct_path defaulting to NULL. Open
-// must be idempotent — running twice does not double-add.
 func TestMigrateSchema_AddsDirectPath(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "messages.db")
 
-	// Pre-create a legacy messages.db WITHOUT the direct_path column.
-	// This mirrors the pre-migration schema (before poll_options_json even,
-	// so we exercise both migrations together).
 	legacy, err := sql.Open("sqlite3", "file:"+dbPath+"?_foreign_keys=on")
 	if err != nil {
 		t.Fatalf("open legacy DB: %v", err)
@@ -260,16 +244,12 @@ func TestMigrateSchema_AddsDirectPath(t *testing.T) {
 	}
 	_ = legacy.Close()
 
-	// Opening through the store must migrate — direct_path and poll_options_json
-	// both get ALTER'd on. Existing legacy row is preserved.
 	s, err := Open(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer s.Close()
 
-	// Verify direct_path column exists by SELECTing it — a missing column
-	// surfaces as a SQL error.
 	var (
 		haveDirectPath sql.NullString
 		haveURL        string
@@ -286,10 +266,8 @@ func TestMigrateSchema_AddsDirectPath(t *testing.T) {
 		t.Error("legacy row url should have survived migration")
 	}
 
-	// Second Open must be a no-op — verifies migrateSchema is idempotent.
 	s.Close()
 
-	// Reopen and verify new tables exist.
 	s2, err := Open(dir)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
@@ -305,8 +283,6 @@ func TestMigrateSchema_AddsDirectPath(t *testing.T) {
 	}
 }
 
-// TestMigrateSchema_AddsContactProfiles verifies the new Phase 3 tables
-// are created on an existing (legacy) database.
 func TestMigrateSchema_AddsContactProfiles(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "messages.db")
@@ -351,7 +327,6 @@ func TestMigrateSchema_AddsContactProfiles(t *testing.T) {
 		}
 	}
 
-	// Verify upsert works.
 	if err := s.UpsertContactProfile("test@s.whatsapp.net", "testuser", "synced", "", false); err != nil {
 		t.Fatalf("UpsertContactProfile: %v", err)
 	}
@@ -363,7 +338,6 @@ func TestMigrateSchema_AddsContactProfiles(t *testing.T) {
 		t.Errorf("username mismatch: got %q", prof.Username)
 	}
 
-	// Verify evidence recording.
 	if err := s.RecordEvidence("123@lid", "456@s.whatsapp.net", "test", "", true); err != nil {
 		t.Fatalf("RecordEvidence: %v", err)
 	}
@@ -372,7 +346,6 @@ func TestMigrateSchema_AddsContactProfiles(t *testing.T) {
 		t.Errorf("GetBestPNForLID: got %q, want 456@s.whatsapp.net", pn)
 	}
 
-	// Idempotent.
 	s.Close()
 	s2, err := Open(dir)
 	if err != nil {
@@ -384,8 +357,6 @@ func TestMigrateSchema_AddsContactProfiles(t *testing.T) {
 func TestHasInboundFrom(t *testing.T) {
 	s := openTestStore(t)
 
-	// Alice (447700000001) has inbound rows in the seed (a1, a3, a5 with
-	// is_from_me = 0).
 	got, err := s.HasInboundFrom("447700000001@s.whatsapp.net")
 	if err != nil {
 		t.Fatalf("HasInboundFrom(Alice): %v", err)
@@ -394,7 +365,6 @@ func TestHasInboundFrom(t *testing.T) {
 		t.Error("Alice has seeded inbound messages; want true")
 	}
 
-	// A JID with no rows at all → false, no error.
 	got, err = s.HasInboundFrom("000000000@s.whatsapp.net")
 	if err != nil {
 		t.Fatalf("HasInboundFrom(unknown): %v", err)
@@ -404,9 +374,6 @@ func TestHasInboundFrom(t *testing.T) {
 	}
 }
 
-// TestHasInboundFrom_OutboundOnly: a chat where every row is is_from_me = 1
-// (we only ever messaged them) must report false — that's the cold-outreach
-// case the rate limiter treats with the stricter tier.
 func TestHasInboundFrom_OutboundOnly(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
@@ -434,7 +401,6 @@ func TestHasInboundFrom_OutboundOnly(t *testing.T) {
 func TestGetNewestMessage_EmptyChat(t *testing.T) {
 	s := openTestStore(t)
 
-	// Create a chat with no messages.
 	ts := time.Date(2026, 1, 11, 0, 0, 0, 0, time.UTC)
 	if err := s.StoreChat("emptychat@s.whatsapp.net", "Empty", ts); err != nil {
 		t.Fatalf("StoreChat: %v", err)
@@ -467,12 +433,8 @@ func TestOpen_EnablesWAL(t *testing.T) {
 	}
 }
 
-// TestOpen_StorePermissions verifies the store directory is 0700 and the
-// messages.db file is 0600 after Open returns. Session material and cached
-// message bodies must not be readable by other local users.
 func TestOpen_StorePermissions(t *testing.T) {
 	dir := t.TempDir()
-	// Force the directory to a laxer mode to prove Open tightens it.
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatalf("pre-chmod dir: %v", err)
 	}
@@ -505,17 +467,14 @@ func TestClaimScheduledMessage(t *testing.T) {
 	if err := s.StoreScheduledMessage("m1", chat, "hi", "", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	// First claim wins.
 	ok, err := s.ClaimScheduledMessage("m1")
 	if err != nil || !ok {
 		t.Fatalf("first claim: ok=%v err=%v", ok, err)
 	}
-	// Second claim on a 'sending' row still succeeds (reclaim).
 	ok, err = s.ClaimScheduledMessage("m1")
 	if err != nil || !ok {
 		t.Fatalf("reclaim: ok=%v err=%v", ok, err)
 	}
-	// Terminal row cannot be claimed.
 	if err := s.MarkMessageSent("m1", "wa-id", time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +485,6 @@ func TestClaimScheduledMessage(t *testing.T) {
 	if ok {
 		t.Fatal("claimed a sent row")
 	}
-	// Unknown row.
 	ok, err = s.ClaimScheduledMessage("nope")
 	if err != nil {
 		t.Fatal(err)

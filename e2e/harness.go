@@ -18,8 +18,6 @@ import (
 	"time"
 )
 
-// harness runs ./bin/whatsapp-mcp serve on an OS-assigned loopback port
-// and offers a typed MCP tool-call helper.
 type harness struct {
 	t    *testing.T
 	cmd  *exec.Cmd
@@ -34,7 +32,6 @@ func newHarness(t *testing.T) *harness {
 	port := freePort(t)
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 
-	// Build if missing.
 	if _, err := os.Stat(bin); os.IsNotExist(err) {
 		build := exec.Command("make", "build")
 		build.Dir = repo
@@ -77,7 +74,6 @@ func repoRoot(t *testing.T) string {
 	return filepath.Dir(wd)
 }
 
-// waitForReady polls /pair until it responds 200, or fails the test after d.
 func (h *harness) waitForReady(d time.Duration) {
 	h.t.Helper()
 	deadline := time.Now().Add(d)
@@ -95,15 +91,11 @@ func (h *harness) waitForReady(d time.Duration) {
 	h.t.Fatalf("daemon not ready on http://%s after %s", h.addr, d)
 }
 
-// toolResult mirrors the MCP tool-call response shape we care about.
 type toolResult struct {
 	IsError bool
 	Text    string
 }
 
-// callTool POSTs an MCP tools/call request and returns the first text content
-// of the result plus the isError flag. Fails the test on transport errors or
-// malformed responses.
 func (h *harness) callTool(name string, args map[string]any) toolResult {
 	h.t.Helper()
 	body := map[string]any{
@@ -143,10 +135,8 @@ func (h *harness) callTool(name string, args map[string]any) toolResult {
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(rawResp, &envelope); err != nil {
-		// Maybe SSE — strip 'data: ' prefix and retry.
 		body := string(rawResp)
 		if strings.HasPrefix(body, "event:") || strings.Contains(body, "\ndata: ") || strings.HasPrefix(body, "data: ") {
-			// Find the first data: line.
 			for _, line := range strings.Split(body, "\n") {
 				line = strings.TrimSpace(line)
 				if strings.HasPrefix(line, "data: ") {
@@ -173,9 +163,6 @@ decoded:
 	return res
 }
 
-// initializeMCP performs the legacy (pre-2026-07-28) handshake that older
-// clients still send. The server is stateless, so it must succeed without
-// minting an Mcp-Session-Id; later requests carry no session header.
 func (h *harness) initializeMCP() {
 	h.t.Helper()
 	body := map[string]any{

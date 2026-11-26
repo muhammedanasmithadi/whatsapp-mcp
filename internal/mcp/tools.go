@@ -1,37 +1,14 @@
 package mcp
 
-// registerTools wires every MCP tool to the bound WhatsApp client.
-//
-// Tool registrations are split by domain:
-//   - tools_query.go   — read-only data retrieval (list_chats, search_contacts, …)
-//   - tools_send.go    — outbound messages (send_message, send_file, send_reaction, …)
-//   - tools_message.go — message mutation & history (edit, delete, mark_read, sync, …)
-//   - tools_groups.go  — group management (create, leave, participants, settings, …)
-//   - tools_media.go   — polls + contact cards
-//   - tools_privacy.go — blocklist, presence, privacy settings, status message
-//   - tools_social.go  — statuses, profile photos, contact metadata, presence
-//   - tools_contacts.go — local address book (not synced to the phone)
-//   - tools_scheduling.go — queued messages and the timer-driven outbox
-//   - tools_channels.go — WhatsApp Channels (newsletters)
-//   - tools_chatstate.go — mute, pin, star, disappearing messages
-//
-// Shared helpers live in tools_core.go (parseTimestamp, normalizeRecipientToChatJID,
-// maybeMarkChatRead). Common result helpers live in result.go.
 func (s *Server) registerTools() {
-	// Read-only tools are always registered.
 	s.registerQueryTools()
 
-	// preview_send is read-only: it builds the payload without sending it.
 	s.registerPreviewSend()
 
-	// resolve_contacts and diagnose_contacts are read-only.
 	s.registerResolveContacts()
 	s.registerDiagnoseContacts()
 
 	if s.readOnly {
-		// Safe subset only: no send, edit, delete, mark-read, group mutation,
-		// blocklist mutation, privacy or status changes. History backfill and
-		// media download are kept because they are read-side operations.
 		s.registerRequestSync()
 		s.registerSyncContacts()
 		s.registerResyncAppState()
@@ -50,23 +27,18 @@ func (s *Server) registerTools() {
 	s.registerRejectCall()
 	s.registerMessageTools()
 
-	// Phase 1 — group management + blocklist.
 	s.registerGroupTools()
 	s.registerPrivacyTools()
 
-	// Phase 2 — polls + contact cards.
 	s.registerMediaTools()
 
-	// Status read receipts + live presence queries are side-effecting.
 	s.registerSocialActionTools()
 
-	// Local contact book and the message scheduler queue.
 	s.registerContactActionTools()
 	s.registerSyncContacts()
 	s.registerResyncAppState()
 	s.registerSchedulingActionTools()
 
-	// Channels and chat-level settings backed by WhatsApp app state.
 	s.registerChannelActionTools()
 	s.registerChatStateTools()
 }

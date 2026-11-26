@@ -12,12 +12,6 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// The audit found the README naming tools that do not exist, enum spellings
-// the schema rejects, a Go version the module refuses, and a tool count that
-// disagreed across four files. Nothing enforced any of it. These tests make
-// the docs a checked artifact: a tool the server registers must appear in the
-// README, and every tool name the README names must be registered.
-
 func registeredToolNames(t *testing.T) []string {
 	t.Helper()
 	s := NewServer(nil, nil, nil)
@@ -57,14 +51,11 @@ func TestREADMENamesOnlyRegisteredTools(t *testing.T) {
 	for _, name := range registeredToolNames(t) {
 		registered[name] = true
 	}
-	// Tool tables render names as `tool_name`. Pull every backticked
-	// snake_case token and keep those that look like tool names.
 	re := regexp.MustCompile("`([a-z][a-z0-9]*(?:_[a-z0-9]+){1,})`")
 	known := map[string]bool{}
 	for _, name := range registeredToolNames(t) {
 		known[name] = true
 	}
-	// Non-tool identifiers the README legitimately quotes.
 	allowed := map[string]bool{
 		"status@broadcast": true, "s.whatsapp.net": true, "g.us": true,
 		"whatsapp_web": true, "media_root": true, "store_dir": true,
@@ -125,7 +116,6 @@ func TestREADMEGoVersionMatchesModule(t *testing.T) {
 func TestEnumArgsMatchTheirDescriptions(t *testing.T) {
 	s := NewServer(nil, nil, nil)
 	tools := s.MCP().ListTools()
-	// Each entry: tool, property, and the values the protocol accepts.
 	cases := []struct{ tool, prop, values string }{
 		{"set_privacy_setting", "name", "groupadd|readreceipts|calladd|last|profile|status|online|messages|stickers"},
 		{"set_status_privacy_setting", "mode", "all|contacts|close_friends|custom"},

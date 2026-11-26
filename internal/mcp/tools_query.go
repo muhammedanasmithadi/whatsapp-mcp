@@ -10,9 +10,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// registerQueryTools wires read-only query tools: list_chats, get_chat,
-// list_messages, get_message_context, search_contacts, get_status,
-// is_on_whatsapp, list_labels, list_chats_by_label, get_sticker_pack.
 func (s *Server) registerQueryTools() {
 	s.registerSearchContacts()
 	s.registerListMessages()
@@ -34,8 +31,6 @@ func (s *Server) registerQueryTools() {
 	s.registerSchedulingReadTools()
 	s.registerChannelReadTools()
 }
-
-// -- search_contacts --------------------------------------------------------
 
 type searchContactsArgs struct {
 	Query  string `json:"query"`
@@ -80,8 +75,6 @@ func (s *Server) registerSearchContacts() {
 	}))
 }
 
-// -- list_messages ----------------------------------------------------------
-
 type listMessagesArgs struct {
 	After             string `json:"after,omitempty"`
 	Before            string `json:"before,omitempty"`
@@ -118,7 +111,6 @@ func (s *Server) registerListMessages() {
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a listMessagesArgs) (*mcp.CallToolResult, error) {
-		// Clamp parameters to server-side upper bounds.
 		limit := a.Limit
 		if limit > 100 {
 			limit = 100
@@ -136,7 +128,6 @@ func (s *Server) registerListMessages() {
 		useCursor := a.Cursor != ""
 
 		if useCursor || useJSON {
-			// Keyset pagination path: stable, no offset drift.
 			params := store.ListMessagesParams{
 				SenderPhone:    a.SenderPhoneNumber,
 				ChatJID:        a.ChatJID,
@@ -169,13 +160,9 @@ func (s *Server) registerListMessages() {
 			if useJSON {
 				return resultJSON(result)
 			}
-			// Text format with cursor: still render the page, but no cursor
-			// metadata is embeddable in plain text. Switch to format=json to
-			// get next_cursor/has_more.
 			return mcp.NewToolResultText(s.client.Store().FormatMessagesList(ctx, result.Messages, true)), nil
 		}
 
-		// Legacy page/offset path (unchanged behavior).
 		params := store.ListMessagesParams{
 			SenderPhone:    a.SenderPhoneNumber,
 			ChatJID:        a.ChatJID,
@@ -209,8 +196,6 @@ func (s *Server) registerListMessages() {
 	}))
 }
 
-// -- get_read_position ------------------------------------------------------
-
 type getReadPositionArgs struct {
 	ChatJID string `json:"chat_jid"`
 }
@@ -232,8 +217,6 @@ func (s *Server) registerGetReadPosition() {
 		return resultJSON(pos)
 	}))
 }
-
-// -- mark_read_position -----------------------------------------------------
 
 type markReadPositionArgs struct {
 	ChatJID   string `json:"chat_jid"`
@@ -268,8 +251,6 @@ func (s *Server) registerMarkReadPosition() {
 		return resultJSON(pos)
 	}))
 }
-
-// -- list_media_messages ----------------------------------------------------
 
 type listMediaMessagesArgs struct {
 	After             string `json:"after,omitempty"`
@@ -327,8 +308,6 @@ func (s *Server) registerListMediaMessages() {
 	}))
 }
 
-// -- list_chats -------------------------------------------------------------
-
 type listChatsArgs struct {
 	Query              string `json:"query,omitempty"`
 	Limit              int    `json:"limit,omitempty"`
@@ -367,8 +346,6 @@ func (s *Server) registerListChats() {
 	}))
 }
 
-// -- get_chat ---------------------------------------------------------------
-
 type getChatArgs struct {
 	ChatJID            string `json:"chat_jid"`
 	IncludeLastMessage *bool  `json:"include_last_message,omitempty"`
@@ -400,8 +377,6 @@ func (s *Server) registerGetChat() {
 		return resultJSON(chat)
 	}))
 }
-
-// -- get_message_context ----------------------------------------------------
 
 type getMessageContextArgs struct {
 	MessageID string `json:"message_id"`
@@ -437,8 +412,6 @@ func (s *Server) registerGetMessageContext() {
 	}))
 }
 
-// -- is_on_whatsapp ---------------------------------------------------------
-
 type isOnWhatsAppArgs struct {
 	Phones []string `json:"phones"`
 }
@@ -466,8 +439,6 @@ func (s *Server) registerIsOnWhatsApp() {
 	}))
 }
 
-// -- get_status -------------------------------------------------------------
-
 func (s *Server) registerGetStatus() {
 	tool := mcp.NewTool("get_status",
 		mcp.WithDescription("Report whether the embedded WhatsApp bridge is connected and which account it is paired with. Read-only; no side effects. Call this first when other tools fail with auth or connection errors. Returns a JSON object `{connected, paired, own_jid?, own_phone?, hint?}` — `hint` includes the URL of the local pairing UI when not yet paired."),
@@ -492,15 +463,6 @@ func (s *Server) registerGetStatus() {
 	})
 }
 
-// -- pairing_status ---------------------------------------------------------
-
-// registerPairingStatus exposes the live device-pairing state as a structured
-// "setup_state" envelope. Where get_status is human-oriented, this returns a
-// machine-stable shape keyed by `state` so a polling supervisor (e.g. the Den
-// daemon) can surface the WhatsApp linking QR to its own clients.
-//
-// The bound client is consulted only once the cache reports a paired device,
-// keeping the awaiting_qr / error envelopes free of any whatsmeow dependency.
 func (s *Server) registerPairingStatus() {
 	tool := mcp.NewTool("pairing_status",
 		mcp.WithDescription("Report the WhatsApp device-pairing state as a structured `setup_state` envelope for programmatic supervisors that surface the linking QR to their own clients (e.g. a polling daemon). Read-only; no side effects. Returns a JSON object `{type:\"setup_state\", state, …}` where `state` is `ready` (paired and connected; adds own_jid/own_phone), `awaiting_qr` (unpaired; adds qr_payload when a pairing code is cached), or `error` (pairing cache unavailable)."),
@@ -512,10 +474,6 @@ func (s *Server) registerPairingStatus() {
 	s.addTool(tool, func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var ownJID, ownPhone string
 		ready := false
-		// Short-circuits before touching s.client unless we are paired, so a
-		// nil cache or unpaired state never dereferences the WhatsApp client.
-		// stdio has no pair cache, but its device is always paired; the client
-		// answers for it so the tool does not claim an error it does not have.
 		if s.client != nil && (s.cache == nil || s.cache.Paired()) && s.client.IsConnected() {
 			if wa := s.client.WA(); wa != nil && wa.Store != nil && wa.Store.ID != nil {
 				ownJID = wa.Store.ID.String()
@@ -531,9 +489,6 @@ func (s *Server) registerPairingStatus() {
 			resp["own_jid"] = ownJID
 			resp["own_phone"] = ownPhone
 		case s.cache == nil:
-			// No cache and no connection: the transport (stdio) owns no
-			// pairing flow, so report the socket state instead of pretending
-			// the cache is broken.
 			resp["state"] = "disconnected"
 			resp["detail"] = "not connected to WhatsApp; this transport has no pairing flow, use serve mode to pair"
 		case s.cache.QR() != "":
@@ -547,8 +502,6 @@ func (s *Server) registerPairingStatus() {
 		return resultJSON(resp)
 	})
 }
-
-// -- list_labels ----------------------------------------------------------
 
 func (s *Server) registerListLabels() {
 	tool := mcp.NewTool("list_labels",
@@ -566,8 +519,6 @@ func (s *Server) registerListLabels() {
 		return resultJSON(labels)
 	})
 }
-
-// -- list_chats_by_label --------------------------------------------------
 
 type listChatsByLabelArgs struct {
 	LabelID string `json:"label_id"`
@@ -594,8 +545,6 @@ func (s *Server) registerListChatsByLabel() {
 	}))
 }
 
-// -- get_audit_log ----------------------------------------------------------
-
 type getAuditLogArgs struct {
 	Limit int `json:"limit,omitempty"`
 }
@@ -621,8 +570,6 @@ func (s *Server) registerGetAuditLog() {
 		return resultJSON(entries)
 	}))
 }
-
-// -- get_sticker_pack --------------------------------------------------------
 
 type getStickerPackArgs struct {
 	PackID string `json:"pack_id"`

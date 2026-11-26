@@ -10,8 +10,6 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-// privacySettingTypes is the ordered list of valid PrivacySettingType values.
-// Order is preserved in validation error messages for deterministic output.
 var privacySettingTypes = []types.PrivacySettingType{
 	types.PrivacySettingTypeGroupAdd,
 	types.PrivacySettingTypeLastSeen,
@@ -25,7 +23,6 @@ var privacySettingTypes = []types.PrivacySettingType{
 	types.PrivacySettingTypeStickers,
 }
 
-// privacySettingValues is the ordered list of valid PrivacySetting values.
 var privacySettingValues = []types.PrivacySetting{
 	types.PrivacySettingAll,
 	types.PrivacySettingContacts,
@@ -38,8 +35,6 @@ var privacySettingValues = []types.PrivacySetting{
 	types.PrivacySettingOff,
 }
 
-// joinNames renders a slice of string-based constants (privacy setting
-// names or values) as a comma-separated list for error messages.
 func joinNames[T ~string](vals []T) string {
 	parts := make([]string, len(vals))
 	for i, v := range vals {
@@ -48,9 +43,6 @@ func joinNames[T ~string](vals []T) string {
 	return strings.Join(parts, ", ")
 }
 
-// parsePresence validates the public presence state string and maps it to a
-// whatsmeow types.Presence. Exposed separately so tests can exercise the
-// validation branch without a connected client.
 func parsePresence(state string) (types.Presence, error) {
 	switch state {
 	case string(types.PresenceAvailable):
@@ -62,8 +54,6 @@ func parsePresence(state string) (types.Presence, error) {
 	}
 }
 
-// SendPresence sets the user's own online availability. state must be
-// "available" or "unavailable".
 func (c *Client) SendPresence(ctx context.Context, state string) error {
 	p, err := parsePresence(state)
 	if err != nil {
@@ -81,7 +71,6 @@ func (c *Client) SendPresence(ctx context.Context, state string) error {
 	return nil
 }
 
-// GetPrivacySettings returns the current privacy settings as JSON.
 func (c *Client) GetPrivacySettings(ctx context.Context) (string, error) {
 	if !c.wa.IsConnected() {
 		return "", errors.New("not connected to WhatsApp")
@@ -97,8 +86,6 @@ func (c *Client) GetPrivacySettings(ctx context.Context) (string, error) {
 	return string(b), nil
 }
 
-// validatePrivacySettingName returns an error whose message lists the allowed
-// names if the given name is not one of whatsmeow's known constants.
 func validatePrivacySettingName(name string) error {
 	for _, n := range privacySettingTypes {
 		if string(n) == name {
@@ -108,8 +95,6 @@ func validatePrivacySettingName(name string) error {
 	return fmt.Errorf("invalid name %q: must be one of %s", name, joinNames(privacySettingTypes))
 }
 
-// validatePrivacySettingValue returns an error whose message lists the allowed
-// values if the given value is not one of whatsmeow's known constants.
 func validatePrivacySettingValue(value string) error {
 	for _, v := range privacySettingValues {
 		if string(v) == value {
@@ -119,10 +104,6 @@ func validatePrivacySettingValue(value string) error {
 	return fmt.Errorf("invalid value %q: must be one of %s", value, joinNames(privacySettingValues))
 }
 
-// SetPrivacySetting changes a single privacy setting. Returns the resulting
-// privacy settings as JSON. name and value must be one of whatsmeow's known
-// constants; invalid input is rejected with a message listing the allowed
-// values for the offending argument.
 func (c *Client) SetPrivacySetting(ctx context.Context, name, value string) (string, error) {
 	if err := validatePrivacySettingName(name); err != nil {
 		return "", err
@@ -144,7 +125,6 @@ func (c *Client) SetPrivacySetting(ctx context.Context, name, value string) (str
 	return string(b), nil
 }
 
-// SetStatusMessage updates the user's "About" text.
 func (c *Client) SetStatusMessage(ctx context.Context, text string) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")

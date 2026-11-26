@@ -14,7 +14,6 @@ import (
 )
 
 func TestNormalizeIncomingMessage_LIDOriginSender(t *testing.T) {
-	// LID sender "99887766@lid" resolves to phone "447700000002@s.whatsapp.net".
 	s := newTestStoreWithLIDMap(t, map[string]string{"99887766": "447700000002"})
 	c := newClientWithStore(t, s)
 
@@ -45,7 +44,6 @@ func TestNormalizeIncomingMessage_LIDOriginSender(t *testing.T) {
 }
 
 func TestNormalizeIncomingMessage_GroupChat(t *testing.T) {
-	// Group chat JID should NOT be normalised even if sender is LID.
 	s := newTestStoreWithLIDMap(t, map[string]string{"99887766": "447700000002"})
 	c := newClientWithStore(t, s)
 
@@ -130,7 +128,6 @@ func TestNormalizeIncomingMessage_WithMedia(t *testing.T) {
 }
 
 func TestNormalizeIncomingMessage_DirectChatNoLID(t *testing.T) {
-	// Standard JID without LID mapping — should pass through unchanged.
 	s := newTestStoreWithLIDMap(t, nil)
 	c := newClientWithStore(t, s)
 
@@ -155,9 +152,6 @@ func TestNormalizeIncomingMessage_DirectChatNoLID(t *testing.T) {
 }
 
 func TestImportStatusV3Messages(t *testing.T) {
-	// Statuses delivered in a history sync carry the poster as a LID in
-	// key.participant. The import must resolve it to a phone number and file
-	// the row under status@broadcast.
 	s := newTestStoreWithLIDMap(t, map[string]string{"245702512894109": "919207967567"})
 	c := newClientWithStore(t, s)
 
@@ -191,7 +185,6 @@ func TestImportStatusV3Messages(t *testing.T) {
 			MessageTimestamp: &ts,
 		},
 		{
-			// Some payloads put the poster in WebMessageInfo.participant.
 			Key: &waCommon.MessageKey{
 				RemoteJID: proto.String(store.StatusBroadcastJID),
 				FromMe:    proto.Bool(false),
@@ -202,7 +195,6 @@ func TestImportStatusV3Messages(t *testing.T) {
 			MessageTimestamp: &ts,
 		},
 		{
-			// Pruned payload: keep a visible placeholder.
 			Key: &waCommon.MessageKey{
 				RemoteJID:   proto.String(store.StatusBroadcastJID),
 				FromMe:      proto.Bool(false),

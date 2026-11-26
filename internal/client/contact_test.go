@@ -10,8 +10,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// seedStoreWithChat opens a fresh store and inserts one chat plus (optionally)
-// one inbound message, so IsKnownContact has something to classify against.
 func seedStoreWithChat(t *testing.T, jid string, withInbound bool) *store.Store {
 	t.Helper()
 	s, err := store.Open(t.TempDir())
@@ -49,7 +47,6 @@ func TestIsKnownContact_WithInboundHistory(t *testing.T) {
 
 func TestIsKnownContact_NoInboundIsCold(t *testing.T) {
 	const jid = "447700000001@s.whatsapp.net"
-	// Chat exists (we messaged them) but no inbound — still cold.
 	s := seedStoreWithChat(t, jid, false)
 	if err := s.StoreMessage(context.Background(), store.Message{
 		ID: "out-1", ChatJID: jid, Sender: "me", Content: "cold outreach",
@@ -73,7 +70,6 @@ func TestIsKnownContact_UnknownJIDIsCold(t *testing.T) {
 }
 
 func TestIsKnownContact_GroupIsAlwaysKnown(t *testing.T) {
-	// Empty store — a group must be classified known without any query.
 	s, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatalf("open store: %v", err)

@@ -7,8 +7,6 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// registerPrivacyTools wires blocklist, presence, privacy-settings, and
-// status-message tools.
 func (s *Server) registerPrivacyTools() {
 	s.registerGetBlocklist()
 	s.registerBlockContact()
@@ -121,15 +119,11 @@ func (s *Server) registerGetPrivacySettings() {
 	})
 }
 
-// privacySettingNames enumerates the knobs whatsmeow exposes. Kept as a
-// package-level var so the enum list is single-sourced.
 var privacySettingNames = []string{
 	"groupadd", "last", "status", "profile", "readreceipts",
 	"online", "calladd", "messages", "defense", "stickers",
 }
 
-// privacySettingValues enumerates the values those knobs accept. WhatsApp
-// rejects invalid combinations server-side.
 var privacySettingValues = []string{
 	"all", "contacts", "contact_allowlist", "contact_blacklist",
 	"match_last_seen", "known", "none", "on_standard", "off",

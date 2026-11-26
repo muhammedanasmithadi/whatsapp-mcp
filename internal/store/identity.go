@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// nameSourceRank orders contact name provenance from most to least
-// trustworthy. A higher rank wins when two rows describe the same person.
 func nameSourceRank(src string) int {
 	switch src {
 	case "local":
@@ -23,9 +21,7 @@ func nameSourceRank(src string) int {
 	return 0
 }
 
-// personKey returns a stable deduplication key for a contact row. LID rows
 // are resolved to their phone JID when a mapping exists; otherwise the LID
-// itself becomes the key. This prevents one person from appearing twice.
 func (s *Store) personKey(jid string) string {
 	if strings.HasSuffix(jid, "@lid") {
 		resolved := s.ResolveLIDToJID(jid)
@@ -36,14 +32,12 @@ func (s *Store) personKey(jid string) string {
 	return jid
 }
 
-// CanonicalJID strips any device suffix and returns the bare JID. For LID
 // JIDs that resolve to a phone JID, the phone JID is returned.
 func (s *Store) CanonicalJID(jid string) string {
 	jid = strings.TrimSpace(jid)
 	if jid == "" {
 		return ""
 	}
-	// Strip device suffix (e.g. "123:5@s.whatsapp.net" -> "123@s.whatsapp.net").
 	if strings.Contains(jid, ":") && strings.Contains(jid, "@") {
 		parts := strings.SplitN(jid, "@", 2)
 		user := parts[0]
@@ -61,9 +55,6 @@ func (s *Store) CanonicalJID(jid string) string {
 	return jid
 }
 
-// bestName picks the highest-precedence name from a whatsmeow_contacts row.
-// Returns the name and its source ("saved", "business", "push", or "phone"
-// when only a redacted phone is available).
 func bestName(firstName, fullName, pushName, businessName, redactedPhone string) (string, string) {
 	if v := strings.TrimSpace(fullName); v != "" {
 		return v, "saved"
@@ -83,8 +74,6 @@ func bestName(firstName, fullName, pushName, businessName, redactedPhone string)
 	return "", ""
 }
 
-// isPersonJID reports whether a JID represents a person rather than a group,
-// channel, broadcast, or status. Unresolved LIDs are still people.
 func isPersonJID(jid string) bool {
 	if jid == "" {
 		return false
@@ -101,9 +90,6 @@ func isPersonJID(jid string) bool {
 	return true
 }
 
-// mergeContacts combines a set of Contact rows into one per person, applying
-// name precedence and LID resolution. The first argument's rows take
-// precedence on equal rank (local overrides).
 func (s *Store) mergeContacts(local, synced []Contact) []Contact {
 	byKey := make(map[string]Contact)
 	for _, c := range local {
@@ -126,9 +112,7 @@ func (s *Store) mergeContacts(local, synced []Contact) []Contact {
 			byKey[key] = c
 			continue
 		}
-		// Prefer higher name source rank.
 		if nameSourceRank(c.NameSource) > nameSourceRank(existing.NameSource) {
-			// Keep LID from the existing row if the new one lacks it.
 			if existing.LID != "" && c.LID == "" {
 				c.LID = existing.LID
 			}
@@ -157,9 +141,6 @@ func (s *Store) mergeContacts(local, synced []Contact) []Contact {
 	return result
 }
 
-// types import guard removed.
-
-// isAllDigits reports whether s consists entirely of ASCII digits.
 func isAllDigits(s string) bool {
 	if s == "" {
 		return false

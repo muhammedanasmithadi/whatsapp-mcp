@@ -10,10 +10,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/ratelimit"
 )
 
-// TestWithRateLimitOverride verifies the header → context bypass mapping. The
-// bypass must be set only for recognised truthy header values, and never in
-// their absence — this is the boundary that keeps the LLM (which cannot set
-// HTTP headers) from reaching the override.
 func TestWithRateLimitOverride(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -45,9 +41,6 @@ func TestWithRateLimitOverride(t *testing.T) {
 	}
 }
 
-// TestWithRateLimitOverride_NilHeaderSafe: a request with no Header map at all
-// (the common case for non-HTTP transports or unit calls) must not panic and
-// must not grant bypass.
 func TestWithRateLimitOverride_NilHeaderSafe(t *testing.T) {
 	ctx := withRateLimitOverride(context.Background(), mcp.CallToolRequest{})
 	if ratelimit.BypassFromContext(ctx) {

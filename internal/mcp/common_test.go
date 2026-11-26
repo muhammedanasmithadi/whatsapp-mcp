@@ -6,11 +6,6 @@ import (
 	"testing"
 )
 
-// TestRequireNonEmpty documents the helper's behaviour:
-//   - empty string → standardised `<field>: required` error result
-//   - any non-empty string (including whitespace-only) → nil
-//
-// Trimming is the caller's responsibility.
 func TestRequireNonEmpty(t *testing.T) {
 	cases := []struct {
 		name     string

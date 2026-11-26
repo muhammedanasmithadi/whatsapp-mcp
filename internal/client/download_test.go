@@ -14,11 +14,6 @@ import (
 	"go.mau.fi/whatsmeow"
 )
 
-// Regression for the path-traversal guard rejecting every JID when the
-// operator runs with a relative -store directory (the default "./store").
-// chatDir used to be built from the relative c.store.Dir() and compared
-// against an absolute storeDir prefix, so HasPrefix never matched and every
-// download returned "invalid chat directory: path escapes store".
 func TestDownload_RelativeStoreDirAcceptsLegitimateJID(t *testing.T) {
 	t.Chdir(t.TempDir())
 
@@ -61,7 +56,6 @@ func TestDownload_RelativeStoreDirAcceptsLegitimateJID(t *testing.T) {
 		t.Fatalf("expected 'incomplete media information' error, got: %s", got.Message)
 	}
 
-	// Side-effect: chat directory should have been created under ./store.
 	wantDir := filepath.Join("store", chatJID)
 	info, statErr := os.Stat(wantDir)
 	if statErr != nil {
@@ -72,10 +66,6 @@ func TestDownload_RelativeStoreDirAcceptsLegitimateJID(t *testing.T) {
 	}
 }
 
-// The guard must still reject a chatJID that resolves outside the store root
-// (defence-in-depth — chatJID currently comes from the cached DB, not the
-// wire, but the check is cheap and the threat model assumes the DB could be
-// tampered with).
 func TestDownload_RejectsPathTraversalJID(t *testing.T) {
 	t.Chdir(t.TempDir())
 
@@ -115,10 +105,6 @@ func TestDownload_RejectsPathTraversalJID(t *testing.T) {
 	}
 }
 
-// seedCacheHit pre-creates a media row + a corresponding cache file so
-// Download's cache short-circuit fires deterministically without hitting
-// whatsmeow. Returns the absolute cache path and the configured media root
-// for the test to set up output_path scenarios under.
 func seedCacheHit(t *testing.T, jid, msgID, filename string) (cachePath, mediaRoot string, c *Client) {
 	t.Helper()
 	t.Chdir(t.TempDir())
@@ -271,8 +257,6 @@ func TestValidateMediaPayloadRejectsWrongHashAndLength(t *testing.T) {
 	}
 }
 
-// Happy path: output_path under the media root materialises the cached file
-// at the requested destination and returns it in Path.
 func TestDownload_OutputPathHappyPath(t *testing.T) {
 	cachePath, mediaRoot, c := seedCacheHit(t, "447700000099@s.whatsapp.net", "M-OUT-1", "p.jpg")
 	outPath := filepath.Join(mediaRoot, "received.jpg")
@@ -285,14 +269,11 @@ func TestDownload_OutputPathHappyPath(t *testing.T) {
 	if _, err := os.Stat(outPath); err != nil {
 		t.Fatalf("output file missing: %v", err)
 	}
-	// Cache file untouched.
 	if _, err := os.Stat(cachePath); err != nil {
 		t.Fatalf("cache file vanished: %v", err)
 	}
 }
 
-// assertSamePath compares two paths after resolving any platform-level
-// symlinks on their parent directories (e.g. macOS /var → /private/var).
 func assertSamePath(t *testing.T, got, want string) {
 	t.Helper()
 	resolve := func(p string) string {
@@ -304,8 +285,6 @@ func assertSamePath(t *testing.T, got, want string) {
 	}
 }
 
-// output_path outside the configured media root is rejected before any
-// filesystem write.
 func TestDownload_OutputPathRejectsOutsideRoot(t *testing.T) {
 	_, _, c := seedCacheHit(t, "447700000099@s.whatsapp.net", "M-OUT-2", "p.jpg")
 	outside := filepath.Join(t.TempDir(), "stolen.jpg")
@@ -322,8 +301,6 @@ func TestDownload_OutputPathRejectsOutsideRoot(t *testing.T) {
 	}
 }
 
-// If a file already exists at output_path, the call is a no-op: success
-// returned, no overwrite, no work.
 func TestDownload_OutputPathSkipIfExists(t *testing.T) {
 	_, mediaRoot, c := seedCacheHit(t, "447700000099@s.whatsapp.net", "M-OUT-3", "p.jpg")
 	outPath := filepath.Join(mediaRoot, "already-there.jpg")

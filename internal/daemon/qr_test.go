@@ -10,7 +10,6 @@ func TestRenderQRPNG_PrefixAndSize(t *testing.T) {
 	if len(b) < 100 {
 		t.Fatalf("expected non-trivial PNG, got %d bytes", len(b))
 	}
-	// PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
 	want := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
 	for i, x := range want {
 		if b[i] != x {

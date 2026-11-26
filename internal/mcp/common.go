@@ -1,21 +1,3 @@
-// Package mcp — style guide for tool authors.
-//
-// When writing or editing MCP tool descriptions in this package, follow these
-// conventions so the LLM-facing surface stays consistent:
-//
-//  1. Tool-level descriptions are full sentences and end with a period. Lead
-//     with what the tool does; add disambiguation ("use X when Y") as needed.
-//  2. Argument descriptions are sentence fragments (no terminal period) —
-//     they render as schema titles, not prose. Keep them short.
-//  3. Error strings returned from handlers use the `<field>: <reason>` shape
-//     (e.g. `"chat_jid: required"`, `"audio conversion failed: ..."`). Prefer
-//     the shared helpers below to emit them so the shape stays uniform.
-//  4. Tools that read only from the local SQLite cache are prefixed with
-//     `(reads local cache; works while disconnected) ` so callers know they
-//     can be invoked before / after a WhatsApp session is live.
-//  5. Every `chat_jid`, `recipient`, `sender_jid`, and `sender_phone_number`
-//     argument reuses the shared `jidDesc` / `recipientDesc` constants so
-//     callers always see the same JID-shape hint.
 package mcp
 
 import (
@@ -26,17 +8,8 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/ratelimit"
 )
 
-// rateLimitOverrideHeader is the HTTP header a human-configured MCP client can
-// set to bypass the daemon-side send/usync rate limiter. It is deliberately a
-// transport header, not a tool argument: the LLM controls JSON-RPC params but
-// not HTTP headers, so the model cannot set this to talk its way past the
-// guard mid-conversation — only the operator who configures the client can.
 const rateLimitOverrideHeader = "X-Rate-Limit-Override"
 
-// withRateLimitOverride returns a context carrying the operator bypass flag
-// when the originating HTTP request set X-Rate-Limit-Override to a truthy
-// value ("true", "1", "yes"). Otherwise ctx is returned unchanged. Pass the
-// tool request's Header (populated by the streamable HTTP server) as h.
 func withRateLimitOverride(ctx context.Context, req mcp.CallToolRequest) context.Context {
 	switch req.Header.Get(rateLimitOverrideHeader) {
 	case "true", "1", "yes", "TRUE", "True":
@@ -46,28 +19,12 @@ func withRateLimitOverride(ctx context.Context, req mcp.CallToolRequest) context
 	}
 }
 
-// jidDesc describes the expected shape of a single-chat or group JID.
-// Used for `chat_jid`, `sender_jid`, and `sender_phone_number` arguments.
 const jidDesc = "WhatsApp JID: individual as `<digits>@s.whatsapp.net` or bare phone digits, group as `<digits>-<timestamp>@g.us`"
 
-// recipientDesc describes the expected shape of a send-target. Callers may
-// pass either a bare phone number or a fully qualified JID (individual or
-// group). Bare numbers must be digits only — no `+` prefix, spaces, or
-// punctuation; a leading `+` is stripped as a courtesy but everything else
-// is rejected with a clear error rather than misrouted silently.
 const recipientDesc = "Send target: digits only (E.164 without `+`, no spaces or punctuation); or `<digits>@s.whatsapp.net`; or group `<digits>-<timestamp>@g.us`"
 
-// offlineSafePrefix marks a tool as safe to call while disconnected from
-// WhatsApp because it only reads the local SQLite cache.
 const offlineSafePrefix = "(reads local cache; works while disconnected) "
 
-// requireNonEmpty returns a standard validation error when value is the empty
-// string; otherwise it returns nil so callers can use the idiom:
-//
-//	if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil { return r, nil }
-//
-// Note: whitespace-only values are NOT treated as empty — callers that want
-// that behaviour should trim the string themselves before calling this.
 func requireNonEmpty(name, value string) *mcp.CallToolResult {
 	if value == "" {
 		return mcp.NewToolResultError(name + ": required")
@@ -75,11 +32,6 @@ func requireNonEmpty(name, value string) *mcp.CallToolResult {
 	return nil
 }
 
-// requireBoolPresent rejects a call whose required boolean argument is absent.
-// A missing bool decodes to false, which for these tools is a real state
-// change — muting with muted omitted unmutes the chat, and starring with
-// starred omitted unstars the message — so absence must fail rather than
-// silently flip state.
 func requireBoolPresent(req mcp.CallToolRequest, name string) *mcp.CallToolResult {
 	args, ok := req.Params.Arguments.(map[string]any)
 	if !ok {
@@ -91,14 +43,6 @@ func requireBoolPresent(req mcp.CallToolRequest, name string) *mcp.CallToolResul
 	return nil
 }
 
-// toolResult is a small wrapper that funnels the two common success/failure
-// shapes through a single call site:
-//
-//   - on error, it returns `mcp.NewToolResultError(err.Error()), nil`
-//   - on success, it JSON-serialises payload via resultJSON
-//
-// Handlers that only ever return text (not JSON) should keep using
-// mcp.NewToolResultText directly — forcing this helper there reduces clarity.
 func toolResult(payload any, err error) (*mcp.CallToolResult, error) {
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil

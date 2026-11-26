@@ -38,7 +38,6 @@ func TestListMessages_ChatJIDFilter(t *testing.T) {
 			t.Fatalf("expected only Alice's chat, got ChatJID=%q", m.ChatJID)
 		}
 	}
-	// Alice has 5 seeded messages.
 	if got := len(msgs); got != 5 {
 		t.Fatalf("expected 5 alice messages, got %d", got)
 	}
@@ -70,7 +69,6 @@ func TestListMessages_QueryCaseInsensitive(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// Seed has content "HOW are you" in uppercase.
 	msgs, err := s.ListMessages(ctx, ListMessagesParams{
 		Query: "how are",
 		Limit: 50,
@@ -105,7 +103,6 @@ func TestListMessages_Pagination(t *testing.T) {
 		t.Fatalf("page 1 should return 2, got %d", len(page1))
 	}
 
-	// Pages must not overlap.
 	seen := map[string]bool{}
 	for _, m := range page0 {
 		seen[m.ID] = true
@@ -116,8 +113,6 @@ func TestListMessages_Pagination(t *testing.T) {
 		}
 	}
 
-	// Ordering: both pages should be DESC timestamp, and all page0 timestamps
-	// should be >= all page1 timestamps.
 	for _, a := range page0 {
 		for _, b := range page1 {
 			if a.Timestamp.Before(b.Timestamp) {
@@ -131,15 +126,10 @@ func TestListChats_SortByLastActive(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// NOTE: ListChats always selects latest_msg.* columns even when
-	// includeLastMessage=false, which causes a SQL error. Until the source
-	// is fixed, tests pass true here. See bug note in the test summary.
 	chats, err := s.ListChats(ctx, "", 20, 0, true, false, "last_active")
 	if err != nil {
 		t.Fatalf("ListChats: %v", err)
 	}
-	// Seed has 4 chats: Alice (direct), Project Team (group), Bob (direct),
-	// LidOnly (@lid). ListChats does not filter @lid.
 	if len(chats) != 4 {
 		t.Fatalf("expected 4 chats, got %d", len(chats))
 	}
@@ -149,7 +139,6 @@ func TestListChats_SortByLastActive(t *testing.T) {
 				chats[i-1].LastMessageTime, chats[i].LastMessageTime)
 		}
 	}
-	// Most recent should be Project Team (2026-01-10).
 	if chats[0].JID != "123456789@g.us" {
 		t.Fatalf("expected Project Team first, got %q", chats[0].JID)
 	}
@@ -159,7 +148,6 @@ func TestListChats_SortByName(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// See note in TestListChats_SortByLastActive.
 	chats, err := s.ListChats(ctx, "", 20, 0, true, false, "name")
 	if err != nil {
 		t.Fatalf("ListChats: %v", err)
@@ -184,7 +172,6 @@ func TestListChats_IncludeLastMessage(t *testing.T) {
 	if len(chats) == 0 {
 		t.Fatal("no chats returned")
 	}
-	// At least one chat should now have a non-empty last message.
 	anyNonEmpty := false
 	for _, c := range chats {
 		if c.LastMessage != "" {
@@ -201,7 +188,6 @@ func TestSearchContacts_ExcludesGroups(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// Empty query returns all non-group chats.
 	res, err := s.SearchContacts(ctx, "", 50, "")
 	if err != nil {
 		t.Fatalf("SearchContacts: %v", err)
@@ -221,7 +207,6 @@ func TestSearchContacts_ExcludesGroups(t *testing.T) {
 		}
 	}
 
-	// Filtering by name.
 	res2, err := s.SearchContacts(ctx, "Alice", 50, "")
 	if err != nil {
 		t.Fatalf("SearchContacts Alice: %v", err)
@@ -236,8 +221,6 @@ func TestGetChat(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// NOTE: Same shape as ListChats — GetChat references m.* columns even
-	// when includeLastMessage=false, causing a SQL error. Tests pass true.
 	c, err := s.GetChat(ctx, "447700000001@s.whatsapp.net", true)
 	if err != nil {
 		t.Fatalf("GetChat: %v", err)
@@ -262,7 +245,6 @@ func TestGetMessageContext(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// a3 is the middle-ish Alice message (2026-01-03). Ask for 2 before, 1 after.
 	c, err := s.GetMessageContext(ctx, "a3", 2, 1)
 	if err != nil {
 		t.Fatalf("GetMessageContext: %v", err)
@@ -276,7 +258,6 @@ func TestGetMessageContext(t *testing.T) {
 	if len(c.After) != 1 {
 		t.Fatalf("expected 1 after, got %d", len(c.After))
 	}
-	// All context messages are from Alice's chat.
 	for _, m := range append(append([]Message{}, c.Before...), c.After...) {
 		if m.ChatJID != "447700000001@s.whatsapp.net" {
 			t.Fatalf("context message from wrong chat: %+v", m)
@@ -294,8 +275,6 @@ func TestGetSenderName(t *testing.T) {
 	}
 }
 
-// Issue #21: name lookups must reach the synced address book
-// (whatsmeow_contacts), not just the chats table.
 func TestSearchContacts_AddressBook(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
@@ -315,7 +294,6 @@ func TestSearchContacts_AddressBook(t *testing.T) {
 		}
 	}
 
-	// Number search must also surface the saved name, not the bare number.
 	res3, err := s.SearchContacts(ctx, "919900000000", 50, "")
 	if err != nil {
 		t.Fatalf("SearchContacts by number: %v", err)
@@ -330,7 +308,6 @@ func TestGetSenderName_AddressBook(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// No chats row for this JID — the name must come from whatsmeow_contacts.
 	if got := s.GetSenderName(ctx, "919900000000@s.whatsapp.net"); got != "Jane Smith Delhi" {
 		t.Fatalf("expected address-book name, got %q", got)
 	}
@@ -383,7 +360,6 @@ func TestListMessages_IsGroupField(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// g1 lives in the Project Team group; a1 lives in a direct chat.
 	msgs, err := s.ListMessages(ctx, ListMessagesParams{
 		ChatJID: "123456789@g.us",
 		Limit:   50,
@@ -437,7 +413,6 @@ func TestSearchContacts_ExcludesLID(t *testing.T) {
 		}
 	}
 
-	// Searching by the LID-only name returns the unmapped LID row.
 	res2, err := s.SearchContacts(ctx, "LidOnly", 50, "")
 	if err != nil {
 		t.Fatalf("SearchContacts LidOnly: %v", err)
@@ -496,7 +471,6 @@ func TestGetOldestMessage_EmptyChat(t *testing.T) {
 func TestGetMessageAtOrBefore(t *testing.T) {
 	s := openTestStore(t)
 
-	// Between a3 (01-03) and a4 (01-04): the newest at-or-before is a3.
 	id, ts, _, err := s.GetMessageAtOrBefore("447700000001@s.whatsapp.net", mustTime(t, "2026-01-03 12:00:00"))
 	if err != nil {
 		t.Fatalf("GetMessageAtOrBefore: %v", err)
@@ -512,7 +486,6 @@ func TestGetMessageAtOrBefore(t *testing.T) {
 func TestGetMessageAtOrBefore_Inclusive(t *testing.T) {
 	s := openTestStore(t)
 
-	// Exactly on a3's timestamp: the bound is inclusive.
 	id, _, _, err := s.GetMessageAtOrBefore("447700000001@s.whatsapp.net", mustTime(t, "2026-01-03 09:10:00"))
 	if err != nil {
 		t.Fatalf("GetMessageAtOrBefore: %v", err)
@@ -525,20 +498,16 @@ func TestGetMessageAtOrBefore_Inclusive(t *testing.T) {
 func TestGetMessageAtOrBefore_NothingThatFarBack(t *testing.T) {
 	s := openTestStore(t)
 
-	// Older than every cached message: caller falls back to the oldest.
 	_, _, _, err := s.GetMessageAtOrBefore("447700000001@s.whatsapp.net", mustTime(t, "2020-01-01 00:00:00"))
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected sql.ErrNoRows, got %v", err)
 	}
 }
 
-// -- cursor pagination -------------------------------------------------------
-
 func TestListMessagesCursor_BasicRoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// Page 1: 3 messages from Alice's chat.
 	page1, err := s.ListMessagesCursor(ctx, ListMessagesParams{
 		ChatJID: "447700000001@s.whatsapp.net",
 		Limit:   3,
@@ -556,7 +525,6 @@ func TestListMessagesCursor_BasicRoundTrip(t *testing.T) {
 		t.Fatal("expected non-empty next_cursor on page 1")
 	}
 
-	// Page 2: use the cursor from page 1.
 	page2, err := s.ListMessagesCursor(ctx, ListMessagesParams{
 		ChatJID: "447700000001@s.whatsapp.net",
 		Limit:   3,
@@ -575,7 +543,6 @@ func TestListMessagesCursor_BasicRoundTrip(t *testing.T) {
 		t.Fatalf("expected empty next_cursor on last page, got %q", page2.NextCursor)
 	}
 
-	// No message should appear on both pages.
 	seen := map[string]bool{}
 	for _, m := range page1.Messages {
 		seen[m.ID] = true
@@ -586,7 +553,6 @@ func TestListMessagesCursor_BasicRoundTrip(t *testing.T) {
 		}
 	}
 
-	// Ordering: all page1 timestamps >= all page2 timestamps.
 	for _, a := range page1.Messages {
 		for _, b := range page2.Messages {
 			if a.Timestamp.Before(b.Timestamp) {
@@ -635,7 +601,6 @@ func TestListMessagesCursor_GlobalAcrossChats(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// No chat filter: walks all messages across all chats.
 	page1, err := s.ListMessagesCursor(ctx, ListMessagesParams{Limit: 5})
 	if err != nil {
 		t.Fatalf("ListMessagesCursor global: %v", err)
@@ -647,7 +612,6 @@ func TestListMessagesCursor_GlobalAcrossChats(t *testing.T) {
 		t.Fatal("expected more pages")
 	}
 
-	// Verify DESC ordering across all 12 seeded messages.
 	var ids []string
 	for _, m := range page1.Messages {
 		ids = append(ids, m.ID)
@@ -657,25 +621,20 @@ func TestListMessagesCursor_GlobalAcrossChats(t *testing.T) {
 	}
 }
 
-// -- read positions ----------------------------------------------------------
-
 func TestGetSetReadPosition(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// No position yet.
 	_, err := s.GetReadPosition(ctx, "447700000001@s.whatsapp.net")
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected sql.ErrNoRows for unset position, got %v", err)
 	}
 
-	// Set a position.
 	ts := mustTime(t, "2026-01-04 09:15:00")
 	if err := s.SetReadPosition(ctx, "447700000001@s.whatsapp.net", "a4", ts); err != nil {
 		t.Fatalf("SetReadPosition: %v", err)
 	}
 
-	// Read it back.
 	pos, err := s.GetReadPosition(ctx, "447700000001@s.whatsapp.net")
 	if err != nil {
 		t.Fatalf("GetReadPosition: %v", err)
@@ -690,7 +649,6 @@ func TestGetSetReadPosition(t *testing.T) {
 		t.Fatalf("expected last_read_at %v, got %v", ts, pos.LastReadAt)
 	}
 
-	// Upsert: update to a later message.
 	ts2 := mustTime(t, "2026-01-09 10:00:00")
 	if err := s.SetReadPosition(ctx, "447700000001@s.whatsapp.net", "a5", ts2); err != nil {
 		t.Fatalf("SetReadPosition upsert: %v", err)
@@ -704,8 +662,6 @@ func TestGetSetReadPosition(t *testing.T) {
 	}
 }
 
-// -- media messages ----------------------------------------------------------
-
 func TestListMediaMessages(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
@@ -717,7 +673,6 @@ func TestListMediaMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMediaMessages: %v", err)
 	}
-	// Alice has exactly one media message (a4, an image).
 	if len(result.Messages) != 1 {
 		t.Fatalf("expected 1 media message for Alice, got %d", len(result.Messages))
 	}
@@ -731,7 +686,6 @@ func TestListMediaMessages(t *testing.T) {
 		t.Fatal("expected hasMore=false")
 	}
 
-	// Global media listing: only a4 has media in the seed.
 	global, err := s.ListMediaMessages(ctx, ListMessagesParams{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListMediaMessages global: %v", err)
@@ -748,8 +702,6 @@ func TestListMediaMessages_CursorPagination(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	// Add a second media message to Alice's chat to test cursor paging across
-	// more than one media row.
 	_, err := s.db.ExecContext(ctx, `
 		INSERT OR REPLACE INTO messages
 		(id, chat_jid, sender, content, timestamp, is_from_me, media_type, filename, file_length)

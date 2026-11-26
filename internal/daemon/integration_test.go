@@ -42,7 +42,6 @@ func TestIntegration_MCPEndpointReturns503WhenUnmounted(t *testing.T) {
 
 	addr := s.BoundAddr()
 	url := "http://" + addr + "/mcp"
-	// The stub handler responds with 503 on any method.
 	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader("{}"))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)

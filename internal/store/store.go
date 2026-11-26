@@ -1,6 +1,3 @@
-// Package store owns the SQLite-backed message/chat cache and the mapping layer
-// to whatsmeow's own SQLite database. The schema is kept byte-compatible with
-// the historical layout so existing store/messages.db files keep working.
 package store
 
 import (
@@ -17,13 +14,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// ChmodBestEffort tightens a path's permissions but tolerates filesystems that
-// do not support chmod. Network mounts such as Azure Files / CIFS SMB return
-// EPERM/ENOTSUP/EINVAL from chmod(2) — on those mounts access is governed by
-// the mount options (uid/gid/file_mode), not POSIX mode bits, so a rejected
-// chmod is not a security regression. A local filesystem never returns these
-// errors for a file the process owns, so genuine permission tightening on
-// local disk is preserved. Missing files are likewise tolerated.
 func ChmodBestEffort(path string, mode os.FileMode) error {
 	err := os.Chmod(path, mode)
 	if err == nil || os.IsNotExist(err) {
@@ -35,7 +25,6 @@ func ChmodBestEffort(path string, mode os.FileMode) error {
 	return err
 }
 
-// Message mirrors the on-wire shape used by downstream consumers.
 type Message struct {
 	ID          string    `json:"id"`
 	ChatJID     string    `json:"chat_jid"`
@@ -48,18 +37,13 @@ type Message struct {
 	MediaType   string    `json:"media_type,omitempty"`
 	Filename    string    `json:"filename,omitempty"`
 	URL         string    `json:"url,omitempty"`
-	// DirectPath is the CDN path (starting with `/`, including the signed
 	// `?ccb=&oh=&oe=&_nc_sid=` auth query) captured verbatim from the
-	// WhatsApp media protobuf at receive/send time. When present, the
-	// download path uses it directly; when absent (legacy row written by
-	// an older daemon build), Download falls back to parsing URL.
 	DirectPath  string `json:"direct_path,omitempty"`
 	ChatName    string `json:"chat_name,omitempty"`
 	PhoneNumber string `json:"phone_number,omitempty"`
 	IsStarred   bool   `json:"is_starred"`
 }
 
-// Chat is a cached WhatsApp chat.
 type Chat struct {
 	JID             string    `json:"jid"`
 	Name            string    `json:"name"`
@@ -75,11 +59,6 @@ type Chat struct {
 	MutedUntil      time.Time `json:"muted_until,omitempty"`
 }
 
-// Contact is a directory entry derived from chat history, the synced
-// whatsmeow address book, or the bridge-local address book. Fields beyond
-// the original three carry identity and provenance metadata added for the
-// contact/identity overhaul; they are omitempty so existing JSON consumers
-// keep working.
 type Contact struct {
 	PhoneNumber string `json:"phone_number"`
 	Name        string `json:"name,omitempty"`
@@ -92,7 +71,6 @@ type Contact struct {
 	Stale       bool   `json:"stale,omitempty"`
 }
 
-// ContactProfile holds bridge-owned identity metadata for a synced contact.
 type ContactProfile struct {
 	JID            string
 	Username       string
@@ -102,18 +80,12 @@ type ContactProfile struct {
 	UpdatedAt      string
 }
 
-// MessageContext wraps a target message with surrounding context.
 type MessageContext struct {
 	Message Message   `json:"message"`
 	Before  []Message `json:"before,omitempty"`
 	After   []Message `json:"after,omitempty"`
 }
 
-// MessageReadPosition tracks the last message the local agent has read (or
-// otherwise processed) in a given chat. It is a client-side bookmark: WhatsApp
-// itself does not expose read receipts for received messages to linked devices,
-// so we store our own position so callers can resume walks without re-scanning
-// from the top of a chat.
 type MessageReadPosition struct {
 	ChatJID           string    `json:"chat_jid"`
 	LastReadMessageID string    `json:"last_read_message_id,omitempty"`
@@ -121,7 +93,6 @@ type MessageReadPosition struct {
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
 
-// ScheduledMessage is a message scheduled to be sent at a future time.
 type ScheduledMessage struct {
 	ID            string    `json:"id"`
 	ChatJID       string    `json:"chat_jid"`
@@ -135,17 +106,12 @@ type ScheduledMessage struct {
 	Error         string    `json:"error,omitempty"`
 }
 
-// Store handles the message cache and read-only access to whatsmeow's DB.
 type Store struct {
 	db          *sql.DB
 	whatsmeowDB *sql.DB
 	dir         string
 }
 
-// Open creates (if necessary) the store directory and opens both databases.
-// Dir is the directory holding messages.db and whatsapp.db. The directory is
-// created/tightened to 0700 and each .db file ends up at 0600 to keep session
-// material and cached message contents off other local users' radar.
 func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create store dir: %w", err)
@@ -160,9 +126,6 @@ func Open(dir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open messages db: %w", err)
 	}
-	// SQLite is a single-writer, multi-reader database. Limit open connections
-	// to 1 to avoid "database is locked" errors under concurrent access from
-	// the MCP HTTP handler, the history-sync goroutine, and the media downloader.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
@@ -174,21 +137,15 @@ func Open(dir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
-	// Tighten messages.db after schema has been applied (the file exists
-	// by then). IsNotExist-tolerate in case a future sqlite driver version
-	// defers file creation.
 	if err := ChmodBestEffort(msgPath, 0o600); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("chmod messages.db: %w", err)
 	}
 
-	// whatsapp.db may not yet exist on first run; open lazily in read-only mode.
 	waDB, err := sql.Open("sqlite3", "file:"+waPath+"?mode=ro")
 	if err != nil {
-		// Non-fatal: LID resolution falls through to identity.
 		waDB = nil
 	}
-	// If whatsapp.db already exists (from a previous login), tighten it.
 	if err := ChmodBestEffort(waPath, 0o600); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("chmod whatsapp.db: %w", err)
@@ -197,13 +154,10 @@ func Open(dir string) (*Store, error) {
 	return &Store{db: db, whatsmeowDB: waDB, dir: dir}, nil
 }
 
-// DB returns the underlying message database handle (tests only).
 func (s *Store) DB() *sql.DB { return s.db }
 
-// Dir returns the directory backing the store.
 func (s *Store) Dir() string { return s.dir }
 
-// Close releases both database connections.
 func (s *Store) Close() error {
 	if s.whatsmeowDB != nil {
 		_ = s.whatsmeowDB.Close()
@@ -216,8 +170,6 @@ func (s *Store) Close() error {
 	return nil
 }
 
-// ListChatJIDs returns all cached chat JIDs. Used by the full history-sync
-// opt-in to request backfill for every chat after pairing.
 func (s *Store) ListChatJIDs() ([]string, error) {
 	rows, err := s.db.Query("SELECT DISTINCT chat_jid FROM messages")
 	if err != nil {
@@ -235,7 +187,6 @@ func (s *Store) ListChatJIDs() ([]string, error) {
 	return jids, rows.Err()
 }
 
-// StoreChat upserts a chat row.
 func (s *Store) StoreChat(jid, name string, lastMessageTime time.Time) error {
 	_, err := s.db.Exec(
 		`INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)
@@ -245,9 +196,6 @@ func (s *Store) StoreChat(jid, name string, lastMessageTime time.Time) error {
 	return err
 }
 
-// EnsureChat creates a chat row if the JID is not cached yet, preserving any
-// existing row (name, last message time, archive flag). Scheduled messages
-// reference chats, so scheduling to a brand-new recipient needs this first.
 func (s *Store) EnsureChat(jid, name string) error {
 	_, err := s.db.Exec(
 		"INSERT OR IGNORE INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)",
@@ -256,7 +204,6 @@ func (s *Store) EnsureChat(jid, name string) error {
 	return err
 }
 
-// ArchivedState is the explicit archive lifecycle of a chat.
 type ArchivedState bool
 
 const (
@@ -264,29 +211,21 @@ const (
 	ChatArchived ArchivedState = true
 )
 
-// SetArchived sets the archive state of a chat explicitly.
 func (s *Store) SetArchived(chatJID string, state ArchivedState) error {
 	_, err := s.db.Exec("UPDATE chats SET archived = ? WHERE jid = ?", bool(state), chatJID)
 	return err
 }
 
-// SetChatPinnedState records the pin flag WhatsApp's app state accepted, so
-// get_chat and list_chats report it without waiting for a sync echo.
 func (s *Store) SetChatPinnedState(chatJID string, pinned bool) error {
 	_, err := s.db.Exec("UPDATE chats SET pinned = ? WHERE jid = ?", pinned, chatJID)
 	return err
 }
 
-// SetChatMuteState records the mute deadline WhatsApp accepted. A zero time
-// means muted with no deadline.
 func (s *Store) SetChatMuteState(chatJID string, mutedUntil time.Time) error {
 	_, err := s.db.Exec("UPDATE chats SET muted_until = ? WHERE jid = ?", mutedUntil, chatJID)
 	return err
 }
 
-// DeleteChat removes a chat and its cached rows: messages, the chat itself,
-// and the rows that reference it. Scheduled messages and label associations go
-// too, because they point at a chat that no longer exists.
 func (s *Store) DeleteChat(ctx context.Context, chatJID string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -311,20 +250,14 @@ func (s *Store) DeleteChat(ctx context.Context, chatJID string) error {
 	return tx.Commit()
 }
 
-// ArchiveChat archives a chat so it no longer appears in normal chat listings.
-// Read-only chats remain in the database and can be unarchived later.
 func (s *Store) ArchiveChat(chatJID string) error {
 	return s.SetArchived(chatJID, ChatArchived)
 }
 
-// UnarchiveChat unarchives a previously archived chat.
 func (s *Store) UnarchiveChat(chatJID string) error {
 	return s.SetArchived(chatJID, ChatActive)
 }
 
-// StoreMessage inserts or replaces a message row. Messages with no content and
-// no media type are dropped to avoid polluting the cache with signal-only
-// events (typing, receipts, key exchange, etc.).
 func (s *Store) StoreMessage(ctx context.Context, m Message, mediaKey, fileSHA256, fileEncSHA256 []byte, fileLength uint64) error {
 	if m.Content == "" && m.MediaType == "" {
 		return nil
@@ -339,12 +272,6 @@ func (s *Store) StoreMessage(ctx context.Context, m Message, mediaKey, fileSHA25
 	return err
 }
 
-// UpdateMessage replaces the content of an existing message row. Used when
-// WhatsApp delivers an edit event for a previously-cached message. Returns
-// sql.ErrNoRows when no matching row exists.
-// SetMessageStarred records the star flag WhatsApp's app state accepted.
-// whatsmeow keeps no app-state values, so this mirror is the only read-back
-// the bridge has for a star.
 func (s *Store) SetMessageStarred(ctx context.Context, id, chatJID string, starred bool) error {
 	_, err := s.db.ExecContext(ctx,
 		"UPDATE messages SET is_starred = ? WHERE id = ? AND chat_jid = ?",
@@ -370,10 +297,6 @@ func (s *Store) UpdateMessage(ctx context.Context, id, chatJID, content string) 
 	return nil
 }
 
-// RevokeMessage marks a message as deleted-for-everyone in the local cache.
-// The content is replaced with a placeholder and the media fields are cleared
-// so downstream consumers (list_messages, download_media) treat it as revoked.
-// Returns sql.ErrNoRows when no matching row exists.
 func (s *Store) RevokeMessage(ctx context.Context, id, chatJID string) error {
 	result, err := s.db.ExecContext(ctx,
 		"UPDATE messages SET content = '[deleted]', media_type = '', url = '', direct_path = '', media_key = NULL, file_sha256 = NULL, file_enc_sha256 = NULL, file_length = 0 WHERE id = ? AND chat_jid = ?",
@@ -392,7 +315,6 @@ func (s *Store) RevokeMessage(ctx context.Context, id, chatJID string) error {
 	return nil
 }
 
-// StoreMediaInfo updates the media columns of an existing message row.
 func (s *Store) StoreMediaInfo(id, chatJID, url, directPath string, mediaKey, fileSHA256, fileEncSHA256 []byte, fileLength uint64) error {
 	_, err := s.db.Exec(
 		"UPDATE messages SET url = ?, direct_path = ?, media_key = ?, file_sha256 = ?, file_enc_sha256 = ?, file_length = ? WHERE id = ? AND chat_jid = ?",
@@ -401,11 +323,7 @@ func (s *Store) StoreMediaInfo(id, chatJID, url, directPath string, mediaKey, fi
 	return err
 }
 
-// GetMediaInfo fetches the persisted media fields for a message. direct_path
-// is the CDN path captured from the WhatsApp media protobuf at receive time,
 // including the signed `?ccb=&oh=&oe=&_nc_sid=` auth query. It may be empty
-// for legacy rows written before this column existed — callers that need
-// to fetch bytes should fall back to parsing url in that case.
 func (s *Store) GetMediaInfo(id, chatJID string) (mediaType, filename, url, directPath string, mediaKey, fileSHA256, fileEncSHA256 []byte, fileLength uint64, err error) {
 	var dp sql.NullString
 	err = s.db.QueryRow(
@@ -416,8 +334,6 @@ func (s *Store) GetMediaInfo(id, chatJID string) (mediaType, filename, url, dire
 	return
 }
 
-// GetMessage returns one cached message by ID and chat JID, or nil when it is
-// not cached.
 func (s *Store) GetMessage(ctx context.Context, id, chatJID string) (*Message, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, chat_jid, sender, COALESCE(content, ''), timestamp, is_from_me
@@ -433,8 +349,6 @@ func (s *Store) GetMessage(ctx context.Context, id, chatJID string) (*Message, e
 	return &m, nil
 }
 
-// GetNewestMessage returns the latest message row for a chat, used by the
-// history-sync code to anchor the request.
 func (s *Store) GetNewestMessage(chatJID string) (id string, ts time.Time, isFromMe bool, err error) {
 	err = s.db.QueryRow(`
 		SELECT id, timestamp, is_from_me
@@ -445,11 +359,7 @@ func (s *Store) GetNewestMessage(chatJID string) (id string, ts time.Time, isFro
 	return
 }
 
-// GetOldestMessage returns the earliest message row for a chat. It is the
-// counterpart to GetNewestMessage and exists so the history-sync code can
-// anchor a backward walk on a real cached message: WhatsApp resolves an
 // on-demand history-sync cursor by message key, so extending history backwards
-// requires the key of the oldest row we already hold, not a synthesised one.
 func (s *Store) GetOldestMessage(chatJID string) (id string, ts time.Time, isFromMe bool, err error) {
 	err = s.db.QueryRow(`
 		SELECT id, timestamp, is_from_me
@@ -460,11 +370,6 @@ func (s *Store) GetOldestMessage(chatJID string) (id string, ts time.Time, isFro
 	return
 }
 
-// GetMessageAtOrBefore returns the newest message row at or before ts for a
-// chat. It lets a caller anchor a history-sync request on a real cached
-// message near a requested point in time rather than fabricating a key that
-// the server cannot resolve. Returns sql.ErrNoRows when the chat has nothing
-// at or before ts.
 func (s *Store) GetMessageAtOrBefore(chatJID string, before time.Time) (id string, ts time.Time, isFromMe bool, err error) {
 	err = s.db.QueryRow(`
 		SELECT id, timestamp, is_from_me
@@ -475,11 +380,6 @@ func (s *Store) GetMessageAtOrBefore(chatJID string, before time.Time) (id strin
 	return
 }
 
-// HasInboundFrom reports whether the cache holds at least one message we
-// received (is_from_me = 0) in the given chat. It is the "have we ever heard
-// from this JID" signal the rate limiter uses to classify a send target as a
-// known contact (leash) versus cold outreach (stricter leash). A group JID is
-// always a known context and callers treat it as such without querying here.
 func (s *Store) HasInboundFrom(chatJID string) (bool, error) {
 	var exists int
 	err := s.db.QueryRow(
@@ -492,7 +392,6 @@ func (s *Store) HasInboundFrom(chatJID string) (bool, error) {
 	return exists == 1, nil
 }
 
-// StoreLabel upserts a label row.
 func (s *Store) StoreLabel(labelID, name, color string) error {
 	_, err := s.db.Exec(
 		"INSERT OR REPLACE INTO labels (label_id, name, color) VALUES (?, ?, ?)",
@@ -501,7 +400,6 @@ func (s *Store) StoreLabel(labelID, name, color string) error {
 	return err
 }
 
-// LabelState is the explicit labeled/unlabeled state of a chat-label association.
 type LabelState bool
 
 const (
@@ -509,7 +407,6 @@ const (
 	LabelLabeled   LabelState = true
 )
 
-// StoreLabelAssociation upserts a label association for a chat.
 func (s *Store) StoreLabelAssociation(chatJID, labelID string, labeled LabelState) error {
 	_, err := s.db.Exec(
 		"INSERT OR REPLACE INTO label_associations (chat_jid, label_id, labeled) VALUES (?, ?, ?)",
@@ -518,7 +415,6 @@ func (s *Store) StoreLabelAssociation(chatJID, labelID string, labeled LabelStat
 	return err
 }
 
-// ListLabels returns all known labels.
 func (s *Store) ListLabels() ([]map[string]string, error) {
 	rows, err := s.db.Query("SELECT label_id, name, color FROM labels ORDER BY name")
 	if err != nil {
@@ -540,7 +436,6 @@ func (s *Store) ListLabels() ([]map[string]string, error) {
 	return labels, rows.Err()
 }
 
-// ListChatsByLabel returns all chat JIDs that have the given label.
 func (s *Store) ListChatsByLabel(labelID string) ([]string, error) {
 	rows, err := s.db.Query(
 		"SELECT chat_jid FROM label_associations WHERE label_id = ? AND labeled = 1",
@@ -561,7 +456,6 @@ func (s *Store) ListChatsByLabel(labelID string) ([]string, error) {
 	return jids, rows.Err()
 }
 
-// AuditLogEntry is a single entry in the audit log of agent-initiated actions.
 type AuditLogEntry struct {
 	ID        int64     `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
@@ -573,7 +467,6 @@ type AuditLogEntry struct {
 	Details   string    `json:"details,omitempty"`
 }
 
-// AuditLog records an agent-initiated action in the append-only audit log.
 func (s *Store) AuditLog(toolName, chatJID, messageID, action, result, details string) error {
 	_, err := s.db.Exec(
 		"INSERT INTO audit_log (tool_name, chat_jid, message_id, action, result, details) VALUES (?, ?, ?, ?, ?, ?)",
@@ -582,7 +475,6 @@ func (s *Store) AuditLog(toolName, chatJID, messageID, action, result, details s
 	return err
 }
 
-// ListAuditLog returns the most recent audit log entries, limited by count.
 func (s *Store) ListAuditLog(limit int) ([]AuditLogEntry, error) {
 	if limit <= 0 {
 		limit = 50
@@ -606,7 +498,6 @@ func (s *Store) ListAuditLog(limit int) ([]AuditLogEntry, error) {
 	return entries, rows.Err()
 }
 
-// StoreContact upserts a contact row.
 func (s *Store) StoreContact(jid, name, phoneNumber string) error {
 	_, err := s.db.Exec(
 		"INSERT OR REPLACE INTO contacts (jid, name, phone_number, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
@@ -615,7 +506,6 @@ func (s *Store) StoreContact(jid, name, phoneNumber string) error {
 	return err
 }
 
-// GetContact returns a contact by JID.
 func (s *Store) GetContact(jid string) (*Contact, error) {
 	row := s.db.QueryRow("SELECT jid, name, phone_number FROM contacts WHERE jid = ?", jid)
 	var c Contact
@@ -628,7 +518,6 @@ func (s *Store) GetContact(jid string) (*Contact, error) {
 	return &c, nil
 }
 
-// ListContacts returns all saved contacts ordered by name.
 func (s *Store) ListContacts() ([]Contact, error) {
 	rows, err := s.db.Query("SELECT jid, name, phone_number FROM contacts ORDER BY name")
 	if err != nil {
@@ -646,13 +535,11 @@ func (s *Store) ListContacts() ([]Contact, error) {
 	return contacts, rows.Err()
 }
 
-// DeleteContact deletes a contact by JID.
 func (s *Store) DeleteContact(jid string) error {
 	_, err := s.db.Exec("DELETE FROM contacts WHERE jid = ?", jid)
 	return err
 }
 
-// UpsertContactProfile writes bridge-owned identity metadata for a JID.
 func (s *Store) UpsertContactProfile(jid, username, nameSource, addressingMode string, stale bool) error {
 	staleInt := 0
 	if stale {
@@ -671,7 +558,6 @@ func (s *Store) UpsertContactProfile(jid, username, nameSource, addressingMode s
 	return err
 }
 
-// MarkContactStale marks a contact profile as stale (name removed on phone).
 func (s *Store) MarkContactStale(jid string) error {
 	_, err := s.db.Exec(`
 		INSERT INTO contact_profiles (jid, stale, updated_at)
@@ -681,7 +567,6 @@ func (s *Store) MarkContactStale(jid string) error {
 	return err
 }
 
-// GetContactProfile returns the bridge-owned profile for a JID, or nil.
 func (s *Store) GetContactProfile(jid string) (*ContactProfile, error) {
 	row := s.db.QueryRow(`
 		SELECT jid, COALESCE(username,''), COALESCE(name_source,''),
@@ -699,7 +584,6 @@ func (s *Store) GetContactProfile(jid string) (*ContactProfile, error) {
 	return &p, nil
 }
 
-// ListStaleContacts returns JIDs of contacts marked stale.
 func (s *Store) ListStaleContacts() ([]string, error) {
 	rows, err := s.db.Query("SELECT jid FROM contact_profiles WHERE stale = 1")
 	if err != nil {
@@ -717,7 +601,6 @@ func (s *Store) ListStaleContacts() ([]string, error) {
 	return out, rows.Err()
 }
 
-// evidenceSourceRank orders evidence sources from most to least trustworthy.
 func evidenceSourceRank(source string) int {
 	switch source {
 	case "pairing", "app_state", "usync":
@@ -730,7 +613,6 @@ func evidenceSourceRank(source string) int {
 	return 1
 }
 
-// RecordEvidence stores a LID<->PN mapping observation with provenance.
 func (s *Store) RecordEvidence(lid, pn, source, scope string, verified bool) error {
 	if lid == "" || pn == "" {
 		return nil
@@ -750,7 +632,6 @@ func (s *Store) RecordEvidence(lid, pn, source, scope string, verified bool) err
 }
 
 // GetBestPNForLID returns the most trustworthy phone JID for a LID, based on
-// evidence provenance. Returns "" if no evidence exists.
 func (s *Store) GetBestPNForLID(lid string) string {
 	rows, err := s.db.Query(`
 		SELECT pn, source, verified, learned_at
@@ -786,7 +667,6 @@ func (s *Store) GetBestPNForLID(lid string) string {
 	return best.pn
 }
 
-// ListEvidence returns all evidence rows for a LID.
 func (s *Store) ListEvidence(lid string) ([]map[string]any, error) {
 	rows, err := s.db.Query(`
 		SELECT lid, pn, source, scope, learned_at, verified
@@ -816,7 +696,6 @@ func (s *Store) ListEvidence(lid string) ([]map[string]any, error) {
 	return out, rows.Err()
 }
 
-// StoreScheduledMessage inserts a scheduled message.
 func (s *Store) StoreScheduledMessage(id, chatJID, content, mediaPath string, scheduledAt time.Time) error {
 	_, err := s.db.Exec(
 		"INSERT OR REPLACE INTO scheduled_messages (id, chat_jid, content, media_path, scheduled_at) VALUES (?, ?, ?, ?, ?)",
@@ -825,8 +704,6 @@ func (s *Store) StoreScheduledMessage(id, chatJID, content, mediaPath string, sc
 	return err
 }
 
-// NextScheduledMessageTime returns the scheduled time of the earliest pending
-// scheduled message. ok is false when nothing is pending.
 func (s *Store) NextScheduledMessageTime() (time.Time, bool, error) {
 	var next time.Time
 	err := s.db.QueryRow(`
@@ -843,9 +720,6 @@ func (s *Store) NextScheduledMessageTime() (time.Time, bool, error) {
 	return next, true, nil
 }
 
-// GetPendingScheduledMessages returns all scheduled messages with status
-// 'pending' or 'sending' whose scheduled_at is <= now. 'sending' rows are
-// reclaimed after a crash so a message is never stuck in-flight forever.
 func (s *Store) GetPendingScheduledMessages(ctx context.Context) ([]ScheduledMessage, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, chat_jid, content, media_path, scheduled_at, attempts FROM scheduled_messages
@@ -871,7 +745,6 @@ func (s *Store) GetPendingScheduledMessages(ctx context.Context) ([]ScheduledMes
 	return msgs, rows.Err()
 }
 
-// MarkMessageSent marks a scheduled message as sent.
 func (s *Store) MarkMessageSent(id, messageID string, sentAt time.Time) error {
 	_, err := s.db.Exec(
 		"UPDATE scheduled_messages SET status = 'sent', sent_at = ?, sent_message_id = ? WHERE id = ?",
@@ -880,7 +753,6 @@ func (s *Store) MarkMessageSent(id, messageID string, sentAt time.Time) error {
 	return err
 }
 
-// MarkMessageFailed marks a scheduled message as failed.
 func (s *Store) MarkMessageFailed(id, reason string) error {
 	_, err := s.db.Exec(
 		"UPDATE scheduled_messages SET status = 'failed', error = ? WHERE id = ?",
@@ -889,9 +761,6 @@ func (s *Store) MarkMessageFailed(id, reason string) error {
 	return err
 }
 
-// ListScheduledMessages returns scheduled messages, newest scheduled time
-// first. status filters to pending, sent, or failed; an empty string returns
-// every state.
 func (s *Store) ListScheduledMessages(status string) ([]ScheduledMessage, error) {
 	query := `SELECT id, chat_jid, content, media_path, scheduled_at, status, attempts,
 		sent_at, COALESCE(sent_message_id, ''), COALESCE(error, '')
@@ -927,13 +796,6 @@ func (s *Store) ListScheduledMessages(status string) ([]ScheduledMessage, error)
 	return msgs, rows.Err()
 }
 
-// ClaimScheduledMessage atomically moves a scheduled message from 'pending'
-// or 'sending' to 'sending'. Returns true if this caller won the claim and
-// is responsible for performing the send. A false return means the row was
-// already terminal (sent/failed) or missing.
-// RequeueScheduledMessage returns a message to the pending queue for a later
-// attempt after a transient failure, recording the attempt count and the next
-// due time.
 func (s *Store) RequeueScheduledMessage(id string, attempts int, nextAttempt time.Time) error {
 	_, err := s.db.Exec(
 		"UPDATE scheduled_messages SET status = 'pending', attempts = ?, scheduled_at = ? WHERE id = ?",
@@ -957,9 +819,6 @@ func (s *Store) ClaimScheduledMessage(id string) (bool, error) {
 	return n > 0, nil
 }
 
-// CancelScheduledMessage deletes a pending scheduled message. It reports
-// whether a pending row was removed (false means the ID was unknown or the
-// message had already been sent or failed).
 func (s *Store) CancelScheduledMessage(id string) (bool, error) {
 	res, err := s.db.Exec("DELETE FROM scheduled_messages WHERE id = ? AND status = 'pending'", id)
 	if err != nil {
@@ -972,17 +831,12 @@ func (s *Store) CancelScheduledMessage(id string) (bool, error) {
 	return n > 0, nil
 }
 
-// FindChatName returns the name stored for a chat JID, empty if none.
 func (s *Store) FindChatName(jid string) string {
 	var name string
 	_ = s.db.QueryRow("SELECT name FROM chats WHERE jid = ?", jid).Scan(&name)
 	return name
 }
 
-// RecentIncomingMessages returns up to `limit` recent incoming message IDs +
-// their sender JIDs for the given chat. Used to drive the "mark whole chat as
-// read" helper — we don't track per-message read state locally, so we treat
-// recent incoming messages as the candidates to ack.
 func (s *Store) RecentIncomingMessages(ctx context.Context, chatJID string, limit int) (ids []string, senders []string, err error) {
 	if limit <= 0 {
 		limit = 50
@@ -1008,8 +862,6 @@ func (s *Store) RecentIncomingMessages(ctx context.Context, chatJID string, limi
 	return ids, senders, rows.Err()
 }
 
-// GetReadPosition returns the stored read position for a chat, or
-// sql.ErrNoRows when no position has been recorded yet.
 func (s *Store) GetReadPosition(ctx context.Context, chatJID string) (*MessageReadPosition, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT chat_jid, last_read_message_id, last_read_at, updated_at
@@ -1032,9 +884,6 @@ func (s *Store) GetReadPosition(ctx context.Context, chatJID string) (*MessageRe
 	return &p, nil
 }
 
-// SetReadPosition upserts the read position for a chat. lastReadAt is the
-// timestamp of the last message the caller has processed; if zero, the
-// message's own timestamp is looked up and used.
 func (s *Store) SetReadPosition(ctx context.Context, chatJID, messageID string, lastReadAt time.Time) error {
 	if lastReadAt.IsZero() {
 		err := s.db.QueryRowContext(ctx, `
@@ -1198,10 +1047,6 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp DESC);
 
 `
 
-// migrateSchema brings legacy databases up to the current layout. SQLite lacks
-// "ADD COLUMN IF NOT EXISTS", so we inspect PRAGMA table_info before issuing
-// any ALTER. Every step is idempotent — running migrateSchema twice is a
-// no-op on an up-to-date DB.
 func migrateSchema(db *sql.DB) error {
 	rows, err := db.Query("PRAGMA table_info(messages)")
 	if err != nil {
@@ -1251,7 +1096,6 @@ func migrateSchema(db *sql.DB) error {
 			return fmt.Errorf("add column is_starred: %w", err)
 		}
 	}
-	// chats table: add archived column if missing (legacy databases)
 	chatRows, err := db.Query("PRAGMA table_info(chats)")
 	if err != nil {
 		return fmt.Errorf("pragma table_info(chats): %w", err)
@@ -1297,8 +1141,6 @@ func migrateSchema(db *sql.DB) error {
 			return fmt.Errorf("add column muted_until: %w", err)
 		}
 	}
-	// scheduled_messages table: add the error column used to record send
-	// failures (missing from the first release of the scheduler schema).
 	if err := chatRows.Close(); err != nil {
 		return fmt.Errorf("close table_info(chats): %w", err)
 	}
@@ -1332,8 +1174,6 @@ func migrateSchema(db *sql.DB) error {
 	if err := schedRows.Close(); err != nil {
 		return fmt.Errorf("close table_info(scheduled_messages): %w", err)
 	}
-	// A legacy database in tests may predate the scheduler table entirely.
-	// Open() applies the full schema afterwards, so only migrate when present.
 	var schedTable string
 	if err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_messages'").Scan(&schedTable); err == nil {
 		if !hasScheduleError {
@@ -1352,10 +1192,8 @@ func migrateSchema(db *sql.DB) error {
 			}
 		}
 	}
-	// auto_responder table: add start_time, end_time, cooldown_minutes columns
 	var arTable string
 	if err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='auto_responder'").Scan(&arTable); err != nil {
-		// Table doesn't exist yet, skip column additions (schema will create it)
 	} else {
 		arRows, err := db.Query("PRAGMA table_info(auto_responder)")
 		if err != nil {
@@ -1406,7 +1244,6 @@ func migrateSchema(db *sql.DB) error {
 			}
 		}
 	}
-	// auto_responder_cooldown table: tracks last reply time per contact
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS auto_responder_cooldown (
 			jid         TEXT PRIMARY KEY,
@@ -1415,7 +1252,6 @@ func migrateSchema(db *sql.DB) error {
 	`); err != nil {
 		return fmt.Errorf("create table auto_responder_cooldown: %w", err)
 	}
-	// contact_profiles: bridge-owned identity metadata for synced contacts.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS contact_profiles (
 			jid             TEXT PRIMARY KEY,
@@ -1428,7 +1264,6 @@ func migrateSchema(db *sql.DB) error {
 	`); err != nil {
 		return fmt.Errorf("create table contact_profiles: %w", err)
 	}
-	// identity_evidence: provenance for LID<->PN mappings.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS identity_evidence (
 			lid         TEXT NOT NULL,

@@ -16,9 +16,6 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
-// newClientWithStore builds a *Client that has only the message store and
-// logger wired up. The underlying whatsmeow client is nil — tests MUST stick
-// to code paths that never touch it (e.g. GetChatName with a pre-stored name).
 func newClientWithStore(t *testing.T, s *store.Store) *Client {
 	t.Helper()
 	return &Client{
@@ -28,16 +25,11 @@ func newClientWithStore(t *testing.T, s *store.Store) *Client {
 	}
 }
 
-// newTestStoreWithLIDMap opens a real store rooted in t.TempDir() and
-// pre-populates whatsapp.db with the supplied (lid -> pn) map. The returned
-// store is opened via store.Open, giving LID resolution a read-only handle on
-// the freshly-written whatsmeow_lid_map table.
 func newTestStoreWithLIDMap(t *testing.T, lidMap map[string]string) *store.Store {
 	t.Helper()
 
 	dir := t.TempDir()
 
-	// Pre-create whatsapp.db with the whatsmeow_lid_map table and rows.
 	waPath := filepath.Join(dir, "whatsapp.db")
 	waDB, err := sql.Open("sqlite3", "file:"+waPath+"?_foreign_keys=on")
 	if err != nil {
@@ -69,7 +61,6 @@ func TestGetChatName_UsesExistingName(t *testing.T) {
 	s := newTestStoreWithLIDMap(t, nil)
 	c := newClientWithStore(t, s)
 
-	// Seed a chat name.
 	const jidStr = "447700000001@s.whatsapp.net"
 	if err := s.StoreChat(jidStr, "Alice", time.Now()); err != nil {
 		t.Fatalf("seed chat: %v", err)
@@ -98,13 +89,7 @@ func TestGetChatName_UsesExistingGroupName(t *testing.T) {
 	}
 }
 
-// TestHandleMessage_LIDNormalization exercises the LID-normalization branches
-// inside handleMessage. The chat JID is an @lid direct chat; after resolution
-// it must be stored under the underlying @s.whatsapp.net JID. The chat name is
-// pre-seeded so GetChatName short-circuits and never touches the nil whatsmeow
-// client.
 func TestHandleMessage_LIDNormalization(t *testing.T) {
-	// LID 99887766 maps to phone 447700000002.
 	s := newTestStoreWithLIDMap(t, map[string]string{"99887766": "447700000002"})
 	c := newClientWithStore(t, s)
 
@@ -136,10 +121,8 @@ func TestHandleMessage_LIDNormalization(t *testing.T) {
 		},
 	}
 
-	// This must not panic; the LID-normalized chat JID is used for storage.
 	c.handleMessage(evt)
 
-	// Verify the message was stored under the resolved JID.
 	rows, err := s.DB().Query("SELECT id, chat_jid, sender, content FROM messages WHERE id = ?", "lid-msg-1")
 	if err != nil {
 		t.Fatalf("query stored message: %v", err)
@@ -163,8 +146,6 @@ func TestHandleMessage_LIDNormalization(t *testing.T) {
 	}
 }
 
-// TestHandleMessage_NoNormalizationForStandardJID confirms that non-LID chats
-// go through unchanged and are stored verbatim.
 func TestHandleMessage_NoNormalizationForStandardJID(t *testing.T) {
 	s := newTestStoreWithLIDMap(t, nil)
 	c := newClientWithStore(t, s)
@@ -204,8 +185,6 @@ func TestHandleMessage_NoNormalizationForStandardJID(t *testing.T) {
 	}
 }
 
-// TestHandleMessage_GroupChatNotNormalized confirms that @g.us chats are left
-// alone by the LID normalization branch.
 func TestHandleMessage_GroupChatNotNormalized(t *testing.T) {
 	s := newTestStoreWithLIDMap(t, map[string]string{"99887766": "447700000002"})
 	c := newClientWithStore(t, s)
@@ -219,7 +198,6 @@ func TestHandleMessage_GroupChatNotNormalized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse chat jid: %v", err)
 	}
-	// LID sender in a group -> should resolve to phone.
 	senderJID, err := types.ParseJID("99887766@lid")
 	if err != nil {
 		t.Fatalf("parse sender jid: %v", err)

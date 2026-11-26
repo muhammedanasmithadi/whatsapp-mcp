@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// TestVersionFlag builds the binary in a temp dir and invokes both `-version`
-// and `--version`. This is the cheapest way to exercise the early-return path
-// in main() without restructuring around os.Exit.
 func TestVersionFlag(t *testing.T) {
 	t.Parallel()
 
@@ -38,7 +35,6 @@ func TestVersionFlag(t *testing.T) {
 		}
 	}
 
-	// -version should win even when a subcommand is also present.
 	out, err := exec.Command(bin, "-version", "serve").CombinedOutput()
 	if err != nil {
 		t.Fatalf("-version serve exited non-zero: %v\n%s", err, out)

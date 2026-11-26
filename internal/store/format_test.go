@@ -125,7 +125,6 @@ func TestFormatMessagesList_NonEmpty(t *testing.T) {
 		},
 	}
 	got := s.FormatMessagesList(ctx, msgs, false)
-	// Two messages => two newlines.
 	if n := strings.Count(got, "\n"); n != 2 {
 		t.Fatalf("expected 2 newlines, got %d in %q", n, got)
 	}
