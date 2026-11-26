@@ -89,10 +89,7 @@ func (s *Server) registerResolveContacts() {
 					}
 				}
 				if allDigits && trimmed != "" {
-					jid = raw + "@s.whatsapp.net"
-					if !strings.HasSuffix(jid, "@s.whatsapp.net") {
-						jid = strings.TrimPrefix(raw, "+") + "@s.whatsapp.net"
-					}
+					jid = trimmed + "@s.whatsapp.net"
 				} else {
 					// Treat as a name: search contacts.
 					if s.client != nil && s.client.Store() != nil {

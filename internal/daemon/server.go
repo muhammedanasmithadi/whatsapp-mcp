@@ -88,6 +88,8 @@ type pairDriver interface {
 	MarkMessageFailed(id, reason string) error
 	// SendMessage sends a WhatsApp message.
 	SendMessage(ctx context.Context, chatJID string, content string) (*client.SendResult, error)
+	// Download fetches one cached message's media to the media root.
+	Download(ctx context.Context, messageID, chatJID string) client.DownloadResult
 }
 
 // Config configures a daemon Server. Addr may be "host:port" or "host:0"
@@ -234,8 +236,10 @@ func (s *Server) wshub(ctx context.Context) {
 			s.wsMu.Unlock()
 		case ch := <-s.wsUnregister:
 			s.wsMu.Lock()
-			delete(s.wsSubs, ch)
-			close(ch)
+			if _, ok := s.wsSubs[ch]; ok {
+				delete(s.wsSubs, ch)
+				close(ch)
+			}
 			s.wsMu.Unlock()
 		case ev := <-s.wsBroadcast:
 			s.wsMu.Lock()
@@ -272,15 +276,10 @@ func (s *Server) handleWSEvents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ch := make(chan wsEvent, 16)
 
-	s.wsMu.Lock()
-	s.wsSubs[ch] = struct{}{}
-	s.wsMu.Unlock()
+	s.wsRegister <- ch
 
 	defer func() {
-		s.wsMu.Lock()
-		delete(s.wsSubs, ch)
-		close(ch)
-		s.wsMu.Unlock()
+		s.wsUnregister <- ch
 	}()
 
 	for {

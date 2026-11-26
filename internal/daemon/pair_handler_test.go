@@ -22,6 +22,10 @@ func (f *fakeResetter) Logout(_ context.Context) error {
 	return f.err
 }
 
+func (f *fakeResetter) Download(_ context.Context, _, _ string) client.DownloadResult {
+	return client.DownloadResult{Success: false, Message: "not supported in tests"}
+}
+
 func newTestHandlers(paired bool, qr string, err error) (*pairHandlers, *fakeResetter) {
 	cache := NewPairCache()
 	if paired {

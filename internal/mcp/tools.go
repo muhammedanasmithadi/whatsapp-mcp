@@ -39,7 +39,6 @@ func (s *Server) registerTools() {
 		s.registerTranscribeVoiceNote()
 		s.registerListGroups()
 		s.registerGetGroupInfo()
-		s.registerGetGroupInviteLink()
 		s.registerGetPollResults()
 		s.registerGetBlocklist()
 		s.registerGetPrivacySettings()

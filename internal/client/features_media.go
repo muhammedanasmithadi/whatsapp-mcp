@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -110,6 +111,16 @@ func (c *Client) SendPollVote(ctx context.Context, chatJID, pollMessageID string
 	resp, err := c.wa.SendMessage(ctx, chat, voteMsg)
 	if err != nil {
 		return SendResult{Success: false, Message: fmt.Sprintf("Error sending poll vote: %v", err)}
+	}
+
+	// WhatsApp does not relay our own vote back to the device that cast it, so
+	// the local tally would never count it. Record it here instead.
+	ownJID := chat.String()
+	if c.wa.Store.ID != nil {
+		ownJID = c.wa.Store.ID.ToNonAD().String()
+	}
+	if _, err := c.store.StorePollVote(ctx, pollMessageID, chat.String(), ownJID, options, time.Now()); err != nil {
+		c.log.Warnf("Record own poll vote on %s: %v", pollMessageID, err)
 	}
 
 	return SendResult{

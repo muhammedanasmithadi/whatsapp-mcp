@@ -21,8 +21,6 @@ func (s *Server) registerSocialReadTools() {
 	s.registerGetProfilePicture()
 	s.registerGetContactInfo()
 	s.registerGetAutoResponder()
-	s.registerSetProfilePicture()
-	s.registerSetStatusPrivacy()
 }
 
 // registerSocialActionTools wires tools that produce WhatsApp side effects
@@ -34,6 +32,8 @@ func (s *Server) registerSocialActionTools() {
 	s.registerSendStatus()
 	s.registerDeleteStatus()
 	s.registerGetStatusViewers()
+	s.registerSetProfilePicture()
+	s.registerSetStatusPrivacy()
 }
 
 // -- list_status_updates ----------------------------------------------------
@@ -408,7 +408,7 @@ type setStatusPrivacyArgs struct {
 
 func (s *Server) registerSetStatusPrivacy() {
 	tool := mcp.NewTool("set_status_privacy_setting",
-		mcp.WithDescription("Set the privacy mode for the paired account's Status (Stories) updates. mode can be 'all' (everyone), 'contacts' (my contacts), 'close_friends' (close friends only), or 'custom' (custom list). For 'custom', user_jids should contain the JIDs of allowed contacts. Returns {success, mode}."),
+		mcp.WithDescription("Set the privacy mode for the paired account's Status (Stories) updates. mode can be 'all' (every contact — WhatsApp has no wider audience for Stories than your contacts), 'contacts' (my contacts), 'close_friends' (close friends only), or 'custom' (custom list). For 'custom', user_jids should contain the JIDs of allowed contacts. Returns {success, mode}."),
 		mcp.WithString("mode", mcp.Required(), mcp.Description("privacy mode: all, contacts, close_friends, or custom")),
 		mcp.WithArray("user_jids", mcp.Description("for 'custom' mode: list of contact JIDs allowed to view statuses")),
 		mcp.WithReadOnlyHintAnnotation(false),

@@ -50,15 +50,20 @@ func AnalyzeOggOpus(data []byte) (duration uint32, waveform []byte, err error) {
 		for _, segLen := range segmentTable {
 			pageSize += int(segLen)
 		}
+		if i+pageSize > len(data) {
+			break
+		}
 
 		if !foundOpusHead && pageSeqNum <= 1 {
 			pageData := data[i : i+pageSize]
-			headPos := bytes.Index(pageData, []byte("OpusHead"))
-			if headPos >= 0 && headPos+12 < len(pageData) {
-				headPos += 8
-				if headPos+12 <= len(pageData) {
-					preSkip = binary.LittleEndian.Uint16(pageData[headPos+10 : headPos+12])
-					sampleRate = binary.LittleEndian.Uint32(pageData[headPos+12 : headPos+16])
+			if headPos := bytes.Index(pageData, []byte("OpusHead")); headPos >= 0 {
+				// OpusHead layout: 8-byte magic, version(1), channels(1),
+				// pre-skip(2, LE), input sample rate(4, LE). Offsets are
+				// relative to the magic, not the page header.
+				head := headPos + 8
+				if head+8 <= len(pageData) {
+					preSkip = binary.LittleEndian.Uint16(pageData[head+2 : head+4])
+					sampleRate = binary.LittleEndian.Uint32(pageData[head+4 : head+8])
 					foundOpusHead = true
 				}
 			}

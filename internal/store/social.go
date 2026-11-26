@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"strings"
 	"time"
 )
@@ -477,7 +476,3 @@ func (s *Store) RecordAutoRespond(ctx context.Context, jid string) error {
 		ON CONFLICT(jid) DO UPDATE SET last_reply = CURRENT_TIMESTAMP`, jid)
 	return err
 }
-
-// ErrNoPresence is returned by helpers that want to distinguish "never seen"
-// from a database failure.
-var ErrNoPresence = errors.New("no presence data")

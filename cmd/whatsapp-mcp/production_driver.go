@@ -77,14 +77,14 @@ func (p *productionDriver) StartPairing(ctx context.Context, onQR func(string), 
 		return err
 	}
 
-	success := false
+	success := make(chan struct{})
 	go func() {
+		defer close(success)
 		for item := range qrCh {
 			switch item.Event {
 			case "code":
 				onQR(item.Code)
 			case "success":
-				success = true
 				onSuccess()
 				return
 			case "timeout":
@@ -98,15 +98,14 @@ func (p *productionDriver) StartPairing(ctx context.Context, onQR func(string), 
 		return err
 	}
 
-	// Wait briefly to let the success callback fire if pairing completes.
+	// Wait for the pairing outcome: the QR channel closes on success or on
+	// timeout/expiry, so a closed channel with no success event means retry.
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(500 * time.Millisecond):
-	}
-
-	if success {
+	case <-success:
 		return nil
+	case <-time.After(500 * time.Millisecond):
 	}
 
 	// Pairing didn't complete (QR expired, timed out, or channel closed).
@@ -181,6 +180,10 @@ func (p *productionDriver) MarkMessageFailed(id, reason string) error {
 }
 
 // SendMessage sends a WhatsApp message.
+func (p *productionDriver) Download(ctx context.Context, messageID, chatJID string) client.DownloadResult {
+	return p.c.Download(ctx, messageID, chatJID, "")
+}
+
 func (p *productionDriver) SendMessage(ctx context.Context, chatJID string, content string) (*client.SendResult, error) {
 	r := p.c.Send(ctx, chatJID, content)
 	return &r, nil

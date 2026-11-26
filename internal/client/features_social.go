@@ -571,7 +571,11 @@ func (c *Client) SetProfilePicture(ctx context.Context, mediaPath string) error 
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
-	data, err := os.ReadFile(mediaPath)
+	safePath, err := c.ValidateMediaPath(mediaPath)
+	if err != nil {
+		return fmt.Errorf("media_path rejected: %w", err)
+	}
+	data, err := os.ReadFile(safePath)
 	if err != nil {
 		return fmt.Errorf("read media file: %w", err)
 	}
@@ -608,9 +612,7 @@ func (c *Client) SetStatusPrivacy(ctx context.Context, mode string, userJIDs []s
 	}
 	var distMode waSyncAction.StatusPrivacyAction_StatusDistributionMode
 	switch mode {
-	case "all":
-		distMode = waSyncAction.StatusPrivacyAction_ALLOW_LIST
-	case "contacts":
+	case "all", "contacts":
 		distMode = waSyncAction.StatusPrivacyAction_CONTACTS
 	case "close_friends":
 		distMode = waSyncAction.StatusPrivacyAction_CLOSE_FRIENDS

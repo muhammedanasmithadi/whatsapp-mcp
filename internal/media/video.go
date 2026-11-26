@@ -23,14 +23,16 @@ func AnalyzeVideo(ctx context.Context, path string) (VideoInfo, []byte, error) {
 	info := VideoInfo{}
 
 	// Probe metadata.
+	safePath := sanitizeFFmpegInputPath(path)
 	cmd := exec.CommandContext(ctx, "ffprobe",
 		"-v", "error",
 		"-select_streams", "v:0",
 		"-show_entries", "stream=width,height",
 		"-show_entries", "format=duration",
 		"-of", "json",
-		path,
+		safePath,
 	)
+	cmd.Env = minimalEnv()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
@@ -75,13 +77,14 @@ func AnalyzeVideo(ctx context.Context, path string) (VideoInfo, []byte, error) {
 	thumbCmd := exec.CommandContext(ctx, "ffmpeg",
 		"-y",
 		"-ss", "1",
-		"-i", path,
+		"-i", safePath,
 		"-frames:v", "1",
 		"-q:v", "5",
 		"-f", "image2pipe",
 		"-vcodec", "mjpeg",
 		"-",
 	)
+	thumbCmd.Env = minimalEnv()
 	var thumbBuf bytes.Buffer
 	thumbCmd.Stdout = &thumbBuf
 	// discard stderr

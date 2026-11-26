@@ -109,6 +109,5 @@ func (c *Client) PinMessage(ctx context.Context, chatJID, messageID string, pinn
 	if cached == nil {
 		return fmt.Errorf("message %s is not cached in %s; sync the chat first", messageID, jid)
 	}
-	msgJID := types.NewJID(messageID, jid.Server)
-	return c.wa.SendAppState(ctx, appstate.BuildPin(msgJID.ToNonAD(), pinned))
+	return c.wa.SendAppState(ctx, appstate.BuildPin(jid, pinned))
 }

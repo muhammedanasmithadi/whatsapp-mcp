@@ -44,6 +44,7 @@ type pairPageData struct {
 // satisfies it via *client.Client; tests substitute a fake.
 type resetter interface {
 	Logout(ctx context.Context) error
+	Download(ctx context.Context, messageID, chatJID string) client.DownloadResult
 }
 
 // pairCoder is the dependency `handlePairCode` needs. Production wiring
@@ -211,12 +212,11 @@ func (h *pairHandlers) handleMediaDownload(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "invalid path; expected /media/download/{message_id}/{chat_jid}", http.StatusBadRequest)
 		return
 	}
-	client, ok := h.reset.(*client.Client)
-	if !ok {
+	if h.reset == nil {
 		http.Error(w, "media download not available", http.StatusInternalServerError)
 		return
 	}
-	result := client.Download(r.Context(), req.messageID, req.chatJID, "")
+	result := h.reset.Download(r.Context(), req.messageID, req.chatJID)
 	if !result.Success {
 		http.Error(w, result.Message, http.StatusBadRequest)
 		return
@@ -347,8 +347,9 @@ func (h *pairHandlers) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		mac := hmac.New(sha256.New, h.webhookSecret)
 		mac.Write(body)
 		expectedMAC := mac.Sum(nil)
-		sigHex := strings.TrimPrefix(sig, "sha256=")
-		if !hmac.Equal([]byte(sigHex), expectedMAC) {
+		sigHex := strings.TrimSpace(strings.TrimPrefix(sig, "sha256="))
+		gotMAC, err := hex.DecodeString(sigHex)
+		if err != nil || !hmac.Equal(gotMAC, expectedMAC) {
 			http.Error(w, "invalid X-Hub-Signature-256", http.StatusUnauthorized)
 			return
 		}

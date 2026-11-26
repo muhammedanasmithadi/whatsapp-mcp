@@ -334,12 +334,12 @@ func (c *Client) ForwardMessage(ctx context.Context, targetChatJID, sourceChatJI
 		return err
 	}
 
-	_, err = c.wa.SendMessage(ctx, target, msg)
+	resp, err := c.wa.SendMessage(ctx, target, msg)
 	if err != nil {
 		return fmt.Errorf("send forwarded message: %w", err)
 	}
 
-	c.persistSent(ctx, target, "", cached.Content, "", msg)
+	c.persistSent(ctx, target, resp.ID, cached.Content, "", msg)
 	return nil
 }
 

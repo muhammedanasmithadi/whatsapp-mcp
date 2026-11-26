@@ -23,36 +23,3 @@ func (s *Store) ContactName(jid string) string {
 	}
 	return name.String
 }
-
-// searchContactNames returns address-book contacts whose name or JID matches
-// the LIKE pattern, as a jid -> display-name map. Empty when the whatsmeow
-// store is unavailable.
-func (s *Store) searchContactNames(pattern string) map[string]string {
-	out := map[string]string{}
-	if s.whatsmeowDB == nil {
-		return out
-	}
-	rows, err := s.whatsmeowDB.Query(`
-		SELECT their_jid, `+contactNameExpr+` AS name
-		FROM whatsmeow_contacts
-		WHERE their_jid LIKE '%@s.whatsapp.net'
-		  AND (LOWER(full_name) LIKE LOWER(?) OR LOWER(push_name) LIKE LOWER(?)
-		    OR LOWER(first_name) LIKE LOWER(?) OR LOWER(business_name) LIKE LOWER(?)
-		    OR their_jid LIKE ?)
-		LIMIT 50`, pattern, pattern, pattern, pattern, pattern)
-	if err != nil {
-		return out
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var jid string
-		var name sql.NullString
-		if err := rows.Scan(&jid, &name); err != nil {
-			continue
-		}
-		if name.Valid && name.String != "" {
-			out[jid] = name.String
-		}
-	}
-	return out
-}

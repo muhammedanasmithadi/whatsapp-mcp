@@ -105,8 +105,8 @@ func (s *Store) ListMessages(ctx context.Context, params ListMessagesParams) ([]
 		args = append(args, params.ChatJID)
 	}
 	if params.Query != "" {
-		whereClauses = append(whereClauses, "LOWER(messages.content) LIKE LOWER(?)")
-		args = append(args, "%"+params.Query+"%")
+		whereClauses = append(whereClauses, "LOWER(messages.content) LIKE LOWER(?) ESCAPE '\\'")
+		args = append(args, "%"+escapeLike(params.Query)+"%")
 	}
 
 	var b strings.Builder
@@ -189,8 +189,8 @@ func (s *Store) ListChats(ctx context.Context, query string, limit, page int, in
 	var args []any
 	clauses := []string{}
 	if query != "" {
-		clauses = append(clauses, "(LOWER(chats.name) LIKE LOWER(?) OR chats.jid LIKE ?)")
-		args = append(args, "%"+query+"%", "%"+query+"%")
+		clauses = append(clauses, "(LOWER(chats.name) LIKE LOWER(?) ESCAPE '\\' OR chats.jid LIKE ? ESCAPE '\\')")
+		args = append(args, "%"+escapeLike(query)+"%", "%"+escapeLike(query)+"%")
 	}
 	if !includeArchived {
 		clauses = append(clauses, "chats.archived = 0")
@@ -593,7 +593,7 @@ func (s *Store) GetSenderName(ctx context.Context, senderJID string) string {
 
 	var name2 sql.NullString
 	err := s.db.QueryRowContext(ctx,
-		"SELECT name FROM chats WHERE jid LIKE ? LIMIT 1", "%"+phonePart+"%").Scan(&name2)
+		"SELECT name FROM chats WHERE jid LIKE ? ESCAPE '\\' LIMIT 1", "%"+escapeLike(phonePart)+"%").Scan(&name2)
 	if err == nil && name2.Valid && name2.String != "" {
 		return name2.String
 	}
@@ -724,7 +724,7 @@ func (s *Store) ListMessagesCursor(ctx context.Context, params ListMessagesParam
 	}
 	if params.Query != "" {
 		whereClauses = append(whereClauses, "LOWER(messages.content) LIKE LOWER(?)")
-		args = append(args, "%"+params.Query+"%")
+		args = append(args, "%"+escapeLike(params.Query)+"%")
 	}
 	if params.Cursor != "" {
 		cursorTs, cursorID, err := decodeCursor(params.Cursor)
@@ -975,4 +975,11 @@ func scanChatRow(row interface {
 	}
 	c.IsGroup = strings.HasSuffix(c.JID, "@g.us")
 	return c, nil
+}
+
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "%", `\%`)
+	s = strings.ReplaceAll(s, "_", `\_`)
+	return s
 }
