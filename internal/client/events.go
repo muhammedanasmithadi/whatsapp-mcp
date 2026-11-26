@@ -58,6 +58,10 @@ func (c *Client) StartEventHandler() {
 			c.handleLabelEdit(v)
 		case *events.LabelAssociationChat:
 			c.handleLabelAssociationChat(v)
+		case *events.Contact:
+			c.handleContact(v)
+		case *events.PushName:
+			c.handlePushName(v)
 		default:
 			c.log.Debugf("Unhandled event type: %T", v)
 		}
@@ -162,6 +166,26 @@ func (c *Client) handleMessage(msg *events.Message) {
 		msg.Info.Timestamp,
 		msg.Message,
 	)
+
+	// Record LID<->PN evidence from message alt fields.
+	if msg.Info.SenderAlt.String() != "" && msg.Info.SenderAlt.String() != msg.Info.Sender.String() {
+		senderLID := msg.Info.Sender.String()
+		senderPN := msg.Info.SenderAlt.String()
+		if strings.HasSuffix(senderLID, "@lid") && strings.HasSuffix(senderPN, "@s.whatsapp.net") {
+			lid := strings.TrimSuffix(senderLID, "@lid")
+			pn := strings.TrimSuffix(senderPN, "@s.whatsapp.net")
+			if err := c.store.RecordEvidence(lid+"@lid", pn+"@s.whatsapp.net", "message_alt", "", true); err != nil {
+				c.log.Warnf("Failed to record message evidence: %v", err)
+			}
+		}
+		if strings.HasSuffix(senderPN, "@lid") && strings.HasSuffix(senderLID, "@s.whatsapp.net") {
+			lid := strings.TrimSuffix(senderPN, "@lid")
+			pn := strings.TrimSuffix(senderLID, "@s.whatsapp.net")
+			if err := c.store.RecordEvidence(lid+"@lid", pn+"@s.whatsapp.net", "message_alt", "", true); err != nil {
+				c.log.Warnf("Failed to record message evidence: %v", err)
+			}
+		}
+	}
 
 	name := c.GetChatName(msg.Info.Chat, nm.chatJID, nil, nm.msg.Sender)
 
@@ -869,6 +893,48 @@ func (c *Client) handleLabelAssociationChat(evt *events.LabelAssociationChat) {
 		actionStr = "labeled"
 	}
 	c.log.Infof("[label] %s: %s with label %s", actionStr, c.redactor.JID(chatJID), labelID)
+}
+
+// handleContact processes a contact app-state mutation from another linked
+// device. On REMOVE (Action == nil) the contact is marked stale in the bridge
+// profile table. On SET the name and username are upserted.
+func (c *Client) handleContact(evt *events.Contact) {
+	jid := c.store.ResolveLIDToJID(evt.JID.String())
+	if evt.Action == nil {
+		// Contact removed on another device.
+		if err := c.store.MarkContactStale(jid); err != nil {
+			c.log.Warnf("Failed to mark contact stale %s: %v", jid, err)
+		} else {
+			c.log.Infof("[contact] removed on another device: %s", c.redactor.JID(jid))
+		}
+		return
+	}
+	username := ""
+	if evt.Action != nil {
+		username = evt.Action.GetUsername()
+	}
+	// Record LID<->PN evidence from contact mutations that carry both.
+	if evt.Action != nil {
+		lidJID := evt.Action.GetLidJID()
+		pnJID := evt.Action.GetPnJID()
+		if lidJID != "" && pnJID != "" {
+			lid := strings.TrimSuffix(lidJID, "@lid")
+			pn := strings.TrimSuffix(pnJID, "@s.whatsapp.net")
+			if err := c.store.RecordEvidence(lid+"@lid", pn+"@s.whatsapp.net", "app_state", "", true); err != nil {
+				c.log.Warnf("Failed to record contact evidence: %v", err)
+			}
+		}
+	}
+	nameSource := "synced"
+	if err := c.store.UpsertContactProfile(jid, username, nameSource, "", false); err != nil {
+		c.log.Warnf("Failed to upsert contact profile %s: %v", jid, err)
+	}
+	c.log.Debugf("[contact] updated on another device: %s username=%s", c.redactor.JID(jid), username)
+}
+
+// handlePushName processes a push-name change event.
+func (c *Client) handlePushName(evt *events.PushName) {
+	c.log.Debugf("[pushname] %s -> %s", c.redactor.JID(evt.JID.String()), evt.NewPushName)
 }
 
 // handlePollVote decrypts an incoming PollUpdateMessage, reverses its

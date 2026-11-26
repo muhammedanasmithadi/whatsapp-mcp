@@ -4,6 +4,8 @@ package mcp
 
 import (
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -52,6 +54,10 @@ type Server struct {
 	presence   store.PresenceStore
 	audit      store.AuditStore
 	messages   store.MessageReader
+
+	// syncMu guards lastSync for the sync_contacts cooldown.
+	syncMu   sync.Mutex
+	lastSync time.Time
 }
 
 // Option configures a Server at construction time.

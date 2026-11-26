@@ -13,6 +13,10 @@ type ContactStore interface {
 	GetContact(jid string) (*Contact, error)
 	StoreContact(jid, name, phoneNumber string) error
 	DeleteContact(jid string) error
+	UpsertContactProfile(jid, username, nameSource, addressingMode string, stale bool) error
+	MarkContactStale(jid string) error
+	GetContactProfile(jid string) (*ContactProfile, error)
+	ListStaleContacts() ([]string, error)
 }
 
 // SchedulingStore is the scheduled-message persistence surface. It is kept

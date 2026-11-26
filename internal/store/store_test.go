@@ -288,9 +288,95 @@ func TestMigrateSchema_AddsDirectPath(t *testing.T) {
 
 	// Second Open must be a no-op — verifies migrateSchema is idempotent.
 	s.Close()
+
+	// Reopen and verify new tables exist.
 	s2, err := Open(dir)
 	if err != nil {
-		t.Fatalf("second Open: %v", err)
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s2.Close()
+	for _, tbl := range []string{"contact_profiles", "identity_evidence"} {
+		var name string
+		if err := s2.db.QueryRow(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name=?", tbl,
+		).Scan(&name); err != nil {
+			t.Fatalf("table %s missing after migration: %v", tbl, err)
+		}
+	}
+}
+
+// TestMigrateSchema_AddsContactProfiles verifies the new Phase 3 tables
+// are created on an existing (legacy) database.
+func TestMigrateSchema_AddsContactProfiles(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "messages.db")
+
+	legacy, err := sql.Open("sqlite3", "file:"+dbPath+"?_foreign_keys=on")
+	if err != nil {
+		t.Fatalf("open legacy DB: %v", err)
+	}
+	_, err = legacy.Exec(`
+		CREATE TABLE chats (jid TEXT PRIMARY KEY, name TEXT, last_message_time TIMESTAMP);
+		CREATE TABLE messages (
+			id TEXT, chat_jid TEXT, sender TEXT, content TEXT,
+			timestamp TIMESTAMP, is_from_me BOOLEAN,
+			media_type TEXT, filename TEXT, url TEXT,
+			media_key BLOB, file_sha256 BLOB, file_enc_sha256 BLOB,
+			file_length INTEGER,
+			PRIMARY KEY (id, chat_jid),
+			FOREIGN KEY (chat_jid) REFERENCES chats(jid)
+		);
+		CREATE TABLE contacts (
+			jid TEXT PRIMARY KEY, name TEXT, phone_number TEXT,
+			created_at TIMESTAMP, updated_at TIMESTAMP
+		);
+	`)
+	if err != nil {
+		t.Fatalf("seed legacy schema: %v", err)
+	}
+	_ = legacy.Close()
+
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	for _, tbl := range []string{"contact_profiles", "identity_evidence"} {
+		var name string
+		if err := s.db.QueryRow(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name=?", tbl,
+		).Scan(&name); err != nil {
+			t.Fatalf("table %s missing after migration: %v", tbl, err)
+		}
+	}
+
+	// Verify upsert works.
+	if err := s.UpsertContactProfile("test@s.whatsapp.net", "testuser", "synced", "", false); err != nil {
+		t.Fatalf("UpsertContactProfile: %v", err)
+	}
+	prof, err := s.GetContactProfile("test@s.whatsapp.net")
+	if err != nil || prof == nil {
+		t.Fatalf("GetContactProfile: %v, %v", err, prof)
+	}
+	if prof.Username != "testuser" {
+		t.Errorf("username mismatch: got %q", prof.Username)
+	}
+
+	// Verify evidence recording.
+	if err := s.RecordEvidence("123@lid", "456@s.whatsapp.net", "test", "", true); err != nil {
+		t.Fatalf("RecordEvidence: %v", err)
+	}
+	pn := s.GetBestPNForLID("123@lid")
+	if pn != "456@s.whatsapp.net" {
+		t.Errorf("GetBestPNForLID: got %q, want 456@s.whatsapp.net", pn)
+	}
+
+	// Idempotent.
+	s.Close()
+	s2, err := Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
 	}
 	defer s2.Close()
 }

@@ -16,18 +16,23 @@ func (s *Store) ResolveLIDToJID(jid string) string {
 	if !strings.HasSuffix(jid, "@lid") {
 		return jid
 	}
-	if s.whatsmeowDB == nil {
-		return jid
-	}
 
 	// Strip any device suffix ("123:5@lid"): whatsmeow_lid_map is keyed on
 	// the bare LID user, but message senders carry the device ID.
 	lid, _, _ := strings.Cut(jidUser(jid), ":")
 
-	var phone string
-	err := s.whatsmeowDB.QueryRow("SELECT pn FROM whatsmeow_lid_map WHERE lid = ?", lid).Scan(&phone)
-	if err == nil && phone != "" {
+	// 1. Check bridge-owned evidence first (has provenance and source ranking).
+	if phone := s.GetBestPNForLID(lid); phone != "" {
 		return phone + "@s.whatsapp.net"
+	}
+
+	// 2. Fall back to whatsmeow_lid_map.
+	if s.whatsmeowDB != nil {
+		var phone string
+		err := s.whatsmeowDB.QueryRow("SELECT pn FROM whatsmeow_lid_map WHERE lid = ?", lid).Scan(&phone)
+		if err == nil && phone != "" {
+			return phone + "@s.whatsapp.net"
+		}
 	}
 	return jid
 }

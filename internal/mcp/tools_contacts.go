@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
+
+	"go.mau.fi/whatsmeow/appstate"
 
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
@@ -22,6 +25,263 @@ func (s *Server) registerContactActionTools() {
 	s.registerCreateContact()
 	s.registerUpdateContact()
 	s.registerDeleteContact()
+}
+
+// -- resolve_contacts --------------------------------------------------------
+
+type resolveContactsArgs struct {
+	Inputs []string `json:"inputs"`
+}
+
+func (s *Server) registerResolveContacts() {
+	tool := mcp.NewTool("resolve_contacts",
+		mcp.WithDescription("Resolve a batch of contact identifiers (phone numbers, JIDs, LIDs, or names) to canonical identities. Returns one entry per input with canonical_jid, jid, lid, phone, username, name, resolved, status, source, and error. Statuses: mapped (LID resolved to phone), unmapped (LID with no known phone), unanswered (server did not respond), invalid (malformed input), error (lookup failed). Unknown is never a negative — use is_on_whatsapp to verify registration. Read-only."),
+		mcp.WithArray("inputs", mcp.Required(), mcp.Items(map[string]any{"type": "string"}), mcp.Description("contact identifiers to resolve: phone digits, JIDs, LIDs, or names")),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a resolveContactsArgs) (*mcp.CallToolResult, error) {
+		if len(a.Inputs) == 0 {
+			return s.toolErr("resolve_contacts", "", "", "resolve_contacts", fmt.Errorf("inputs must not be empty")), nil
+		}
+		if len(a.Inputs) > 50 {
+			return s.toolErr("resolve_contacts", "", "", "resolve_contacts", fmt.Errorf("at most 50 inputs per call")), nil
+		}
+
+		type entry struct {
+			Input        string `json:"input"`
+			CanonicalJID string `json:"canonical_jid,omitempty"`
+			JID          string `json:"jid,omitempty"`
+			LID          string `json:"lid,omitempty"`
+			Phone        string `json:"phone,omitempty"`
+			Username     string `json:"username,omitempty"`
+			Name         string `json:"name,omitempty"`
+			NameSource   string `json:"name_source,omitempty"`
+			Resolved     bool   `json:"resolved"`
+			Status       string `json:"status"`
+			Source       string `json:"source,omitempty"`
+			Error        string `json:"error,omitempty"`
+		}
+
+		var results []entry
+		for _, raw := range a.Inputs {
+			raw = strings.TrimSpace(raw)
+			e := entry{Input: raw, Resolved: false, Status: "invalid"}
+
+			if raw == "" {
+				e.Error = "empty input"
+				results = append(results, e)
+				continue
+			}
+
+			// Determine if it's a JID, LID, phone, or name.
+			jid := raw
+			if !strings.Contains(raw, "@") {
+				// Could be phone digits or a name.
+				trimmed := strings.TrimPrefix(raw, "+")
+				allDigits := true
+				for _, r := range trimmed {
+					if r < '0' || r > '9' {
+						allDigits = false
+						break
+					}
+				}
+				if allDigits && trimmed != "" {
+					jid = raw + "@s.whatsapp.net"
+					if !strings.HasSuffix(jid, "@s.whatsapp.net") {
+						jid = strings.TrimPrefix(raw, "+") + "@s.whatsapp.net"
+					}
+				} else {
+					// Treat as a name: search contacts.
+					if s.client != nil && s.client.Store() != nil {
+						res, err := s.client.Store().SearchContacts(ctx, raw, 5, "")
+						if err == nil && len(res.Contacts) > 0 {
+							c := res.Contacts[0]
+							e.CanonicalJID = c.JID
+							e.JID = c.JID
+							e.LID = c.LID
+							e.Phone = c.PhoneNumber
+							e.Name = c.Name
+							e.NameSource = c.NameSource
+							e.Resolved = c.Resolved
+							e.Status = c.Status
+							e.Source = "search"
+							results = append(results, e)
+							continue
+						}
+					}
+					e.Error = "no matching contact found"
+					results = append(results, e)
+					continue
+				}
+			}
+
+			// Canonicalize.
+			if s.client != nil && s.client.Store() != nil {
+				canon := s.client.Store().CanonicalJID(jid)
+				// Look up name from synced contacts.
+				res, _ := s.client.Store().SearchContacts(ctx, "", 200, "")
+				var found *store.Contact
+				for i := range res.Contacts {
+					if res.Contacts[i].JID == canon || res.Contacts[i].JID == jid {
+						found = &res.Contacts[i]
+						break
+					}
+				}
+				e.CanonicalJID = canon
+				e.JID = canon
+				if found != nil {
+					e.LID = found.LID
+					e.Phone = found.PhoneNumber
+					e.Name = found.Name
+					e.NameSource = found.NameSource
+					e.Resolved = found.Resolved
+					e.Status = found.Status
+					e.Source = "synced"
+				} else {
+					// Resolve LID if applicable.
+					if strings.HasSuffix(canon, "@lid") {
+						resolved := s.client.Store().ResolveLIDToJID(canon)
+						if resolved != canon {
+							e.JID = resolved
+							e.CanonicalJID = resolved
+							e.Phone = strings.TrimSuffix(resolved, "@s.whatsapp.net")
+							e.Resolved = true
+							e.Status = "mapped"
+							e.Source = "lid_map"
+						} else {
+							e.LID = canon
+							e.Phone = ""
+							e.Resolved = false
+							e.Status = "unmapped"
+							e.Source = "unresolved"
+						}
+					} else {
+						e.Phone = strings.TrimSuffix(canon, "@s.whatsapp.net")
+						e.Resolved = true
+						e.Status = "mapped"
+						e.Source = "direct"
+					}
+				}
+			} else {
+				e.CanonicalJID = jid
+				e.JID = jid
+				e.Status = "unresolved"
+				e.Error = "client not connected"
+			}
+
+			// Look up username from contact_profiles.
+			if s.contacts != nil {
+				prof, _ := s.contacts.GetContactProfile(e.JID)
+				if prof != nil {
+					e.Username = prof.Username
+				}
+			}
+
+			results = append(results, e)
+		}
+
+		return s.toolOK("resolve_contacts", "", "", "resolve_contacts", "", results)
+	}))
+}
+
+// -- diagnose_contacts ------------------------------------------------------
+
+func (s *Server) registerDiagnoseContacts() {
+	tool := mcp.NewTool("diagnose_contacts",
+		mcp.WithDescription("Diagnostic summary of the contact/identity store: counts of saved/push/business/unmapped/stale contacts, LID mapping coverage, evidence rows by source, app-state version, and last sync time. Read-only. Use to troubleshoot contact sync issues."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, error) {
+		diag := map[string]any{}
+
+		if s.client != nil && s.client.Store() != nil {
+			st := s.client.Store()
+			res, err := st.SearchContacts(ctx, "", 200, "")
+			if err == nil {
+				counts := map[string]int{}
+				unmapped := 0
+				stale := 0
+				for _, c := range res.Contacts {
+					counts[c.NameSource]++
+					if c.Status == "unmapped" {
+						unmapped++
+					}
+					if c.Stale {
+						stale++
+					}
+				}
+				diag["total_people"] = res.Count
+				diag["name_sources"] = counts
+				diag["unmapped_lids"] = unmapped
+				diag["stale"] = stale
+			}
+		}
+
+		// Evidence counts by source.
+		if s.contacts != nil {
+			staleList, _ := s.contacts.ListStaleContacts()
+			diag["stale_contacts"] = len(staleList)
+		}
+
+		// Last sync time.
+		s.syncMu.Lock()
+		if !s.lastSync.IsZero() {
+			diag["last_sync"] = s.lastSync.UTC().Format(time.RFC3339)
+		} else {
+			diag["last_sync"] = "never"
+		}
+		s.syncMu.Unlock()
+
+		diag["db_tables"] = []string{"contact_profiles", "identity_evidence"}
+
+		return s.toolOK("diagnose_contacts", "", "", "diagnose_contacts", "", diag)
+	}))
+}
+
+// -- sync_contacts ----------------------------------------------------------
+
+func (s *Server) registerSyncContacts() {
+	tool := mcp.NewTool("sync_contacts",
+		mcp.WithDescription("Force a full resync of the WhatsApp contact address book from the server. This triggers a critical_unblock_low app-state sync which refreshes saved contact names, LID mappings, and usernames. Rate-limited to once per 10 minutes. Returns a summary of what was synced or an error if rate-limited."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, error) {
+		if s.client == nil || s.client.WA() == nil {
+			return s.toolErr("sync_contacts", "", "", "sync_contacts", fmt.Errorf("not connected")), nil
+		}
+
+		s.syncMu.Lock()
+		if time.Since(s.lastSync) < 10*time.Minute {
+			remaining := 10*time.Minute - time.Since(s.lastSync)
+			s.syncMu.Unlock()
+			return s.toolErr("sync_contacts", "", "", "sync_contacts",
+				fmt.Errorf("rate limited: try again in %s", remaining.Round(time.Second))), nil
+		}
+		s.syncMu.Unlock()
+
+		err := s.client.WA().FetchAppState(ctx, appstate.WAPatchCriticalUnblockLow, true, false)
+		if err != nil {
+			return s.toolErr("sync_contacts", "", "", "sync_contacts", err), nil
+		}
+
+		s.syncMu.Lock()
+		s.lastSync = time.Now()
+		s.syncMu.Unlock()
+
+		return s.toolOK("sync_contacts", "", "", "sync_contacts", "", map[string]any{
+			"synced":    true,
+			"synced_at": time.Now().UTC().Format(time.RFC3339),
+		})
+	}))
 }
 
 // canonicalContactJID normalizes a phone number or JID and rejects non-user
@@ -44,49 +304,50 @@ func canonicalContactJID(raw string) (string, error) {
 // -- list_contacts ----------------------------------------------------------
 
 type listContactsArgs struct {
-	Query string `json:"query,omitempty"`
+	Query  string `json:"query,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
 }
 
 func (s *Server) registerListContacts() {
 	tool := mcp.NewTool("list_contacts",
 		mcp.WithDescription("List contacts saved in the bridge's local address book, optionally filtered by a case-insensitive substring of name or phone. These rows are local only: linked devices cannot write the phone's address book, so saving a contact here does not make it appear in WhatsApp on the phone or other devices. They do improve name resolution inside this bridge. Use search_contacts to search every cached WhatsApp contact instead. Read-only."),
-		mcp.WithString("query", mcp.Description("optional case-insensitive substring to match against name or phone")),
+		mcp.WithString("query", mcp.Description("optional case-insensitive substring to match against name, phone, JID, or LID")),
+		mcp.WithNumber("limit", mcp.Description("page size, 1-200 (default 50)")),
+		mcp.WithString("cursor", mcp.Description("opaque cursor from a prior response; resume pagination")),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a listContactsArgs) (*mcp.CallToolResult, error) {
+		limit := a.Limit
+		if limit <= 0 {
+			limit = 50
+		}
+		if s.client != nil && s.client.Store() != nil {
+			res, err := s.client.Store().SearchContacts(ctx, strings.TrimSpace(a.Query), limit, a.Cursor)
+			if err != nil {
+				return s.toolErr("list_contacts", "", "", "list_contacts", err), nil
+			}
+			contacts := res.Contacts
+			if contacts == nil {
+				contacts = []store.Contact{}
+			}
+			payload := map[string]any{
+				"contacts": contacts,
+				"count":    res.Count,
+				"has_more": res.HasMore,
+			}
+			if res.NextCursor != "" {
+				payload["next_cursor"] = res.NextCursor
+			}
+			return s.toolOK("list_contacts", "", "", "list_contacts", "", payload)
+		}
+		// Fallback: bridge-local address book only when no client is available.
 		contacts, err := s.contacts.ListContacts()
 		if err != nil {
 			return s.toolErr("list_contacts", "", "", "list_contacts", err), nil
-		}
-		// Merge in cached WhatsApp contacts (from whatsmeow) so users see their
-		// address book even when nothing has been saved in the bridge-local
-		// table. Local rows take precedence on name.
-		if s.client != nil && s.client.Store() != nil {
-			localByJID := make(map[string]bool, len(contacts))
-			for _, c := range contacts {
-				localByJID[c.JID] = true
-			}
-			waContacts, werr := s.client.Store().SearchContacts(ctx, strings.TrimSpace(a.Query))
-			if werr == nil {
-				for _, wc := range waContacts {
-					if localByJID[wc.JID] {
-						continue
-					}
-					contacts = append(contacts, wc)
-				}
-			}
-		}
-		if q := strings.ToLower(strings.TrimSpace(a.Query)); q != "" {
-			filtered := make([]store.Contact, 0, len(contacts))
-			for _, c := range contacts {
-				if strings.Contains(strings.ToLower(c.Name), q) || strings.Contains(strings.ToLower(c.PhoneNumber), q) || strings.Contains(strings.ToLower(c.JID), q) {
-					filtered = append(filtered, c)
-				}
-			}
-			contacts = filtered
 		}
 		if contacts == nil {
 			contacts = []store.Contact{}

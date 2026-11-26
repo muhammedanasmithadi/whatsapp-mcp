@@ -71,11 +71,31 @@ type Chat struct {
 	IsGroup         bool      `json:"is_group"`
 }
 
-// Contact is a directory entry derived from chat history.
+// Contact is a directory entry derived from chat history, the synced
+// whatsmeow address book, or the bridge-local address book. Fields beyond
+// the original three carry identity and provenance metadata added for the
+// contact/identity overhaul; they are omitempty so existing JSON consumers
+// keep working.
 type Contact struct {
 	PhoneNumber string `json:"phone_number"`
 	Name        string `json:"name,omitempty"`
 	JID         string `json:"jid"`
+	LID         string `json:"lid,omitempty"`
+	NameSource  string `json:"name_source,omitempty"`
+	Saved       bool   `json:"saved,omitempty"`
+	Resolved    bool   `json:"resolved,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Stale       bool   `json:"stale,omitempty"`
+}
+
+// ContactProfile holds bridge-owned identity metadata for a synced contact.
+type ContactProfile struct {
+	JID            string
+	Username       string
+	NameSource     string
+	AddressingMode string
+	Stale          bool
+	UpdatedAt      string
 }
 
 // MessageContext wraps a target message with surrounding context.
@@ -657,6 +677,170 @@ func (s *Store) DeleteContact(jid string) error {
 	return err
 }
 
+// UpsertContactProfile writes bridge-owned identity metadata for a JID.
+func (s *Store) UpsertContactProfile(jid, username, nameSource, addressingMode string, stale bool) error {
+	staleInt := 0
+	if stale {
+		staleInt = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO contact_profiles (jid, username, name_source, addressing_mode, stale, updated_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT (jid) DO UPDATE SET
+			username = excluded.username,
+			name_source = excluded.name_source,
+			addressing_mode = excluded.addressing_mode,
+			stale = excluded.stale,
+			updated_at = CURRENT_TIMESTAMP`,
+		jid, username, nameSource, addressingMode, staleInt)
+	return err
+}
+
+// MarkContactStale marks a contact profile as stale (name removed on phone).
+func (s *Store) MarkContactStale(jid string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO contact_profiles (jid, stale, updated_at)
+		VALUES (?, 1, CURRENT_TIMESTAMP)
+		ON CONFLICT (jid) DO UPDATE SET stale = 1, updated_at = CURRENT_TIMESTAMP`,
+		jid)
+	return err
+}
+
+// GetContactProfile returns the bridge-owned profile for a JID, or nil.
+func (s *Store) GetContactProfile(jid string) (*ContactProfile, error) {
+	row := s.db.QueryRow(`
+		SELECT jid, COALESCE(username,''), COALESCE(name_source,''),
+		       COALESCE(addressing_mode,''), stale, COALESCE(updated_at,'')
+		FROM contact_profiles WHERE jid = ?`, jid)
+	var p ContactProfile
+	var staleInt int
+	if err := row.Scan(&p.JID, &p.Username, &p.NameSource, &p.AddressingMode, &staleInt, &p.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	p.Stale = staleInt != 0
+	return &p, nil
+}
+
+// ListStaleContacts returns JIDs of contacts marked stale.
+func (s *Store) ListStaleContacts() ([]string, error) {
+	rows, err := s.db.Query("SELECT jid FROM contact_profiles WHERE stale = 1")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var jid string
+		if err := rows.Scan(&jid); err != nil {
+			continue
+		}
+		out = append(out, jid)
+	}
+	return out, rows.Err()
+}
+
+// evidenceSourceRank orders evidence sources from most to least trustworthy.
+func evidenceSourceRank(source string) int {
+	switch source {
+	case "pairing", "app_state", "usync":
+		return 4
+	case "message_alt", "history_sync", "group_info":
+		return 3
+	case "blocklist":
+		return 2
+	}
+	return 1
+}
+
+// RecordEvidence stores a LID<->PN mapping observation with provenance.
+func (s *Store) RecordEvidence(lid, pn, source, scope string, verified bool) error {
+	if lid == "" || pn == "" {
+		return nil
+	}
+	v := 0
+	if verified {
+		v = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO identity_evidence (lid, pn, source, scope, verified)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (lid, pn, source) DO UPDATE SET
+			verified = MAX(verified, excluded.verified),
+			learned_at = CURRENT_TIMESTAMP`,
+		lid, pn, source, scope, v)
+	return err
+}
+
+// GetBestPNForLID returns the most trustworthy phone JID for a LID, based on
+// evidence provenance. Returns "" if no evidence exists.
+func (s *Store) GetBestPNForLID(lid string) string {
+	rows, err := s.db.Query(`
+		SELECT pn, source, verified, learned_at
+		FROM identity_evidence
+		WHERE lid = ?
+		ORDER BY verified DESC, learned_at DESC`, lid)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		pn       string
+		source   string
+		verified bool
+	}
+	var best *candidate
+	for rows.Next() {
+		var pn, source, learnedAt string
+		var verified int
+		if err := rows.Scan(&pn, &source, &verified, &learnedAt); err != nil {
+			continue
+		}
+		c := &candidate{pn: pn, source: source, verified: verified != 0}
+		if best == nil || evidenceSourceRank(c.source) > evidenceSourceRank(best.source) ||
+			(evidenceSourceRank(c.source) == evidenceSourceRank(best.source) && c.verified && !best.verified) {
+			best = c
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	return best.pn
+}
+
+// ListEvidence returns all evidence rows for a LID.
+func (s *Store) ListEvidence(lid string) ([]map[string]any, error) {
+	rows, err := s.db.Query(`
+		SELECT lid, pn, source, scope, learned_at, verified
+		FROM identity_evidence
+		WHERE lid = ?
+		ORDER BY learned_at DESC`, lid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []map[string]any
+	for rows.Next() {
+		var lid, pn, source, scope, learnedAt string
+		var verified int
+		if err := rows.Scan(&lid, &pn, &source, &scope, &learnedAt, &verified); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"lid":        lid,
+			"pn":         pn,
+			"source":     source,
+			"scope":      scope,
+			"learned_at": learnedAt,
+			"verified":   verified != 0,
+		})
+	}
+	return out, rows.Err()
+}
+
 // StoreScheduledMessage inserts a scheduled message.
 func (s *Store) StoreScheduledMessage(id, chatJID, content string, scheduledAt time.Time) error {
 	_, err := s.db.Exec(
@@ -962,6 +1146,25 @@ CREATE TABLE IF NOT EXISTS contacts (
 	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS contact_profiles (
+	jid             TEXT PRIMARY KEY,
+	username        TEXT,
+	name_source     TEXT,
+	addressing_mode TEXT,
+	stale           INTEGER NOT NULL DEFAULT 0,
+	updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS identity_evidence (
+	lid         TEXT NOT NULL,
+	pn          TEXT NOT NULL,
+	source      TEXT NOT NULL,
+	scope       TEXT NOT NULL DEFAULT '',
+	learned_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	verified    INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (lid, pn, source)
+);
+
 CREATE TABLE IF NOT EXISTS scheduled_messages (
 	id TEXT PRIMARY KEY,
 	chat_jid TEXT NOT NULL,
@@ -1179,6 +1382,33 @@ func migrateSchema(db *sql.DB) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("create table auto_responder_cooldown: %w", err)
+	}
+	// contact_profiles: bridge-owned identity metadata for synced contacts.
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS contact_profiles (
+			jid             TEXT PRIMARY KEY,
+			username        TEXT,
+			name_source     TEXT,
+			addressing_mode TEXT,
+			stale           INTEGER NOT NULL DEFAULT 0,
+			updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		return fmt.Errorf("create table contact_profiles: %w", err)
+	}
+	// identity_evidence: provenance for LID<->PN mappings.
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS identity_evidence (
+			lid         TEXT NOT NULL,
+			pn          TEXT NOT NULL,
+			source      TEXT NOT NULL,
+			scope       TEXT NOT NULL DEFAULT '',
+			learned_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			verified    INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (lid, pn, source)
+		)
+	`); err != nil {
+		return fmt.Errorf("create table identity_evidence: %w", err)
 	}
 	return nil
 }

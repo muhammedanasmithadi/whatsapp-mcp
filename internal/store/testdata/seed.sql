@@ -103,6 +103,27 @@ INSERT INTO whatsmeow_lid_map (lid, pn) VALUES
 INSERT INTO whatsmeow_contacts (our_jid, their_jid, first_name, full_name, push_name, business_name) VALUES
     ('me@s.whatsapp.net', '919900000000@s.whatsapp.net', 'Jane', 'Jane Smith Delhi', 'Jane S', '');
 
+-- Identity evidence table (Phase 3).
+CREATE TABLE IF NOT EXISTS identity_evidence (
+    lid         TEXT NOT NULL,
+    pn          TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    scope       TEXT NOT NULL DEFAULT '',
+    learned_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    verified    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (lid, pn, source)
+);
+
+-- Contact profiles table (Phase 2).
+CREATE TABLE IF NOT EXISTS contact_profiles (
+    jid             TEXT PRIMARY KEY,
+    username        TEXT,
+    name_source     TEXT,
+    addressing_mode TEXT,
+    stale           INTEGER NOT NULL DEFAULT 0,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS scheduled_messages (
     id TEXT PRIMARY KEY,
     chat_jid TEXT NOT NULL,

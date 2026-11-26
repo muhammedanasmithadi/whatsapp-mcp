@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 )
@@ -140,6 +139,13 @@ func (s *Store) ListMessages(ctx context.Context, params ListMessagesParams) ([]
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	rows.Close()
+
+	// Resolve sender phones now that rows are closed (avoids connection
+	// deadlock on single-connection stores).
+	for i := range result {
+		result[i].SenderPhone = s.resolveSenderPhone(result[i].Sender)
+	}
 
 	if !params.IncludeContext || len(result) == 0 {
 		return result, nil
@@ -214,11 +220,15 @@ func (s *Store) ListChats(ctx context.Context, query string, limit, page int, in
 		if err != nil {
 			return nil, err
 		}
-		c.PhoneNumber = s.ResolveJIDToPhone(c.JID)
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	rows.Close()
+
+	for i := range result {
+		result[i].PhoneNumber = s.ResolveJIDToPhone(result[i].JID)
 	}
 	return result, nil
 }
@@ -241,68 +251,268 @@ func (s *Store) GetChat(ctx context.Context, jid string, includeLastMessage bool
 	return &c, nil
 }
 
-// SearchContacts does a LIKE search over chats (excluding groups) and the
-// synced whatsmeow_contacts address book, and returns up to 50 contacts
-// ordered by name, jid. Address-book names win over chat names, which for
-// 1:1 chats are often just the bare phone number.
-func (s *Store) SearchContacts(ctx context.Context, query string) ([]Contact, error) {
-	pattern := "%" + query + "%"
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT DISTINCT jid, name
-		FROM chats
-		WHERE (LOWER(name) LIKE LOWER(?) OR LOWER(jid) LIKE LOWER(?))
-		  AND jid NOT LIKE '%@g.us'
-		  AND jid NOT LIKE '%@lid'
-		ORDER BY name, jid
-		LIMIT 50`, pattern, pattern)
+func base64Encode(s string) string {
+	return base64.URLEncoding.EncodeToString([]byte(s))
+}
+
+func base64Decode(s string) (string, error) {
+	b, err := base64.URLEncoding.DecodeString(s)
 	if err != nil {
-		return nil, fmt.Errorf("search contacts: %w", err)
+		return "", err
 	}
-	defer rows.Close()
+	return string(b), nil
+}
 
-	var result []Contact
-	for rows.Next() {
-		var jid string
-		var name sql.NullString
-		if err := rows.Scan(&jid, &name); err != nil {
-			return nil, err
+// SearchContactsResult holds a page of contact search results together with
+// pagination metadata.
+type SearchContactsResult struct {
+	Contacts   []Contact `json:"contacts"`
+	NextCursor string    `json:"next_cursor,omitempty"`
+	HasMore    bool      `json:"has_more"`
+	Count      int       `json:"count"`
+}
+
+// SearchContacts searches the synced whatsmeow address book and the
+// bridge-local address book, merges them by person (LID resolution), applies
+// name precedence, filters by an optional query, and returns a page.
+//
+// Channels, groups, status broadcasts and unresolved LID rows are excluded
+// from person results only when they cannot be resolved. Unresolved LIDs are
+// kept as separate rows with an empty phone and status "unmapped".
+func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cursor string) (SearchContactsResult, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	q := strings.ToLower(strings.TrimSpace(query))
+
+	// 1. Collect synced contacts from whatsmeow_contacts.
+	type syncedRow struct {
+		jid           string
+		firstName     string
+		fullName      string
+		pushName      string
+		businessName  string
+		redactedPhone string
+	}
+	var synced []syncedRow
+	if s.whatsmeowDB != nil {
+		rows, err := s.whatsmeowDB.QueryContext(ctx, `
+			SELECT their_jid, first_name, full_name, push_name, business_name, redacted_phone
+			FROM whatsmeow_contacts`)
+		if err == nil {
+			for rows.Next() {
+				var r syncedRow
+				var fn, ln, pn, bn, rp sql.NullString
+				if err := rows.Scan(&r.jid, &fn, &ln, &pn, &bn, &rp); err != nil {
+					continue
+				}
+				r.firstName = fn.String
+				r.fullName = ln.String
+				r.pushName = pn.String
+				r.businessName = bn.String
+				r.redactedPhone = rp.String
+				if !isPersonJID(r.jid) {
+					continue
+				}
+				synced = append(synced, r)
+			}
+			rows.Close()
 		}
-		result = append(result, Contact{
-			PhoneNumber: jidUser(jid),
-			Name:        name.String,
+	}
+
+	// 2. Build Contact rows from synced data.
+	var syncedContacts []Contact
+	for _, r := range synced {
+		name, src := bestName(r.firstName, r.fullName, r.pushName, r.businessName, r.redactedPhone)
+		if name == "" {
+			name = jidUser(r.jid)
+			src = "phone"
+		}
+		jid := r.jid
+		phone := jidUser(jid)
+		if strings.HasSuffix(jid, "@lid") {
+			resolved := s.ResolveLIDToJID(jid)
+			if resolved != jid {
+				phone = strings.TrimSuffix(resolved, "@s.whatsapp.net")
+			} else {
+				phone = ""
+			}
+		}
+		lid := ""
+		if strings.HasSuffix(jid, "@lid") {
+			lid = jid
+		}
+		status := "mapped"
+		if strings.HasSuffix(jid, "@lid") && s.ResolveLIDToJID(jid) == jid {
+			status = "unmapped"
+		}
+		saved := (strings.TrimSpace(r.fullName) != "" || strings.TrimSpace(r.firstName) != "")
+		c := Contact{
+			PhoneNumber: phone,
+			Name:        name,
 			JID:         jid,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+			LID:         lid,
+			NameSource:  src,
+			Saved:       saved,
+			Resolved:    phone != "" || !strings.HasSuffix(jid, "@lid"),
+			Status:      status,
+		}
+		syncedContacts = append(syncedContacts, c)
 	}
 
-	// Merge in address-book matches (issue #21: saved names live in
-	// whatsmeow_contacts, not chats).
-	names := s.searchContactNames(pattern)
-	seen := make(map[string]bool, len(result))
-	for i, c := range result {
-		seen[c.JID] = true
-		if n := names[c.JID]; n != "" {
-			result[i].Name = n
-		}
+	// 2b. Collect chat-derived contacts as a secondary source. Chat names are
+	// often push names or bare phone numbers, so they get lower precedence.
+	type chatRow struct {
+		jid  string
+		name string
 	}
-	for jid, name := range names {
-		if seen[jid] {
+	var chatData []chatRow
+	chatRows, _ := s.db.QueryContext(ctx, `
+		SELECT jid, name FROM chats
+		WHERE jid NOT LIKE '%@g.us'
+		  AND jid NOT LIKE '%@newsletter'`)
+	if chatRows != nil {
+		for chatRows.Next() {
+			var jid string
+			var name sql.NullString
+			if err := chatRows.Scan(&jid, &name); err != nil {
+				continue
+			}
+			chatData = append(chatData, chatRow{jid: jid, name: name.String})
+		}
+		chatRows.Close()
+	}
+
+	for _, cr := range chatData {
+		jid := cr.jid
+		if !isPersonJID(jid) {
 			continue
 		}
-		result = append(result, Contact{PhoneNumber: jidUser(jid), Name: name, JID: jid})
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Name != result[j].Name {
-			return result[i].Name < result[j].Name
+		n := strings.TrimSpace(cr.name)
+		src := "push"
+		if n == "" || isAllDigits(n) {
+			n = jidUser(jid)
+			src = "phone"
 		}
-		return result[i].JID < result[j].JID
-	})
-	if len(result) > 50 {
-		result = result[:50]
+		phone := jidUser(jid)
+		if strings.HasSuffix(jid, "@lid") {
+			resolved := s.ResolveLIDToJID(jid)
+			if resolved != jid {
+				phone = strings.TrimSuffix(resolved, "@s.whatsapp.net")
+			} else {
+				phone = ""
+			}
+		}
+		lid := ""
+		if strings.HasSuffix(jid, "@lid") {
+			lid = jid
+		}
+		status := "mapped"
+		if strings.HasSuffix(jid, "@lid") && s.ResolveLIDToJID(jid) == jid {
+			status = "unmapped"
+		}
+		c := Contact{
+			PhoneNumber: phone,
+			Name:        n,
+			JID:         jid,
+			LID:         lid,
+			NameSource:  src,
+			Saved:       false,
+			Resolved:    phone != "" || !strings.HasSuffix(jid, "@lid"),
+			Status:      status,
+		}
+		syncedContacts = append(syncedContacts, c)
 	}
-	return result, nil
+
+	// 3. Collect local bridge contacts as overrides.
+	localContacts, _ := s.ListContacts()
+	for i := range localContacts {
+		localContacts[i].NameSource = "local"
+		localContacts[i].Saved = true
+		localContacts[i].Resolved = true
+		localContacts[i].Status = "mapped"
+	}
+
+	// 4. Merge by person.
+	merged := s.mergeContacts(localContacts, syncedContacts)
+
+	// 5. Filter by query.
+	if q != "" {
+		filtered := make([]Contact, 0, len(merged))
+		for _, c := range merged {
+			if strings.Contains(strings.ToLower(c.Name), q) ||
+				strings.Contains(strings.ToLower(c.PhoneNumber), q) ||
+				strings.Contains(strings.ToLower(c.JID), q) ||
+				strings.Contains(strings.ToLower(c.LID), q) {
+				filtered = append(filtered, c)
+			}
+		}
+		merged = filtered
+	}
+
+	// 6. Decode cursor (format: "rank|name|jid").
+	cursorRank, cursorName, cursorJID := -1, "", ""
+	if cursor != "" {
+		raw, err := base64Decode(cursor)
+		if err == nil {
+			parts := strings.SplitN(raw, "|", 3)
+			if len(parts) == 3 {
+				// ignore parse error; -1 means "before everything"
+				fmt.Sscanf(parts[0], "%d", &cursorRank)
+				cursorName = parts[1]
+				cursorJID = parts[2]
+			}
+		}
+	}
+
+	// 7. Apply cursor (skip rows at or before the cursor position).
+	start := 0
+	if cursor != "" {
+		for i, c := range merged {
+			ri := nameSourceRank(c.NameSource)
+			// Sort order is rank DESC, name ASC, jid ASC. An item comes after
+			// the cursor when its rank is lower, or same rank with a greater
+			// name, or same rank and name with a greater jid.
+			if ri < cursorRank ||
+				(ri == cursorRank && c.Name > cursorName) ||
+				(ri == cursorRank && c.Name == cursorName && c.JID > cursorJID) {
+				start = i
+				break
+			}
+			start = i + 1
+		}
+		if start > len(merged) {
+			start = len(merged)
+		}
+	}
+
+	// 8. Paginate.
+	hasMore := start+limit < len(merged)
+	end := start + limit
+	if end > len(merged) {
+		end = len(merged)
+	}
+	page := merged[start:end]
+	if page == nil {
+		page = []Contact{}
+	}
+
+	var nextCursor string
+	if hasMore && len(page) > 0 {
+		last := page[len(page)-1]
+		nextCursor = base64Encode(fmt.Sprintf("%d|%s|%s", nameSourceRank(last.NameSource), last.Name, last.JID))
+	}
+
+	return SearchContactsResult{
+		Contacts:   page,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+		Count:      len(merged),
+	}, nil
 }
 
 // GetMessageContext returns the target message together with before/after
@@ -432,7 +642,15 @@ func (s *Store) queryContextWindow(ctx context.Context, chatJID string, anchor t
 		}
 		out = append(out, m)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	for i := range out {
+		out[i].SenderPhone = s.resolveSenderPhone(out[i].Sender)
+	}
+	return out, nil
 }
 
 // scanListMessageRow scans the 8-column projection used by list_messages and
@@ -464,7 +682,9 @@ func (s *Store) scanListMessageRow(row interface {
 		ChatName:  chatName.String,
 	}
 	m.IsGroup = strings.HasSuffix(m.ChatJID, "@g.us")
-	m.SenderPhone = s.resolveSenderPhone(m.Sender)
+	// SenderPhone is resolved after rows are closed to avoid a connection
+	// deadlock on single-connection stores (resolveSenderPhone queries s.db).
+	m.SenderPhone = m.Sender
 	return m, nil
 }
 
@@ -543,6 +763,11 @@ func (s *Store) ListMessagesCursor(ctx context.Context, params ListMessagesParam
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	rows.Close()
+
+	for i := range result {
+		result[i].SenderPhone = s.resolveSenderPhone(result[i].Sender)
 	}
 
 	hasMore := len(result) > limit
@@ -641,6 +866,11 @@ func (s *Store) listMessagesWithMediaFilter(ctx context.Context, params ListMess
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	rows.Close()
+
+	for i := range result {
+		result[i].SenderPhone = s.resolveSenderPhone(result[i].Sender)
 	}
 
 	hasMore := len(result) > limit

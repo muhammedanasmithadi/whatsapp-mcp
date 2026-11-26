@@ -202,24 +202,31 @@ func TestSearchContacts_ExcludesGroups(t *testing.T) {
 	ctx := context.Background()
 
 	// Empty query returns all non-group chats.
-	contacts, err := s.SearchContacts(ctx, "")
+	res, err := s.SearchContacts(ctx, "", 50, "")
 	if err != nil {
 		t.Fatalf("SearchContacts: %v", err)
+	}
+	contacts := res.Contacts
+	for _, c := range contacts {
+		if c.JID == "123456789@g.us" {
+			t.Fatalf("SearchContacts returned a group: %+v", c)
+		}
+	}
+	if len(contacts) < 3 {
+		t.Fatalf("expected at least 3 contacts (Alice + Bob + address-book Jane), got %d: %+v", len(contacts), contacts)
 	}
 	for _, c := range contacts {
 		if c.JID == "123456789@g.us" {
 			t.Fatalf("SearchContacts returned a group: %+v", c)
 		}
 	}
-	if len(contacts) != 3 {
-		t.Fatalf("expected 3 contacts (Alice + Bob + address-book Jane), got %d", len(contacts))
-	}
 
 	// Filtering by name.
-	got, err := s.SearchContacts(ctx, "Alice")
+	res2, err := s.SearchContacts(ctx, "Alice", 50, "")
 	if err != nil {
 		t.Fatalf("SearchContacts Alice: %v", err)
 	}
+	got := res2.Contacts
 	if len(got) != 1 || got[0].Name != "Alice" {
 		t.Fatalf("expected one match for Alice, got %+v", got)
 	}
@@ -294,10 +301,11 @@ func TestSearchContacts_AddressBook(t *testing.T) {
 	ctx := context.Background()
 
 	for _, q := range []string{"Jane", "Jane Smith", "jane s"} {
-		got, err := s.SearchContacts(ctx, q)
+		res, err := s.SearchContacts(ctx, q, 50, "")
 		if err != nil {
 			t.Fatalf("SearchContacts(%q): %v", q, err)
 		}
+		got := res.Contacts
 		if len(got) != 1 {
 			t.Fatalf("SearchContacts(%q): expected 1 match, got %+v", q, got)
 		}
@@ -308,10 +316,11 @@ func TestSearchContacts_AddressBook(t *testing.T) {
 	}
 
 	// Number search must also surface the saved name, not the bare number.
-	got, err := s.SearchContacts(ctx, "919900000000")
+	res3, err := s.SearchContacts(ctx, "919900000000", 50, "")
 	if err != nil {
 		t.Fatalf("SearchContacts by number: %v", err)
 	}
+	got := res3.Contacts
 	if len(got) != 1 || got[0].Name != "Jane Smith Delhi" {
 		t.Fatalf("expected Jane by number, got %+v", got)
 	}
@@ -412,23 +421,30 @@ func TestSearchContacts_ExcludesLID(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
-	contacts, err := s.SearchContacts(ctx, "")
+	res, err := s.SearchContacts(ctx, "", 50, "")
 	if err != nil {
 		t.Fatalf("SearchContacts: %v", err)
 	}
+	contacts := res.Contacts
 	for _, c := range contacts {
 		if strings.HasSuffix(c.JID, "@lid") {
-			t.Fatalf("SearchContacts returned an @lid row: %+v", c)
+			if c.Status != "unmapped" {
+				t.Fatalf("LID row should be unmapped: %+v", c)
+			}
+			if c.PhoneNumber != "" {
+				t.Fatalf("unmapped LID should have empty phone: %+v", c)
+			}
 		}
 	}
 
-	// Searching by the LID-only name must also return nothing.
-	got, err := s.SearchContacts(ctx, "LidOnly")
+	// Searching by the LID-only name returns the unmapped LID row.
+	res2, err := s.SearchContacts(ctx, "LidOnly", 50, "")
 	if err != nil {
 		t.Fatalf("SearchContacts LidOnly: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected zero results for LidOnly query, got %+v", got)
+	got := res2.Contacts
+	if len(got) != 1 || !strings.HasSuffix(got[0].JID, "@lid") {
+		t.Fatalf("expected one unmapped LID row for LidOnly, got %+v", got)
 	}
 }
 

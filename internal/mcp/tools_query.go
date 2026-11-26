@@ -37,25 +37,45 @@ func (s *Server) registerQueryTools() {
 // -- search_contacts --------------------------------------------------------
 
 type searchContactsArgs struct {
-	Query string `json:"query"`
+	Query  string `json:"query"`
+	Limit  int    `json:"limit,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
 }
 
 func (s *Server) registerSearchContacts() {
 	tool := mcp.NewTool("search_contacts",
 		mcp.WithDescription(offlineSafePrefix+"Search the cached WhatsApp contact list by case-insensitive substring of name or phone number. Read-only; no side effects. Use is_on_whatsapp to verify whether an unknown phone number is registered. Returns a JSON array of contact objects (each with JID, push name, full name, and phone)."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("case-insensitive substring to match against name or phone")),
+		mcp.WithString("query", mcp.Required(), mcp.Description("case-insensitive substring to match against name, phone, JID, or LID")),
+		mcp.WithNumber("limit", mcp.Description("page size, 1-200 (default 50)")),
+		mcp.WithString("cursor", mcp.Description("opaque cursor from a prior response; resume pagination")),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a searchContactsArgs) (*mcp.CallToolResult, error) {
-		contacts, err := s.client.Store().SearchContacts(ctx, a.Query)
+		limit := a.Limit
+		if limit <= 0 {
+			limit = 50
+		}
+		res, err := s.client.Store().SearchContacts(ctx, a.Query, limit, a.Cursor)
 		if err != nil {
 			s.auditLog("search_contacts", "", "", "search_contacts", "error", err.Error())
 			return errorResult(ErrInternal(err.Error())), nil
 		}
-		return resultJSON(contacts)
+		contacts := res.Contacts
+		if contacts == nil {
+			contacts = []store.Contact{}
+		}
+		payload := map[string]any{
+			"contacts": contacts,
+			"count":    res.Count,
+			"has_more": res.HasMore,
+		}
+		if res.NextCursor != "" {
+			payload["next_cursor"] = res.NextCursor
+		}
+		return resultJSON(payload)
 	}))
 }
 
