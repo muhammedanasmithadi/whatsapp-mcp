@@ -354,7 +354,7 @@ type getStatusViewersArgs struct {
 
 func (s *Server) registerGetStatusViewers() {
 	tool := mcp.NewTool("get_status_viewers",
-		mcp.WithDescription("Return viewers of a Status (Story) update. WhatsApp does not expose status viewer lists to linked devices through a public protocol endpoint, so this returns an empty list with a note. message_id is from list_status_updates. Returns {viewers, note}."),
+		mcp.WithDescription("Return viewers of a Status (Story) update. This always fails: WhatsApp does not expose status viewer lists to linked devices through any protocol endpoint, so there is no value to return. Check viewer counts on the phone instead. message_id is from list_status_updates."),
 		mcp.WithString("message_id", mcp.Required(), mcp.Description("WhatsApp message ID of the status to check viewers for")),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -365,11 +365,8 @@ func (s *Server) registerGetStatusViewers() {
 		if r := requireNonEmpty("message_id", a.MessageID); r != nil {
 			return r, nil
 		}
-		viewers, err := s.client.GetStatusViewers(ctx, a.MessageID)
-		if err != nil {
-			return s.toolErr("get_status_viewers", "", a.MessageID, "get_status_viewers", err), nil
-		}
-		return s.toolOK("get_status_viewers", "", a.MessageID, "get_status_viewers", "", map[string]any{"viewers": viewers, "note": "WhatsApp does not expose status viewer lists to linked devices through a public endpoint"})
+		return s.toolErr("get_status_viewers", "", a.MessageID, "get_status_viewers",
+			fmt.Errorf("WhatsApp does not expose status viewer lists to linked devices; check the viewer count on the phone")), nil
 	}))
 }
 

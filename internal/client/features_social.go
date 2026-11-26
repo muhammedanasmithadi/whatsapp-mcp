@@ -515,26 +515,6 @@ func (c *Client) cachedPresence(jid types.JID) (*PresenceResult, error) {
 	return out, nil
 }
 
-// StatusViewer is one viewer of a Status (Story) update.
-type StatusViewer struct {
-	JID       string    `json:"jid"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
-// GetStatusViewers returns viewers of a Status (Story) update. messageID is
-// the status message ID from list_status_updates. WhatsApp does not expose
-// status viewers to linked devices through a public API; this returns an empty
-// list with a note explaining the limitation.
-func (c *Client) GetStatusViewers(ctx context.Context, messageID string) ([]StatusViewer, error) {
-	if !c.wa.IsConnected() {
-		return nil, errors.New("not connected to WhatsApp")
-	}
-	if messageID == "" {
-		return nil, errors.New("message_id required")
-	}
-	return []StatusViewer{}, nil
-}
-
 // SendStatus sends a Status (Story) update as a media message to
 // status@broadcast. mediaPath must be an image or video file under the
 // configured media root. caption is the optional status caption.

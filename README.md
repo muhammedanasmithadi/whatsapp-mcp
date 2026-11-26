@@ -188,7 +188,7 @@ The server exposes **91 tools**, grouped by domain:
 | `mark_status_viewed` | Send read receipts for a contact's statuses |
 | `send_status` | Post a Status update (image/video + caption) |
 | `delete_status` | Delete one of your own status updates |
-| `get_status_viewers` | Viewers of a status (WhatsApp does not expose this to linked devices; returns empty list with a note) |
+| `get_status_viewers` | Always fails: WhatsApp does not expose status viewer lists to linked devices. Check the viewer count on the phone |
 | `set_status_privacy_setting` | Set who can see your statuses (`all`, `contacts`, `close_friends`, `custom`) |
 
 `send_status` fails when WhatsApp does not accept the fan-out: the server
