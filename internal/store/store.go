@@ -121,16 +121,6 @@ type MessageReadPosition struct {
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
 
-// ScheduledStatus is the explicit lifecycle state of a scheduled message.
-type ScheduledStatus string
-
-const (
-	ScheduledStatusPending ScheduledStatus = "pending"
-	ScheduledStatusSending ScheduledStatus = "sending"
-	ScheduledStatusSent    ScheduledStatus = "sent"
-	ScheduledStatusFailed  ScheduledStatus = "failed"
-)
-
 // ScheduledMessage is a message scheduled to be sent at a future time.
 type ScheduledMessage struct {
 	ID            string    `json:"id"`

@@ -28,13 +28,7 @@ const (
 // DefaultSyncCount is WhatsApp's usual on-demand history-sync batch size.
 const DefaultSyncCount = 50
 
-// LIDMode controls whether a history-sync request uses the LID form.
 type LIDMode bool
-
-const (
-	LIDModePhone LIDMode = false
-	LIDModeLID   LIDMode = true
-)
 
 // RequestHistorySync asks WhatsApp to backfill messages for chatJID.
 //

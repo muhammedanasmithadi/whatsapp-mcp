@@ -21,13 +21,6 @@ const (
 )
 
 // handlerInstallState tracks whether the logged-out handler has been installed.
-type handlerInstallState int
-
-const (
-	handlerNotInstalled handlerInstallState = iota
-	handlerInstalled
-)
-
 // productionDriver adapts *client.Client to the daemon.pairDriver interface.
 // It does not install any internal state — the Client itself owns all
 // whatsmeow-facing state.
@@ -40,7 +33,7 @@ type productionDriver struct {
 	pairingAttempts int
 
 	// handlerState ensures the logged-out event handler is installed only once.
-	handlerState handlerInstallState
+	handlerInstalled bool
 }
 
 func newProductionDriver(c *client.Client) *productionDriver {
@@ -124,10 +117,10 @@ func (p *productionDriver) StartPairing(ctx context.Context, onQR func(string), 
 func (p *productionDriver) Connect(ctx context.Context, onLoggedOut func()) error {
 	// Install the logged-out handler only once; retries of StartPairing
 	// call Connect again and must not stack up handlers.
-	if p.handlerState != handlerInstalled {
+	if !p.handlerInstalled {
 		p.c.AddLoggedOutHandler(func(_ *events.LoggedOut) { onLoggedOut() })
 		p.c.StartEventHandler()
-		p.handlerState = handlerInstalled
+		p.handlerInstalled = true
 	}
 	if p.c.IsConnected() {
 		// The pairing flow already connected this client; just install

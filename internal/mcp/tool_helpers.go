@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"fmt"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -18,6 +20,13 @@ func (s *Server) toolErr(toolName, chatJID, messageID, action string, err error)
 // toolOK handles a tool success consistently: audits the success and returns a
 // JSON result. details is a short human-readable summary stored in the audit
 // log.
+func (s *Server) sendResult(toolName, chatJID, messageID string, r client.SendResult, errDetail string) (*mcp.CallToolResult, error) {
+	if !r.Success {
+		return s.toolErr(toolName, chatJID, messageID, toolName, fmt.Errorf("%s", r.Message)), nil
+	}
+	return s.toolOK(toolName, chatJID, messageID, toolName, "", r)
+}
+
 func (s *Server) toolOK(toolName, chatJID, messageID, action string, details string, result any) (*mcp.CallToolResult, error) {
 	s.auditLog(toolName, chatJID, messageID, action, "success", details)
 	return resultJSON(result)

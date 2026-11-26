@@ -57,8 +57,7 @@ func DefaultConfig() Config {
 type AllowDecision bool
 
 const (
-	AllowDenied  AllowDecision = false
-	AllowAllowed AllowDecision = true
+	AllowDenied AllowDecision = false
 )
 
 // Decision is the result of an Allow* check. When Allowed is false, Reason is

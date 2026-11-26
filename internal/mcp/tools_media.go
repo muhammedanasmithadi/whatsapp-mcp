@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -50,11 +49,7 @@ func (s *Server) registerSendPoll() {
 			return mcp.NewToolResultError("options: max 32 entries"), nil
 		}
 		ctx = withRateLimitOverride(ctx, req)
-		r := s.client.SendPoll(ctx, a.Recipient, a.Question, a.Options, a.SelectableCount)
-		if !r.Success {
-			return s.toolErr("send_poll", a.Recipient, "", "send_poll", fmt.Errorf("%s", r.Message)), nil
-		}
-		return resultJSON(r)
+		return s.sendResult("send_poll", a.Recipient, "", s.client.SendPoll(ctx, a.Recipient, a.Question, a.Options, a.SelectableCount), "poll")
 	}))
 }
 
@@ -89,11 +84,7 @@ func (s *Server) registerSendPollVote() {
 			return mcp.NewToolResultError("options: max 32 entries"), nil
 		}
 		ctx = withRateLimitOverride(ctx, req)
-		r := s.client.SendPollVote(ctx, a.ChatJID, a.PollMessageID, a.Options)
-		if !r.Success {
-			return s.toolErr("send_poll_vote", a.ChatJID, a.PollMessageID, "send_poll_vote", fmt.Errorf("%s", r.Message)), nil
-		}
-		return resultJSON(r)
+		return s.sendResult("send_poll_vote", a.ChatJID, a.PollMessageID, s.client.SendPollVote(ctx, a.ChatJID, a.PollMessageID, a.Options), "vote")
 	}))
 }
 
@@ -157,10 +148,6 @@ func (s *Server) registerSendContactCard() {
 			return mcp.NewToolResultError("name: required when vcard is not provided"), nil
 		}
 		ctx = withRateLimitOverride(ctx, req)
-		r := s.client.SendContactCard(ctx, a.Recipient, a.Name, a.Phone, a.VCard)
-		if !r.Success {
-			return s.toolErr("send_contact_card", a.Recipient, "", "send_contact_card", fmt.Errorf("%s", r.Message)), nil
-		}
-		return resultJSON(r)
+		return s.sendResult("send_contact_card", a.Recipient, "", s.client.SendContactCard(ctx, a.Recipient, a.Name, a.Phone, a.VCard), "contact card")
 	}))
 }

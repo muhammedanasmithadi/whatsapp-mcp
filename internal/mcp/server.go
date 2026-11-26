@@ -124,12 +124,6 @@ func NewServer(c *client.Client, st *store.Store, cache pairingCache, opts ...Op
 	return s
 }
 
-// ReadOnly reports whether the server was constructed in read-only mode.
-func (s *Server) ReadOnly() bool { return s.readOnly }
-
-// ToolSurface reports the explicit exposure mode of the server.
-func (s *Server) ToolSurface() ToolSurface { return s.toolSurface }
-
 // auditLog records an agent-initiated action in the append-only audit log.
 func (s *Server) auditLog(toolName, chatJID, messageID, action, result, details string) {
 	if s.audit == nil {

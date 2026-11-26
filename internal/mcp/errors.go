@@ -34,11 +34,10 @@ const (
 type ErrorCategory string
 
 const (
-	ErrorCategoryClient    ErrorCategory = "client_error"  // Client did something wrong (can retry after fixing)
-	ErrorCategoryServer    ErrorCategory = "server_error"  // Server-side problem (retry may help)
-	ErrorCategoryNetwork   ErrorCategory = "network_error" // Network/transport problem (retry may help)
-	ErrorCategoryRateLimit ErrorCategory = "rate_limit"    // Rate limit hit (retry after wait)
-	ErrorCategoryAuth      ErrorCategory = "auth_error"    // Authentication/authorization failure
+	ErrorCategoryClient    ErrorCategory = "client_error" // Client did something wrong (can retry after fixing)
+	ErrorCategoryServer    ErrorCategory = "server_error" // Server-side problem (retry may help)
+	ErrorCategoryRateLimit ErrorCategory = "rate_limit"   // Rate limit hit (retry after wait)
+	ErrorCategoryAuth      ErrorCategory = "auth_error"   // Authentication/authorization failure
 )
 
 // ErrorDetail is a structured error detail for MCP tool responses.
@@ -49,9 +48,6 @@ type ErrorDetail struct {
 	Detail     string        `json:"detail,omitempty"`      // Human-readable explanation
 	Retryable  bool          `json:"retryable"`             // Whether retrying may succeed
 	RetryAfter int           `json:"retry_after,omitempty"` // Seconds to wait before retrying (0 = no specific time)
-	Field      string        `json:"field,omitempty"`       // For invalid_parameter: which field caused the error
-	Expected   string        `json:"expected,omitempty"`    // For invalid_parameter: what was expected
-	Got        string        `json:"got,omitempty"`         // For invalid_parameter: what was actually provided
 }
 
 // MCPError is a structured error that can be converted to an MCP tool result.
@@ -63,7 +59,6 @@ func (e *MCPError) Error() string {
 	return e.Detail.Message
 }
 
-// NewMPCError creates a new MCPError with the given fields.
 func NewMPCError(code ErrorCode, category ErrorCategory, message, detail string, retryable bool, retryAfter int) *MCPError {
 	return &MCPError{
 		Detail: ErrorDetail{

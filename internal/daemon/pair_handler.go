@@ -83,7 +83,6 @@ type pairHandlers struct {
 	pairQRLimiter    *Limiter
 	pairResetLimiter *Limiter
 	pairCodeLimiter  *Limiter
-	pairEventLimiter *Limiter
 
 	startedAt time.Time
 
@@ -127,7 +126,6 @@ func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishW
 		pairCodeLimiter:  NewLimiter(3.0/60.0, 1),   // 3/min, burst 1; WhatsApp limits code requests server-side too
 		// SSE connections are long-lived, so allow a modest burst for the
 		// initial handshake and let the TCP keep-alive carry the stream.
-		pairEventLimiter: NewLimiter(30.0/60.0, 3), // 30/min, burst 3
 		// Webhook requests: allow 10 per second with burst of 20.
 		webhookLimiter: NewLimiter(10.0, 20),
 		startedAt:      time.Now(),
