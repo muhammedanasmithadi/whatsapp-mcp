@@ -35,8 +35,11 @@ func (s *Server) registerMuteChat() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a muteChatArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a muteChatArgs) (*mcp.CallToolResult, error) {
 		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if r := requireBoolPresent(req, "muted"); r != nil {
 			return r, nil
 		}
 		if a.DurationSeconds < 0 {
@@ -75,8 +78,11 @@ func (s *Server) registerPinChat() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a pinChatArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a pinChatArgs) (*mcp.CallToolResult, error) {
 		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if r := requireBoolPresent(req, "pinned"); r != nil {
 			return r, nil
 		}
 		if err := s.client.SetChatPinned(ctx, a.ChatJID, a.Pinned); err != nil {
@@ -105,8 +111,11 @@ func (s *Server) registerStarMessage() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a starMessageArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a starMessageArgs) (*mcp.CallToolResult, error) {
 		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if r := requireBoolPresent(req, "starred"); r != nil {
 			return r, nil
 		}
 		if r := requireNonEmpty("message_id", a.MessageID); r != nil {

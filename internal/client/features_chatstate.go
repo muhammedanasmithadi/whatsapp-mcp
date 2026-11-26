@@ -12,6 +12,15 @@ import (
 
 // SetChatMuted mutes or unmutes a chat. A zero duration while muting means
 // "mute forever"; WhatsApp Web offers 8 hours, 1 week, and always.
+// chatRowJID returns the key the chats table uses for a JID: the phone form
+// for LID-addressed chats, and the JID itself for groups.
+func (c *Client) chatRowJID(jid types.JID) string {
+	if jid.Server == types.HiddenUserServer {
+		return c.store.ResolveLIDToJID(jid.String())
+	}
+	return jid.String()
+}
+
 func (c *Client) SetChatMuted(ctx context.Context, recipient string, muted bool, duration time.Duration) error {
 	if !c.wa.IsConnected() {
 		return errors.New("not connected to WhatsApp")
@@ -23,7 +32,20 @@ func (c *Client) SetChatMuted(ctx context.Context, recipient string, muted bool,
 	if duration < 0 {
 		return errors.New("mute duration cannot be negative")
 	}
-	return c.wa.SendAppState(ctx, appstate.BuildMute(jid.ToNonAD(), muted, duration))
+	if err := c.wa.SendAppState(ctx, appstate.BuildMute(jid.ToNonAD(), muted, duration)); err != nil {
+		return err
+	}
+	// WhatsApp accepted the mute. Record it in our own chat row so get_chat and
+	// list_chats report it immediately instead of waiting for an app-state sync
+	// to echo the value back.
+	until := time.Time{}
+	if muted && duration > 0 {
+		until = time.Now().Add(duration)
+	}
+	if err := c.store.SetChatMuteState(c.chatRowJID(jid), until); err != nil {
+		c.log.Warnf("Record mute state for %s: %v", jid, err)
+	}
+	return nil
 }
 
 // SetChatPinned pins or unpins a chat in WhatsApp's chat list.
@@ -35,7 +57,13 @@ func (c *Client) SetChatPinned(ctx context.Context, recipient string, pinned boo
 	if err != nil {
 		return err
 	}
-	return c.wa.SendAppState(ctx, appstate.BuildPin(jid.ToNonAD(), pinned))
+	if err := c.wa.SendAppState(ctx, appstate.BuildPin(jid.ToNonAD(), pinned)); err != nil {
+		return err
+	}
+	if err := c.store.SetChatPinnedState(c.chatRowJID(jid), pinned); err != nil {
+		c.log.Warnf("Record pin state for %s: %v", jid, err)
+	}
+	return nil
 }
 
 // StarMessage stars or unstars a cached message. WhatsApp stores stars in app

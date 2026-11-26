@@ -251,7 +251,7 @@ func (s *Server) registerSetAutoResponder() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a setAutoResponderArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a setAutoResponderArgs) (*mcp.CallToolResult, error) {
 		if a.Enabled && strings.TrimSpace(a.Message) == "" {
 			return errorResult(ErrInvalidParameter("message", "non-empty reply text when enabled", "empty string")), nil
 		}

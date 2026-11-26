@@ -68,6 +68,10 @@ type Chat struct {
 	LastIsFromMe    bool      `json:"last_is_from_me"`
 	PhoneNumber     string    `json:"phone_number,omitempty"`
 	IsGroup         bool      `json:"is_group"`
+	Archived        bool      `json:"archived"`
+	Pinned          bool      `json:"pinned"`
+	Muted           bool      `json:"muted"`
+	MutedUntil      time.Time `json:"muted_until,omitempty"`
 }
 
 // Contact is a directory entry derived from chat history, the synced
@@ -272,6 +276,20 @@ const (
 // SetArchived sets the archive state of a chat explicitly.
 func (s *Store) SetArchived(chatJID string, state ArchivedState) error {
 	_, err := s.db.Exec("UPDATE chats SET archived = ? WHERE jid = ?", bool(state), chatJID)
+	return err
+}
+
+// SetChatPinnedState records the pin flag WhatsApp's app state accepted, so
+// get_chat and list_chats report it without waiting for a sync echo.
+func (s *Store) SetChatPinnedState(chatJID string, pinned bool) error {
+	_, err := s.db.Exec("UPDATE chats SET pinned = ? WHERE jid = ?", pinned, chatJID)
+	return err
+}
+
+// SetChatMuteState records the mute deadline WhatsApp accepted. A zero time
+// means muted with no deadline.
+func (s *Store) SetChatMuteState(chatJID string, mutedUntil time.Time) error {
+	_, err := s.db.Exec("UPDATE chats SET muted_until = ? WHERE jid = ?", mutedUntil, chatJID)
 	return err
 }
 
@@ -1018,7 +1036,9 @@ CREATE TABLE IF NOT EXISTS chats (
 	jid TEXT PRIMARY KEY,
 	name TEXT,
 	last_message_time TIMESTAMP,
-	archived BOOLEAN NOT NULL DEFAULT 0
+	archived BOOLEAN NOT NULL DEFAULT 0,
+	pinned BOOLEAN NOT NULL DEFAULT 0,
+	muted_until TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -1199,7 +1219,7 @@ func migrateSchema(db *sql.DB) error {
 		return fmt.Errorf("pragma table_info(chats): %w", err)
 	}
 	defer chatRows.Close()
-	hasArchived := false
+	hasArchived, hasChatPinned, hasChatMuted := false, false, false
 	for chatRows.Next() {
 		var (
 			cid        int
@@ -1212,8 +1232,13 @@ func migrateSchema(db *sql.DB) error {
 		if err := chatRows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &primaryKey); err != nil {
 			return fmt.Errorf("scan table_info(chats): %w", err)
 		}
-		if name == "archived" {
+		switch name {
+		case "archived":
 			hasArchived = true
+		case "pinned":
+			hasChatPinned = true
+		case "muted_until":
+			hasChatMuted = true
 		}
 	}
 	if err := chatRows.Err(); err != nil {
@@ -1222,6 +1247,16 @@ func migrateSchema(db *sql.DB) error {
 	if !hasArchived {
 		if _, err := db.Exec("ALTER TABLE chats ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0"); err != nil {
 			return fmt.Errorf("add column archived: %w", err)
+		}
+	}
+	if !hasChatPinned {
+		if _, err := db.Exec("ALTER TABLE chats ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add column pinned: %w", err)
+		}
+	}
+	if !hasChatMuted {
+		if _, err := db.Exec("ALTER TABLE chats ADD COLUMN muted_until TIMESTAMP"); err != nil {
+			return fmt.Errorf("add column muted_until: %w", err)
 		}
 	}
 	// scheduled_messages table: add the error column used to record send

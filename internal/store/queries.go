@@ -251,6 +251,28 @@ func (s *Store) GetChat(ctx context.Context, jid string, includeLastMessage bool
 	return &c, nil
 }
 
+func (s *Store) applyChatSettings(ctx context.Context, c *Chat) {
+	if s.whatsmeowDB == nil {
+		return
+	}
+	var (
+		mutedUntil sql.NullTime
+		pinned     int
+	)
+	err := s.whatsmeowDB.QueryRowContext(ctx,
+		`SELECT cs.pinned, cs.muted_until FROM whatsmeow_chat_settings cs
+		 JOIN whatsmeow_device d ON d.jid = cs.our_jid
+		 WHERE cs.chat_jid = ?`, c.JID).Scan(&pinned, &mutedUntil)
+	if err != nil {
+		return
+	}
+	c.Pinned = pinned != 0
+	c.Muted = mutedUntil.Valid && mutedUntil.Time.After(time.Now())
+	if mutedUntil.Valid {
+		c.MutedUntil = mutedUntil.Time
+	}
+}
+
 func base64Encode(s string) string {
 	return base64.URLEncoding.EncodeToString([]byte(s))
 }
@@ -924,24 +946,15 @@ func chatSelectSQL(alias string, includeLastMessage bool) string {
 	if alias != "chats" {
 		from = "chats " + alias
 	}
+	flags := alias + ".archived, " + alias + ".pinned, " + alias + ".muted_until"
 	if !includeLastMessage {
-		return fmt.Sprintf(`SELECT
-		%s.jid,
-		%s.name,
-		%s.last_message_time,
-		NULL,
-		NULL,
-		NULL
-	FROM %s`, alias, alias, alias, from)
+		return `SELECT ` + alias + `.jid, ` + alias + `.name, ` + alias + `.last_message_time,
+			NULL, NULL, NULL, ` + flags + `
+		FROM ` + from
 	}
-	return fmt.Sprintf(`SELECT
-		%s.jid,
-		%s.name,
-		%s.last_message_time,
-		lm.content,
-		lm.sender,
-		lm.is_from_me
-	FROM %s
+	return `SELECT ` + alias + `.jid, ` + alias + `.name, ` + alias + `.last_message_time,
+		lm.content, lm.sender, lm.is_from_me, ` + flags + `
+	FROM ` + from + `
 		LEFT JOIN (
 			SELECT m.chat_jid, m.content, m.sender, m.is_from_me
 			FROM messages m
@@ -950,10 +963,8 @@ func chatSelectSQL(alias string, includeLastMessage bool) string {
 				FROM messages
 				GROUP BY chat_jid
 			) m2 ON m.chat_jid = m2.chat_jid AND m.timestamp = m2.max_ts AND m.id = m2.max_id
-		) lm ON %s.jid = lm.chat_jid`, alias, alias, alias, from, alias)
+		) lm ON ` + alias + `.jid = lm.chat_jid`
 }
-
-// scanChatRow scans the 6-column projection used by ListChats and GetChat.
 func scanChatRow(row interface {
 	Scan(dest ...any) error
 }) (Chat, error) {
@@ -964,8 +975,11 @@ func scanChatRow(row interface {
 		lastMessage  sql.NullString
 		lastSender   sql.NullString
 		lastIsFromMe sql.NullBool
+		archived     sql.NullBool
+		pinned       sql.NullBool
+		mutedUntil   sql.NullTime
 	)
-	if err := row.Scan(&jid, &name, &lastTime, &lastMessage, &lastSender, &lastIsFromMe); err != nil {
+	if err := row.Scan(&jid, &name, &lastTime, &lastMessage, &lastSender, &lastIsFromMe, &archived, &pinned, &mutedUntil); err != nil {
 		return Chat{}, err
 	}
 	c := Chat{
@@ -974,9 +988,15 @@ func scanChatRow(row interface {
 		LastMessage:  lastMessage.String,
 		LastSender:   lastSender.String,
 		LastIsFromMe: lastIsFromMe.Bool,
+		Archived:     archived.Bool,
+		Pinned:       pinned.Bool,
 	}
 	if lastTime.Valid {
 		c.LastMessageTime = lastTime.Time
+	}
+	if mutedUntil.Valid {
+		c.MutedUntil = mutedUntil.Time
+		c.Muted = c.MutedUntil.After(time.Now())
 	}
 	c.IsGroup = strings.HasSuffix(c.JID, "@g.us")
 	return c, nil

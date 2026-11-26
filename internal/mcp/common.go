@@ -75,6 +75,22 @@ func requireNonEmpty(name, value string) *mcp.CallToolResult {
 	return nil
 }
 
+// requireBoolPresent rejects a call whose required boolean argument is absent.
+// A missing bool decodes to false, which for these tools is a real state
+// change — muting with muted omitted unmutes the chat, and starring with
+// starred omitted unstars the message — so absence must fail rather than
+// silently flip state.
+func requireBoolPresent(req mcp.CallToolRequest, name string) *mcp.CallToolResult {
+	args, ok := req.Params.Arguments.(map[string]any)
+	if !ok {
+		return errorResult(ErrInvalidParameter(name, "a boolean", "missing arguments"))
+	}
+	if _, present := args[name]; !present {
+		return errorResult(ErrInvalidParameter(name, "a boolean (true or false)", "omitted"))
+	}
+	return nil
+}
+
 // toolResult is a small wrapper that funnels the two common success/failure
 // shapes through a single call site:
 //

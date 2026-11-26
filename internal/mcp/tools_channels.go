@@ -172,8 +172,11 @@ func (s *Server) registerMuteChannel() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a muteChannelArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a muteChannelArgs) (*mcp.CallToolResult, error) {
 		if r := requireNonEmpty("channel", a.Channel); r != nil {
+			return r, nil
+		}
+		if r := requireBoolPresent(req, "muted"); r != nil {
 			return r, nil
 		}
 		if err := s.client.SetChannelMuted(ctx, a.Channel, a.Muted); err != nil {

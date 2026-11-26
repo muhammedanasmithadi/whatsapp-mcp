@@ -247,8 +247,11 @@ func (s *Server) registerSetGroupAnnounce() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a setGroupAnnounceArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a setGroupAnnounceArgs) (*mcp.CallToolResult, error) {
 		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if r := requireBoolPresent(req, "announce_only"); r != nil {
 			return r, nil
 		}
 		if err := s.client.SetGroupAnnounce(ctx, a.ChatJID, a.AnnounceOnly); err != nil {
@@ -274,8 +277,11 @@ func (s *Server) registerSetGroupLocked() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a setGroupLockedArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a setGroupLockedArgs) (*mcp.CallToolResult, error) {
 		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if r := requireBoolPresent(req, "locked"); r != nil {
 			return r, nil
 		}
 		if err := s.client.SetGroupLocked(ctx, a.ChatJID, a.Locked); err != nil {
@@ -387,8 +393,11 @@ func (s *Server) registerSetGroupJoinApproval() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a setGroupJoinApprovalArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a setGroupJoinApprovalArgs) (*mcp.CallToolResult, error) {
 		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if r := requireBoolPresent(req, "enabled"); r != nil {
 			return r, nil
 		}
 		if err := s.client.SetGroupJoinApprovalMode(ctx, a.ChatJID, a.Enabled); err != nil {

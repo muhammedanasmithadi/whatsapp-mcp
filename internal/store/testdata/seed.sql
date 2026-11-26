@@ -4,6 +4,9 @@ CREATE TABLE IF NOT EXISTS chats (
     name TEXT,
     last_message_time TIMESTAMP,
     archived BOOLEAN NOT NULL DEFAULT 0
+,
+    pinned BOOLEAN NOT NULL DEFAULT 0,
+    muted_until TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS messages (
