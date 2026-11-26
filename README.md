@@ -248,6 +248,7 @@ hash before posting.
 | `resolve_contacts` | Resolve a batch of identifiers (phone, JID, LID, or name) to canonical identities with provenance |
 | `diagnose_contacts` | Diagnostic summary: counts by name source, unmapped LIDs, stale rows, last sync |
 | `sync_contacts` | Force a full resync of the address book from WhatsApp (rate-limited, 10 min cooldown) |
+| `resync_app_state` | Force a full app-state resync for one patch (regular_low by default) when app-state writes fail with a 409 or a mismatching LThash |
 | `create_contact` | Create a local (bridge-only) contact entry |
 | `update_contact` | Update a local contact |
 | `delete_contact` | Delete a local contact |
@@ -268,9 +269,9 @@ hash before posting.
 
 | Tool | Description |
 |------|-------------|
-| `schedule_message` | Queue a text message for later delivery (timer-driven, survives restarts) |
+| `schedule_message` | Queue a text or media message for later delivery (timer-driven, survives restarts, retries a transient transport failure with a 30s-per-attempt backoff up to five attempts) |
 | `cancel_scheduled_message` | Cancel a pending scheduled message |
-| `list_scheduled_messages` | List queued messages with status |
+| `list_scheduled_messages` | List queued messages with status, attempt count, and the failure reason when one is recorded |
 
 ### Auto-responder
 
