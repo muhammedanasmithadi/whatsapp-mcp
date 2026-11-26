@@ -147,6 +147,7 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
+	rateWasContact := c.IsKnownContact(plan.jid)
 	if err := c.checkSendRate(ctx, plan.jid); err != nil {
 		if c.metricSink != nil {
 			c.metricSink.IncRateLimited()
@@ -162,6 +163,13 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 	if err != nil {
 		if c.metricSink != nil {
 			c.metricSink.IncErrors()
+		}
+		// The send never reached WhatsApp, so give the budget back rather than
+		// letting a flapping socket consume messages the operator can never
+		// send. Whatsmeow writes the frame before it waits for the ack, so a
+		// cancelled context is excluded: there the outcome is unknown.
+		if !unknownOutcome(err.Error()) && c.limiter != nil {
+			c.limiter.RefundSend(rateWasContact)
 		}
 		return SendResult{Success: false, Message: fmt.Sprintf("Error sending message: %v", err)}
 	}
@@ -191,6 +199,13 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 // server returns a participant-list hash that differs from the one this client
 // declared, WhatsApp did not accept the fan-out, so the send is reported as a
 // failure carrying both hashes and the message id instead of a blind success.
+func unknownOutcome(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "context canceled") ||
+		strings.Contains(lower, "context deadline exceeded") ||
+		strings.Contains(lower, "client is closed")
+}
+
 func sendResultFor(recipient string, resp whatsmeow.SendResponse) SendResult {
 	result := SendResult{
 		Success:       true,

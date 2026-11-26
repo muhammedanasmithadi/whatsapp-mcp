@@ -22,7 +22,7 @@ Once paired with your phone (the same way you link WhatsApp Web), the daemon:
 | **Auto-responder** | Event-driven out-of-office replies to incoming 1:1 text messages |
 | **Audit & observability** | Audit log, health check, Prometheus metrics, WebSocket events, SSE pairing events |
 
-The daemon exposes **90 MCP tools** over Streamable HTTP, serves health (`/healthz`) and Prometheus metrics (`/metrics`), and pushes new messages to connected clients over WebSocket (`/ws/events`).
+The daemon exposes **100 MCP tools** over Streamable HTTP, serves health (`/healthz`) and Prometheus metrics (`/metrics`), and pushes new messages to connected clients over WebSocket (`/ws/events`).
 
 ## Architecture
 
@@ -158,7 +158,7 @@ stdout carries JSON-RPC frames only; every diagnostic goes to stderr.
 
 ## MCP tools reference
 
-The server exposes **90 tools**, grouped by domain:
+The server exposes **100 tools**, grouped by domain:
 
 ### Messaging
 
@@ -167,6 +167,7 @@ The server exposes **90 tools**, grouped by domain:
 | `send_message` | Send a text message to a person or group |
 | `send_file` | Upload and send a picture, video, document, or attachment |
 | `send_audio_message` | Send an audio file as a voice note (transcodes via ffmpeg if needed) |
+| `send_sticker` | Send a WebP sticker file to a chat |
 | `send_location` | Send a map location |
 | `send_contact_card` | Send a contact card (vCard) |
 | `send_poll` | Send a poll with 2–32 options |
@@ -179,6 +180,8 @@ The server exposes **90 tools**, grouped by domain:
 | `transcribe_voice_note` | Transcribe a voice note via the configured STT endpoint |
 | `batch_send_messages` | Send multiple messages in one call |
 | `preview_send` | Dry-run a send: show the post-processed payload, and for a Status the audience, device count, and participant-list hash, without sending |
+| `forward_message` | Forward a cached message to another chat |
+| `reject_call` | Reject an incoming call using the call id from the [voice call] / [video call] row in the chat |
 
 ### Statuses (Stories)
 
@@ -190,6 +193,8 @@ The server exposes **90 tools**, grouped by domain:
 | `delete_status` | Delete one of your own status updates |
 | `get_status_viewers` | Always fails: WhatsApp does not expose status viewer lists to linked devices. Check the viewer count on the phone |
 | `set_status_privacy_setting` | Set who can see your statuses (`all`, `contacts`, `close_friends`, `custom`) |
+| `get_status` | Read the paired account's current About/status text |
+| `request_status_sync` | Ask the phone to backfill recent Status (Stories) updates into the cache |
 
 `send_status` fails when WhatsApp does not accept the fan-out: the server
 returns the participant-list hash it computed for your audience, and the post
@@ -219,12 +224,18 @@ hash before posting.
 | `leave_group` | Leave a group |
 | `join_group_with_link` | Join a group via invite link |
 | `get_group_info` | Get group metadata |
+| `list_groups` | List the groups the account belongs to |
 | `get_group_invite_link` | Get or reset a group invite link |
 | `set_group_name` | Rename a group |
 | `set_group_topic` | Set group topic/description |
 | `set_group_announce` | Set announce-only mode |
 | `set_group_locked` | Lock/unlock a group |
 | `update_group_participants` | Add/remove/promote/demote participants |
+| `set_group_photo` | Set the group's photo (admin) |
+| `set_group_join_approval` | Require admin approval before new members join (admin) |
+| `set_group_member_add_mode` | Choose who may add members: `admin_add` or `all_member_add` (admin) |
+| `list_group_join_requests` | List pending requests to join an approval-gated group (admin) |
+| `resolve_group_join_request` | Approve or reject pending join requests (admin) |
 | `mute_chat` | Mute/unmute a chat |
 | `pin_chat` | Pin/unpin a chat in the chat list |
 
@@ -238,6 +249,8 @@ hash before posting.
 | `mute_channel` | Mute/unmute a channel |
 | `get_channel_info` | Get channel metadata |
 | `list_channel_messages` | List messages from a channel |
+| `send_channel_message` | Post a message to a channel you administer. Public and irreversible: every follower sees it at once and there is no delete |
+| `create_channel` | Create a new channel with a name and description |
 
 ### Contacts
 
@@ -248,6 +261,7 @@ hash before posting.
 | `resolve_contacts` | Resolve a batch of identifiers (phone, JID, LID, or name) to canonical identities with provenance |
 | `diagnose_contacts` | Diagnostic summary: counts by name source, unmapped LIDs, stale rows, last sync |
 | `sync_contacts` | Force a full resync of the address book from WhatsApp (rate-limited, 10 min cooldown) |
+| `get_sticker_pack` | Fetch a sticker pack by its id and list its stickers |
 | `resync_app_state` | Force a full app-state resync for one patch (regular_low by default) when app-state writes fail with a 409 or a mismatching LThash |
 | `create_contact` | Create a local (bridge-only) contact entry |
 | `update_contact` | Update a local contact |
@@ -263,7 +277,7 @@ hash before posting.
 | `block_contact` | Block a contact |
 | `unblock_contact` | Unblock a contact |
 | `get_privacy_settings` | Read privacy settings |
-| `set_privacy_setting` | Set a privacy setting (`group_add`, `last`, `status`, `profile`, `read_receipts`, `online`, `call_add`, `messages`, `defense`, `stickers`) |
+| `set_privacy_setting` | Set a privacy setting by its protocol name (`groupadd`, `last`, `status`, `profile`, `readreceipts`, `online`, `calladd`, `messages`, `defense`, `stickers`) |
 
 ### Scheduling
 
@@ -286,7 +300,8 @@ hash before posting.
 |------|-------------|
 | `mute_chat` | Mute/unmute a chat |
 | `pin_chat` | Pin/unpin a chat |
-| `archive_chat` | Archive/unarchive a chat |
+| `archive_chat` | Archive a chat so it drops out of the default listing |
+| `unarchive_chat` | Restore an archived chat to the default listing |
 | `set_disappearing_timer` | Set disappearing-message timer |
 | `star_message` | Star/unstar a message |
 
@@ -302,7 +317,11 @@ hash before posting.
 | `list_media_messages` | List messages with media |
 | `download_media` | Download media for a message |
 | `search_contacts` | Search contacts |
-| `get_read_position` / `set_read_position` | Read/set read position in a chat |
+| `get_read_position` / `mark_read_position` | Read or advance the local read position in a chat (bridge-side bookkeeping; no message is sent) |
+| `get_poll_results` | Read the current tally of a poll |
+| `list_labels` | List the labels on the account |
+| `list_chats_by_label` | List the chats carrying one label |
+| `request_sync` | Ask the phone to backfill older messages for a chat |
 | `mark_chat_read` / `mark_read` | Mark messages as read |
 | `mark_read_position` | Mark read position |
 

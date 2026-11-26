@@ -47,6 +47,7 @@ func (s *Server) registerTools() {
 	}
 
 	s.registerSendTools()
+	s.registerRejectCall()
 	s.registerMessageTools()
 
 	// Phase 1 — group management + blocklist.

@@ -28,6 +28,41 @@ const (
 	messageKindEdit
 )
 
+// handleCallOffer records an incoming call so it is visible to the operator,
+// and stores it as a system row in the call's chat so list_messages shows it.
+func (c *Client) handleCallOffer(evt *events.CallOffer) {
+	chat := evt.From.ToNonAD().String()
+	if !evt.GroupJID.IsEmpty() {
+		chat = evt.GroupJID.String()
+	}
+	kind := "voice"
+	if evt.Data != nil && len(evt.Data.GetChildren()) > 0 {
+		for _, child := range evt.Data.GetChildren() {
+			if child.Tag == "video" {
+				kind = "video"
+				break
+			}
+		}
+	}
+	c.log.Infof("Incoming %s call from %s (call %s)", kind, c.redactor.JID(evt.From.String()), c.redactor.MsgID(evt.CallID))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.Store().StoreChat(chat, c.Store().FindChatName(chat), evt.Timestamp); err != nil {
+		c.log.Warnf("Store chat for incoming call: %v", err)
+		return
+	}
+	err := c.Store().StoreMessage(ctx, store.Message{
+		ID:        evt.CallID,
+		ChatJID:   chat,
+		Sender:    evt.From.User,
+		Content:   "[" + kind + " call]",
+		Timestamp: evt.Timestamp,
+	}, nil, nil, nil, 0)
+	if err != nil {
+		c.log.Warnf("Store incoming call: %v", err)
+	}
+}
+
 // StartEventHandler registers the event handler on the underlying whatsmeow
 // client. Must be called before Connect().
 func (c *Client) StartEventHandler() {
@@ -62,6 +97,10 @@ func (c *Client) StartEventHandler() {
 			c.handleContact(v)
 		case *events.PushName:
 			c.handlePushName(v)
+		case *events.CallOffer:
+			c.handleCallOffer(v)
+		case *events.CallTerminate:
+			c.log.Infof("Call %s from %s ended", c.redactor.MsgID(v.CallID), c.redactor.JID(v.From.String()))
 		default:
 			c.log.Debugf("Unhandled event type: %T", v)
 		}

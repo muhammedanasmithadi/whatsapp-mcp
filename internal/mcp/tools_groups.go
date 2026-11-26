@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -23,6 +25,11 @@ func (s *Server) registerGroupTools() {
 	s.registerSetGroupLocked()
 	s.registerGetGroupInviteLink()
 	s.registerJoinGroupWithLink()
+	s.registerSetGroupPhoto()
+	s.registerSetGroupJoinApproval()
+	s.registerSetGroupMemberAddMode()
+	s.registerListGroupJoinRequests()
+	s.registerResolveGroupJoinRequest()
 }
 
 type createGroupArgs struct {
@@ -332,5 +339,150 @@ func (s *Server) registerJoinGroupWithLink() {
 			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error joining group", true)), nil
 		}
 		return toolResult(map[string]string{"jid": jid}, nil)
+	}))
+}
+
+type setGroupPhotoArgs struct {
+	ChatJID   string `json:"chat_jid"`
+	PhotoPath string `json:"photo_path"`
+}
+
+func (s *Server) registerSetGroupPhoto() {
+	tool := mcp.NewTool("set_group_photo",
+		mcp.WithDescription("Replace a group's photo with the image file at photo_path; every member sees the new icon in the chat list and inside the group. Only admins may change a group photo. Irreversible to a previous version — the old icon is overwritten, so save a copy first with get_profile_picture when the current one matters. Accepts JPEG bytes through the media-root allowlist; other formats may be rejected by WhatsApp with ErrInvalidImageFormat. Returns a JSON object {chat_jid, photo_id} where photo_id is the new photo handle/id."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithString("photo_path", mcp.Required(), mcp.Description("path to a JPEG image file inside the daemon's media root")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a setGroupPhotoArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if r := requireNonEmpty("photo_path", a.PhotoPath); r != nil {
+			return r, nil
+		}
+		photoID, err := s.client.SetGroupPhoto(ctx, a.ChatJID, a.PhotoPath)
+		if err != nil {
+			return s.toolErr("set_group_photo", a.ChatJID, "", "set_group_photo", err), nil
+		}
+		return s.toolOK("set_group_photo", a.ChatJID, "", "set_group_photo", "group photo updated", map[string]any{"chat_jid": a.ChatJID, "photo_id": photoID})
+	}))
+}
+
+type setGroupJoinApprovalArgs struct {
+	ChatJID string `json:"chat_jid"`
+	Enabled bool   `json:"enabled"`
+}
+
+func (s *Server) registerSetGroupJoinApproval() {
+	tool := mcp.NewTool("set_group_join_approval",
+		mcp.WithDescription("Toggle admin approval for join requests on a group: when enabled, a person who follows a group invite link waits in a pending state instead of joining, and only an admin can admit or decline them (resolve_group_join_request, list_group_join_requests). Existing members are not asked and see a system message about the setting change. Reversible by calling again with the inverse value; pending requests survive the toggle either way. Prerequisite: admin. Returns a JSON object {chat_jid, enabled}."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithBoolean("enabled", mcp.Required(), mcp.Description("true to hold invite-link joins for admin approval, false to let them join immediately")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a setGroupJoinApprovalArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if err := s.client.SetGroupJoinApprovalMode(ctx, a.ChatJID, a.Enabled); err != nil {
+			return s.toolErr("set_group_join_approval", a.ChatJID, "", "set_group_join_approval", err), nil
+		}
+		return s.toolOK("set_group_join_approval", a.ChatJID, "", "set_group_join_approval", fmt.Sprintf("join approval enabled=%t", a.Enabled), map[string]any{"chat_jid": a.ChatJID, "enabled": a.Enabled})
+	}))
+}
+
+type setGroupMemberAddModeArgs struct {
+	ChatJID string `json:"chat_jid"`
+	Mode    string `json:"mode"`
+}
+
+func (s *Server) registerSetGroupMemberAddMode() {
+	tool := mcp.NewTool("set_group_member_add_mode",
+		mcp.WithDescription("Set who may add participants to a group: `admin_add` restricts add/remove/promote/demote to admins, `all_member_add` lets every member add others. Affects update_group_participants — a non-admin add in an admin_add group is refused before anything changes. Members see a system message about the setting change. Reversible by calling again with the inverse value. Prerequisite: admin. Returns a JSON object {chat_jid, mode}."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithString("mode", mcp.Required(), mcp.Enum(client.GroupMemberAddModes...), mcp.Description("`admin_add` (admins only) or `all_member_add` (every member may add)")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a setGroupMemberAddModeArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if !slices.Contains(client.GroupMemberAddModes, a.Mode) {
+			return errorResult(ErrInvalidParameter("mode", strings.Join(client.GroupMemberAddModes, ", "), a.Mode)), nil
+		}
+		if err := s.client.SetGroupMemberAddMode(ctx, a.ChatJID, a.Mode); err != nil {
+			return s.toolErr("set_group_member_add_mode", a.ChatJID, "", "set_group_member_add_mode", err), nil
+		}
+		return s.toolOK("set_group_member_add_mode", a.ChatJID, "", "set_group_member_add_mode", fmt.Sprintf("member add mode=%s", a.Mode), map[string]any{"chat_jid": a.ChatJID, "mode": a.Mode})
+	}))
+}
+
+type listGroupJoinRequestsArgs struct {
+	ChatJID string `json:"chat_jid"`
+}
+
+func (s *Server) registerListGroupJoinRequests() {
+	tool := mcp.NewTool("list_group_join_requests",
+		mcp.WithDescription("List the people waiting for admin approval to join a group, with the JID of each requester and the time of the request. Read-only; no side effects and nothing is sent to the requesters. Returns an empty list when join approval is off (set_group_join_approval) or nobody is waiting. Use resolve_group_join_request to admit or decline. Returns a JSON object {chat_jid, requests: [{jid, requested_at}]}."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a listGroupJoinRequestsArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		requests, err := s.client.ListGroupJoinRequests(ctx, a.ChatJID)
+		if err != nil {
+			return s.toolErr("list_group_join_requests", a.ChatJID, "", "list_group_join_requests", err), nil
+		}
+		return s.toolOK("list_group_join_requests", a.ChatJID, "", "list_group_join_requests", fmt.Sprintf("listed %d join requests", len(requests)), map[string]any{"chat_jid": a.ChatJID, "requests": requests})
+	}))
+}
+
+type resolveGroupJoinRequestArgs struct {
+	ChatJID      string   `json:"chat_jid"`
+	Participants []string `json:"participants"`
+	Action       string   `json:"action"`
+}
+
+func (s *Server) registerResolveGroupJoinRequest() {
+	tool := mcp.NewTool("resolve_group_join_request",
+		mcp.WithDescription("Admit or decline people waiting for approval to join a group. Approving puts them in the group, and every member sees a `joined` system message for each admitted person; declining silently drops the request — no system message is posted and the requester is not told. Each request resolves once; resolving it again returns an error for that participant. Not reversible in the same shape: a declined requester must ask again, and an admitted member has to be removed through update_group_participants. Works while join approval is on (set_group_join_approval). Prerequisite: admin. Returns a JSON object {chat_jid, action, results: [{jid, phone_number?, lid?, error_code?}]} where error_code is set only for outcomes WhatsApp rejected."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithArray("participants", mcp.Required(), mcp.Items(map[string]any{"type": "string"}), mcp.Description("people to resolve, as phone digits only (E.164 without `+`, no spaces) or individual JIDs (`<digits>@s.whatsapp.net` or `<digits>@lid`); the JIDs list_group_join_requests returned work as-is")),
+		mcp.WithString("action", mcp.Required(), mcp.Enum(client.ParticipantRequestActions...), mcp.Description("`approve` to admit the requester, `reject` to decline the request")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a resolveGroupJoinRequestArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if len(a.Participants) == 0 {
+			return errorResult(ErrInvalidParameter("participants", "non-empty array", "empty array")), nil
+		}
+		if !slices.Contains(client.ParticipantRequestActions, a.Action) {
+			return errorResult(ErrInvalidParameter("action", strings.Join(client.ParticipantRequestActions, ", "), a.Action)), nil
+		}
+		outcomes, err := s.client.ResolveGroupJoinRequest(ctx, a.ChatJID, a.Participants, a.Action)
+		if err != nil {
+			return s.toolErr("resolve_group_join_request", a.ChatJID, "", "resolve_group_join_request", err), nil
+		}
+		return s.toolOK("resolve_group_join_request", a.ChatJID, "", "resolve_group_join_request", fmt.Sprintf("%sd %d join requests", a.Action, len(outcomes)), map[string]any{"chat_jid": a.ChatJID, "action": a.Action, "results": outcomes})
 	}))
 }

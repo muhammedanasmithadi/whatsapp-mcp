@@ -130,6 +130,28 @@ func (l *Limiter) AllowSend(isContact bool) Decision {
 	return Decision{Allowed: true}
 }
 
+// RefundSend returns the budget a failed send consumed. A send that never
+// reached WhatsApp (transport failure, rejected build) must not shrink the
+// hourly budget: a flapping socket would otherwise permanently cost the
+// operator messages that were never delivered.
+func (l *Limiter) RefundSend(isContact bool) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.sends = pruneBefore(l.sends, l.clock().Add(-time.Hour))
+	if len(l.sends) > 0 {
+		l.sends = l.sends[:len(l.sends)-1]
+	}
+	if !isContact && len(l.nonContactSends) > 0 {
+		l.nonContactSends = l.nonContactSends[:len(l.nonContactSends)-1]
+	}
+	if len(l.sends) == 0 {
+		l.lastSend = time.Time{}
+	}
+}
+
 // AllowUsync atomically checks whether an is_on_whatsapp lookup is permitted
 // and, if so, records it. A denied decision does not consume budget.
 func (l *Limiter) AllowUsync() Decision {

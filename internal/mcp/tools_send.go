@@ -13,7 +13,7 @@ import (
 
 // registerSendTools wires outbound-message tools: send_message, send_file,
 // send_audio_message, send_reaction, send_reply, send_contact_card,
-// send_typing, send_location.
+// send_typing, send_location, send_sticker.
 func (s *Server) registerSendTools() {
 	s.registerSendMessage()
 	s.registerBatchSendMessages()
@@ -23,6 +23,7 @@ func (s *Server) registerSendTools() {
 	s.registerSendReply()
 	s.registerSendTyping()
 	s.registerSendLocation()
+	s.registerSendSticker()
 }
 
 // -- send_message -----------------------------------------------------------
@@ -324,5 +325,45 @@ func (s *Server) registerSendTyping() {
 			state = "active"
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Presence %s for %s", state, a.ChatJID)), nil
+	}))
+}
+
+// -- send_sticker ------------------------------------------------------------
+
+type sendStickerArgs struct {
+	Recipient    string `json:"recipient"`
+	MediaPath    string `json:"media_path"`
+	MarkChatRead bool   `json:"mark_chat_read,omitempty"`
+}
+
+func (s *Server) registerSendSticker() {
+	tool := mcp.NewTool("send_sticker",
+		mcp.WithDescription("Upload and send a WebP sticker to a WhatsApp chat; recipients see it render as a sticker rather than a plain attachment. The file must be a WebP image inside the configured media root — send_file is for ordinary image, video, audio, or document attachments and delivers a WebP as a normal image instead of a sticker. Reversible via delete_message (revoke). Returns a JSON object `{Success, Message, ID}` where `ID` is the WhatsApp message ID on success."),
+		mcp.WithString("recipient", mcp.Required(), mcp.Description(recipientDesc)),
+		mcp.WithString("media_path", mcp.Required(), mcp.Description("absolute path to a WebP image; must sit under the configured media root (`WHATSAPP_MCP_MEDIA_ROOT`, default `<store>/uploads/`)")),
+		mcp.WithBoolean("mark_chat_read", mcp.DefaultBool(false), mcp.Description("if true, also ack recent incoming messages in the chat to clear the unread badge (defaults to false)")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a sendStickerArgs) (*mcp.CallToolResult, error) {
+		if a.Recipient == "" || a.MediaPath == "" {
+			return errorResult(ErrInvalidParameter("recipient and media_path", "non-empty strings", "empty string(s)")), nil
+		}
+		ctx = withRateLimitOverride(ctx, req)
+		r := s.client.SendSticker(ctx, a.Recipient, a.MediaPath)
+		s.maybeMarkChatRead(ctx, r, a.Recipient, a.MarkChatRead)
+		if !r.Success {
+			s.auditLog("send_sticker", a.Recipient, "", "send", "error", r.Message)
+			return errorResult(ErrWhatsAppAPI(r.Message, "WhatsApp API returned an error sending the sticker", true)), nil
+		}
+		s.auditLog("send_sticker", a.Recipient, r.ID, "send", "success", r.Message)
+		result, err := resultJSON(r)
+		if err != nil {
+			s.auditLog("send_sticker", a.Recipient, r.ID, "send", "error", err.Error())
+			return errorResult(ErrInternal(err.Error())), nil
+		}
+		return result, nil
 	}))
 }

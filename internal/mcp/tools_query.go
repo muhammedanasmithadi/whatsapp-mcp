@@ -12,7 +12,7 @@ import (
 
 // registerQueryTools wires read-only query tools: list_chats, get_chat,
 // list_messages, get_message_context, search_contacts, get_status,
-// is_on_whatsapp, list_labels, list_chats_by_label.
+// is_on_whatsapp, list_labels, list_chats_by_label, get_sticker_pack.
 func (s *Server) registerQueryTools() {
 	s.registerSearchContacts()
 	s.registerListMessages()
@@ -28,6 +28,7 @@ func (s *Server) registerQueryTools() {
 	s.registerListLabels()
 	s.registerListChatsByLabel()
 	s.registerGetAuditLog()
+	s.registerGetStickerPack()
 	s.registerSocialReadTools()
 	s.registerContactsReadTools()
 	s.registerSchedulingReadTools()
@@ -613,5 +614,32 @@ func (s *Server) registerGetAuditLog() {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return resultJSON(entries)
+	}))
+}
+
+// -- get_sticker_pack --------------------------------------------------------
+
+type getStickerPackArgs struct {
+	PackID string `json:"pack_id"`
+}
+
+func (s *Server) registerGetStickerPack() {
+	tool := mcp.NewTool("get_sticker_pack",
+		mcp.WithDescription("Fetch a WhatsApp sticker pack by its ID and return the pack's name, publisher, and every sticker it contains with each sticker's mimetype, dimensions, size, emojis, and accessibility text. Read-only; no side effects and nothing is sent. Use send_sticker to send a sticker from a local WebP file. Returns a JSON object `{pack_id, name, publisher, stickers}`."),
+		mcp.WithString("pack_id", mcp.Required(), mcp.Description("WhatsApp sticker pack ID, e.g. the `sticker-pack-id` carried by a received StickerPackMessage or returned by get_sticker_pack")),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a getStickerPackArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("pack_id", a.PackID); r != nil {
+			return r, nil
+		}
+		pack, err := s.client.GetStickerPack(ctx, a.PackID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return resultJSON(pack)
 	}))
 }

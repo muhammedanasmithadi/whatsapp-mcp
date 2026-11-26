@@ -14,6 +14,7 @@ var expectedToolNames = []string{
 	"block_contact",
 	"cancel_scheduled_message",
 	"create_contact",
+	"create_channel",
 	"create_group",
 	"delete_contact",
 	"delete_message",
@@ -37,10 +38,12 @@ var expectedToolNames = []string{
 	"get_profile_picture",
 	"get_read_position",
 	"get_status",
+	"get_sticker_pack",
 	"get_status_viewers",
 	"is_on_whatsapp",
 	"join_group_with_link",
 	"leave_group",
+	"list_group_join_requests",
 	"list_channel_messages",
 	"list_channels",
 	"list_chats",
@@ -65,12 +68,15 @@ var expectedToolNames = []string{
 	"pin_chat",
 	"preview_send",
 	"recover_media",
+	"reject_call",
 	"request_sync",
+	"resolve_group_join_request",
 	"resync_app_state",
 	"request_status_sync",
 	"schedule_message",
 	"search_contacts",
 	"send_audio_message",
+	"send_channel_message",
 	"send_contact_card",
 	"send_file",
 	"send_location",
@@ -81,11 +87,15 @@ var expectedToolNames = []string{
 	"send_reaction",
 	"send_reply",
 	"send_status",
+	"send_sticker",
 	"send_typing",
 	"set_disappearing_timer",
 	"set_group_announce",
+	"set_group_join_approval",
 	"set_group_locked",
+	"set_group_member_add_mode",
 	"set_group_name",
+	"set_group_photo",
 	"set_group_topic",
 	"set_privacy_setting",
 	"set_profile_picture",
@@ -164,7 +174,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 
 func TestNewServer_ToolCount(t *testing.T) {
 	s := NewServer(nil, nil, nil)
-	const want = 90
+	const want = 100
 	if got := len(s.MCP().ListTools()); got != want {
 		t.Errorf("tool count = %d, want %d", got, want)
 	}

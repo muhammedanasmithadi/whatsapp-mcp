@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/types/events"
 
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
@@ -131,9 +132,32 @@ func (p *productionDriver) Connect(ctx context.Context, onLoggedOut func()) erro
 	if p.c.IsConnected() {
 		// The pairing flow already connected this client; just install
 		// the post-pair handlers and return.
+		go p.syncAppState()
 		return nil
 	}
-	return p.c.Connect(ctx, client.ConnectOpts{})
+	if err := p.c.Connect(ctx, client.ConnectOpts{}); err != nil {
+		return err
+	}
+	go p.syncAppState()
+	return nil
+}
+
+// syncAppState repairs the app-state cache in the background. A freshly
+// linked device has no app-state snapshot, and every mutation that writes one
+// (pins, stars, status privacy, archive, mute) fails until the snapshot
+// arrives. whatsmeow never fetches it on its own, so the bridge asks for the
+// patches it writes. onlyIfNotSynced keeps a boot on an already-synced device
+// cheap.
+func (p *productionDriver) syncAppState() {
+	syncCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	for _, patch := range []appstate.WAPatchName{appstate.WAPatchRegularLow, appstate.WAPatchCriticalUnblockLow} {
+		if err := p.c.WA().FetchAppState(syncCtx, patch, false, true); err != nil {
+			p.c.WA().Log.Warnf("app-state sync for %s: %v", patch, err)
+			continue
+		}
+		p.c.WA().Log.Infof("app-state synced: %s", patch)
+	}
 }
 
 func (p *productionDriver) Logout(ctx context.Context) error { return p.c.Logout(ctx) }

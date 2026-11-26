@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -20,6 +21,8 @@ func (s *Server) registerChannelActionTools() {
 	s.registerFollowChannel()
 	s.registerUnfollowChannel()
 	s.registerMuteChannel()
+	s.registerSendChannelMessage()
+	s.registerCreateChannel()
 }
 
 // -- list_channels ----------------------------------------------------------
@@ -177,5 +180,77 @@ func (s *Server) registerMuteChannel() {
 			return s.toolErr("mute_channel", a.Channel, "", "mute_channel", err), nil
 		}
 		return s.toolOK("mute_channel", a.Channel, "", "mute_channel", "", map[string]any{"success": true, "channel": a.Channel, "muted": a.Muted})
+	}))
+}
+
+type sendChannelMessageArgs struct {
+	ChannelJID string `json:"channel_jid"`
+	Message    string `json:"message"`
+	MediaPath  string `json:"media_path"`
+}
+
+func (s *Server) registerSendChannelMessage() {
+	tool := mcp.NewTool("send_channel_message",
+		mcp.WithDescription("Post a message to a WhatsApp Channel the paired account administers. Public and irreversible: every follower sees the post the moment WhatsApp accepts it, and there is no delete for a channel post, so this bridge cannot take it back. Use send_message for a private chat and follow_channel to subscribe. With media_path the post carries that attachment and message becomes its caption; without it the post is plain text. Returns a JSON object with channel_jid, message_id, server_id, kind, and media info when an attachment was posted."),
+		mcp.WithString("channel_jid", mcp.Required(), mcp.Description("channel JID as `<id>@newsletter`; an invite link/code is also accepted")),
+		mcp.WithString("message", mcp.Description("post body text; required unless media_path is given, in which case it is the attachment caption")),
+		mcp.WithString("media_path", mcp.Description("absolute path to an image, video, audio, or document file; must sit under the configured media root (`WHATSAPP_MCP_MEDIA_ROOT`, default `<store>/uploads/`)")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a sendChannelMessageArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("channel_jid", a.ChannelJID); r != nil {
+			return r, nil
+		}
+		if r := requireNonEmpty("message", a.Message); r != nil && a.MediaPath == "" {
+			return r, nil
+		}
+		if a.MediaPath != "" {
+			if _, err := s.client.ValidateMediaPath(a.MediaPath); err != nil {
+				return errorResult(ErrInvalidParameter("media_path", "valid file path under media root", err.Error())), nil
+			}
+		}
+		ctx = withRateLimitOverride(ctx, req)
+		result, err := s.client.SendChannelMessage(ctx, a.ChannelJID, a.Message, a.MediaPath)
+		if err != nil {
+			return s.toolErr("send_channel_message", a.ChannelJID, "", "send_channel_message", err), nil
+		}
+		return s.toolOK("send_channel_message", a.ChannelJID, result.MessageID, "send_channel_message", fmt.Sprintf("posted %s to channel", result.Kind), result)
+	}))
+}
+
+type createChannelArgs struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	PicturePath string `json:"picture_path"`
+}
+
+func (s *Server) registerCreateChannel() {
+	tool := mcp.NewTool("create_channel",
+		mcp.WithDescription("Create a new WhatsApp Channel (newsletter) owned by the paired account and return its metadata: JID, name, description, subscriber count, invite code, picture, verification state, and settings. The paired account becomes the channel's only admin and only follower, and the channel is reachable by its invite link the moment it exists. There is no delete for a channel in this bridge, so the channel stays after the run. Use send_channel_message to post to it and list_channels to see it afterwards."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("channel name shown to followers")),
+		mcp.WithString("description", mcp.Description("channel description text shown under the name")),
+		mcp.WithString("picture_path", mcp.Description("absolute path to an image file used as the channel picture; must sit under the configured media root (`WHATSAPP_MCP_MEDIA_ROOT`, default `<store>/uploads/`)")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a createChannelArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("name", a.Name); r != nil {
+			return r, nil
+		}
+		if a.PicturePath != "" {
+			if _, err := s.client.ValidateMediaPath(a.PicturePath); err != nil {
+				return errorResult(ErrInvalidParameter("picture_path", "valid file path under media root", err.Error())), nil
+			}
+		}
+		info, err := s.client.CreateChannel(ctx, a.Name, a.Description, a.PicturePath)
+		if err != nil {
+			return s.toolErr("create_channel", "", "", "create_channel", err), nil
+		}
+		return s.toolOK("create_channel", "", "", "create_channel", "created channel", info)
 	}))
 }
