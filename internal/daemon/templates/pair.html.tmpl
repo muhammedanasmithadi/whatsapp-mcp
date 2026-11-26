@@ -71,8 +71,6 @@
     try { setState(JSON.parse(e.data)); } catch(err){ /* ignore bad frames */ }
   };
   es.onerror = function(){
-    // If the stream drops, fall back to polling the QR image so the page
-    // still works behind proxies that don't support SSE.
     detail.textContent = detail.textContent || 'Pairing stream dropped; showing latest QR.';
   };
 })();

@@ -16,7 +16,6 @@ import (
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/media"
-	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/ratelimit"
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
@@ -148,7 +147,7 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 	}
 
 	rateWasContact := c.IsKnownContact(plan.jid)
-	if err := c.checkSendRate(ctx, plan.jid); err != nil {
+	if err := c.checkSendWindow(ctx, plan.jid); err != nil {
 		if c.metricSink != nil {
 			c.metricSink.IncRateLimited()
 		}
@@ -278,29 +277,6 @@ func mediaKindName(kind whatsmeow.MediaType) string {
 	default:
 		return "document"
 	}
-}
-
-// checkSendRate applies the daemon-side rate limit to an outbound message —
-// defense-in-depth against a client (or the LLM driving it) fanning out sends
-// faster than WhatsApp tolerates. The operator override rides on a context
-// value the MCP layer only sets when the request carried the
-// X-Rate-Limit-Override header, which the model cannot forge.
-func (c *Client) checkSendRate(ctx context.Context, recipientJID types.JID) error {
-	if c.limiter == nil {
-		return nil
-	}
-	if ratelimit.BypassFromContext(ctx) {
-		c.log.Warnf("RATE LIMIT OVERRIDE: send to %s bypassed the limiter via X-Rate-Limit-Override", c.redactor.JID(recipientJID.String()))
-		return nil
-	}
-	isContact := c.IsKnownContact(recipientJID)
-	if d := c.limiter.AllowSend(isContact); !d.Allowed {
-		c.log.Warnf("Rate limited: send to %s denied (%s); retry in %s", c.redactor.JID(recipientJID.String()), d.Reason, d.RetryAfter.Round(time.Second))
-		return fmt.Errorf(
-			"rate limited: %s — retry in %s (set the X-Rate-Limit-Override header to bypass; see the daemon rate-limit docs)",
-			d.Reason, d.RetryAfter.Round(time.Second))
-	}
-	return nil
 }
 
 // ephemeralContextInfo returns the MessageContextInfo carrying the group's

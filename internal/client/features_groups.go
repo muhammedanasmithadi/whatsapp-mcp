@@ -473,7 +473,7 @@ func (c *Client) inviteParticipant(ctx context.Context, out *ParticipantOutcome,
 		out.Error = "WhatsApp returned no invite code, so no invite was sent"
 		return
 	}
-	if err := c.checkSendRate(ctx, to); err != nil {
+	if err := c.checkSendWindow(ctx, to); err != nil {
 		out.Error = fmt.Sprintf("invite not sent yet: %v; repeat the add for this participant after that to send it", err)
 		return
 	}

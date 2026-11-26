@@ -277,46 +277,6 @@ func (s *Store) DeletePresence(ctx context.Context, jid string) error {
 	return err
 }
 
-// GetAutoResponder returns the current auto-responder configuration.
-// Returns enabled=false, message="" when never configured.
-func (s *Store) GetAutoResponder(ctx context.Context) (enabled bool, message string, err error) {
-	var enabledStr sql.NullString
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "enabled").Scan(&enabledStr)
-	if err == sql.ErrNoRows {
-		return false, "", nil
-	}
-	if err != nil {
-		return false, "", err
-	}
-	enabled = enabledStr.String == "true"
-
-	var msg sql.NullString
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "message").Scan(&msg)
-	if err == sql.ErrNoRows {
-		return enabled, "", nil
-	}
-	if err != nil {
-		return false, "", err
-	}
-	var startTime, endTime sql.NullString
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "start_time").Scan(&startTime)
-	if err == nil && startTime.Valid {
-		_ = startTime // stored but not yet enforced at store layer
-	}
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "end_time").Scan(&endTime)
-	if err == nil && endTime.Valid {
-		_ = endTime // stored but not yet enforced at store layer
-	}
-	var coolDown sql.NullInt64
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "cooldown_minutes").Scan(&coolDown)
-	if err == nil && coolDown.Valid {
-		_ = coolDown // stored but not yet enforced at store layer
-	}
-	return enabled, msg.String, nil
-}
-
-// GetAutoResponderWithConfig returns the full auto-responder configuration
-// including start time, end time, and cooldown minutes.
 func (s *Store) GetAutoResponderWithConfig(ctx context.Context) (enabled bool, message, startTime, endTime string, cooldownMinutes int, err error) {
 	var enabledStr sql.NullString
 	err = s.db.QueryRowContext(ctx, `SELECT value FROM auto_responder WHERE key = ?`, "enabled").Scan(&enabledStr)

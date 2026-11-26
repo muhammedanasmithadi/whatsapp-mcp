@@ -37,7 +37,7 @@ func (c *Client) SendChannelMessage(ctx context.Context, input, message, mediaPa
 	if err != nil {
 		return nil, err
 	}
-	if err := c.checkSendRate(ctx, jid); err != nil {
+	if err := c.checkSendWindow(ctx, jid); err != nil {
 		return nil, err
 	}
 

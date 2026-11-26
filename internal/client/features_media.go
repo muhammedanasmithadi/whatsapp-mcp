@@ -31,7 +31,7 @@ func (c *Client) SendPoll(ctx context.Context, recipient, question string, optio
 	if err != nil {
 		return SendResult{Success: false, Message: err.Error()}
 	}
-	if err := c.checkActionRate(ctx, recipientJID); err != nil {
+	if err := c.checkSendWindow(ctx, recipientJID); err != nil {
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
@@ -76,7 +76,7 @@ func (c *Client) SendPollVote(ctx context.Context, chatJID, pollMessageID string
 	if err != nil {
 		return SendResult{Success: false, Message: err.Error()}
 	}
-	if err := c.checkActionRate(ctx, chat); err != nil {
+	if err := c.checkSendWindow(ctx, chat); err != nil {
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
@@ -207,7 +207,7 @@ func (c *Client) SendContactCard(ctx context.Context, recipient, name, phone, vc
 	if err != nil {
 		return SendResult{Success: false, Message: err.Error()}
 	}
-	if err := c.checkActionRate(ctx, recipientJID); err != nil {
+	if err := c.checkSendWindow(ctx, recipientJID); err != nil {
 		return SendResult{Success: false, Message: err.Error()}
 	}
 

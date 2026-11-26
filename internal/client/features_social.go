@@ -20,7 +20,6 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
-	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/ratelimit"
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
@@ -162,11 +161,8 @@ func (c *Client) GetContactInfo(ctx context.Context, recipient string) (*Contact
 	if err != nil {
 		return nil, err
 	}
-	if c.limiter != nil && !ratelimit.BypassFromContext(ctx) {
-		if d := c.limiter.AllowUsync(); !d.Allowed {
-			return nil, fmt.Errorf("rate limited: %s — retry in %s (set the X-Rate-Limit-Override header to bypass)",
-				d.Reason, d.RetryAfter.Round(time.Second))
-		}
+	if err := c.checkUsyncWindow(ctx); err != nil {
+		return nil, err
 	}
 
 	infos, err := c.wa.GetUserInfo(ctx, []types.JID{jid})

@@ -4,10 +4,6 @@ with open("internal/client/events.go", "r") as f:
     lines = f.readlines()
 
 new_lines = [
-    "\t\t\t// Auto-responder: reply to incoming 1:1 text messages when enabled.\n",
-    "\t\t\t// Runs in a goroutine so a slow or rate-limited send never blocks\n",
-    "\t\t\t// message handling. WhatsApp push delivers the incoming message, so\n",
-    "\t\t\t// this is event-driven — no polling.\n",
     "\t\t\tchatJID := nm.chatJID\n",
     "\t\t\tcontent := nm.msg.Content\n",
     "\t\t\tisFromMe := msg.Info.IsFromMe\n",
@@ -32,7 +28,6 @@ new_lines = [
     "\t\t\t\tif strings.TrimSpace(content) == \"\" {\n",
     "\t\t\t\t\treturn\n",
     "\t\t\t\t}\n",
-    "\t\t\t\t// Get the reply message\n",
     "\t\t\t\t_, reply, _, _, _, err := c.store.GetAutoResponderWithConfig(ctx)\n",
     "\t\t\t\tif err != nil {\n",
     "\t\t\t\t\tc.log.Warnf(\"auto-responder: config check failed: %v\", err)\n",

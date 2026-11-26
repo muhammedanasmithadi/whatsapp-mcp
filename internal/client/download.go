@@ -83,11 +83,6 @@ func IsMediaExpired(err error) bool {
 	return false
 }
 
-// Download fetches media for a previously-cached message and writes it under
-// <StoreDir>/<chat_sanitized>/<hex(message_id)>/<filename>. If outputPath is non-empty, the
-// decrypted bytes are additionally placed at that location (validated against
-// the configured media root). The cache is always populated so subsequent
-// calls remain idempotent.
 // inspectCache reports whether the cached media file at path is missing, valid
 // (size + SHA-256 match), or invalid.
 func inspectCache(path string, fileLength uint64, fileSHA256 []byte) cacheState {
@@ -260,31 +255,6 @@ func (c *Client) Download(ctx context.Context, messageID, chatJID, outputPath st
 
 	c.log.Infof("Successfully downloaded %s media (%d bytes)", mediaType, len(data))
 	return finalizeDownload(localPath, absPath, resolvedOutput, mediaType, filename)
-}
-
-func validateCachedMedia(path string, fileLength uint64, fileSHA256 []byte) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if fileLength > 0 && uint64(info.Size()) != fileLength {
-		return fmt.Errorf("size mismatch: got %d bytes, want %d", info.Size(), fileLength)
-	}
-	if len(fileSHA256) > 0 {
-		digest := sha256.New()
-		if _, err := io.Copy(digest, f); err != nil {
-			return err
-		}
-		if !bytes.Equal(digest.Sum(nil), fileSHA256) {
-			return errors.New("SHA-256 mismatch")
-		}
-	}
-	return nil
 }
 
 func validateMediaPayload(data []byte, fileLength uint64, fileSHA256 []byte) error {

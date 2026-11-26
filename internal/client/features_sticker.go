@@ -112,7 +112,7 @@ func (c *Client) SendSticker(ctx context.Context, recipient, mediaPath string) S
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
-	if err := c.checkSendRate(ctx, recipientJID); err != nil {
+	if err := c.checkSendWindow(ctx, recipientJID); err != nil {
 		if c.metricSink != nil {
 			c.metricSink.IncRateLimited()
 		}

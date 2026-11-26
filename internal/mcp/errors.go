@@ -63,7 +63,7 @@ func (e *MCPError) Error() string {
 	return e.Detail.Message
 }
 
-// NewMCPError creates a new MCPError with the given fields.
+// NewMPCError creates a new MCPError with the given fields.
 func NewMPCError(code ErrorCode, category ErrorCategory, message, detail string, retryable bool, retryAfter int) *MCPError {
 	return &MCPError{
 		Detail: ErrorDetail{

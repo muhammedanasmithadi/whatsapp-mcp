@@ -102,24 +102,34 @@ func (c *Client) MarkChatRead(ctx context.Context, chatJID string, limit int) (i
 	return count, firstErr
 }
 
-// checkActionRate applies the daemon-side rate limit to non-message WhatsApp
-// actions (reactions, replies, edits, revokes, poll votes, typing). It shares
-// the same limiter and windows as checkSendRate so an LLM cannot bypass the
-// send cap by switching to reactions.
-func (c *Client) checkActionRate(ctx context.Context, chatJID types.JID) error {
+// checkSendWindow applies the daemon-side rate limit to one outbound WhatsApp
+// operation. Both sends and actions (reactions, replies, edits, revokes, poll
+// votes) draw on the same window, so switching to an action cannot bypass the
+// send cap.
+func (c *Client) checkSendWindow(ctx context.Context, chatJID types.JID) error {
 	if c.limiter == nil {
 		return nil
 	}
 	if ratelimit.BypassFromContext(ctx) {
-		c.log.Warnf("RATE LIMIT OVERRIDE: action to %s bypassed the limiter via X-Rate-Limit-Override", c.redactor.JID(chatJID.String()))
+		c.log.Warnf("RATE LIMIT OVERRIDE: send to %s bypassed the limiter via X-Rate-Limit-Override", c.redactor.JID(chatJID.String()))
 		return nil
 	}
 	isContact := c.IsKnownContact(chatJID)
 	if d := c.limiter.AllowSend(isContact); !d.Allowed {
-		c.log.Warnf("Rate limited: action to %s denied (%s); retry in %s", c.redactor.JID(chatJID.String()), d.Reason, d.RetryAfter.Round(time.Second))
+		c.log.Warnf("Rate limited: send to %s denied (%s); retry in %s", c.redactor.JID(chatJID.String()), d.Reason, d.RetryAfter.Round(time.Second))
 		return fmt.Errorf(
 			"rate limited: %s — retry in %s (set the X-Rate-Limit-Override header to bypass; see the daemon rate-limit docs)",
 			d.Reason, d.RetryAfter.Round(time.Second))
+	}
+	return nil
+}
+
+func (c *Client) checkUsyncWindow(ctx context.Context) error {
+	if c.limiter != nil && !ratelimit.BypassFromContext(ctx) {
+		if d := c.limiter.AllowUsync(); !d.Allowed {
+			return fmt.Errorf("rate limited: %s — retry in %s (set the X-Rate-Limit-Override header to bypass)",
+				d.Reason, d.RetryAfter.Round(time.Second))
+		}
 	}
 	return nil
 }
@@ -134,7 +144,7 @@ func (c *Client) SendReaction(ctx context.Context, chatJID, messageID, senderJID
 	if err != nil {
 		return fmt.Errorf("invalid chat JID: %w", err)
 	}
-	if err := c.checkActionRate(ctx, chat); err != nil {
+	if err := c.checkSendWindow(ctx, chat); err != nil {
 		return err
 	}
 	var sender types.JID
@@ -205,7 +215,7 @@ func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, target
 	if err != nil {
 		return "", fmt.Errorf("invalid chat JID: %w", err)
 	}
-	if err := c.checkActionRate(ctx, chat); err != nil {
+	if err := c.checkSendWindow(ctx, chat); err != nil {
 		return "", err
 	}
 
@@ -254,7 +264,7 @@ func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody st
 	if err != nil {
 		return "", fmt.Errorf("invalid chat JID: %w", err)
 	}
-	if err := c.checkActionRate(ctx, chat); err != nil {
+	if err := c.checkSendWindow(ctx, chat); err != nil {
 		return "", err
 	}
 
@@ -285,7 +295,7 @@ func (c *Client) DeleteMessage(ctx context.Context, chatJID, messageID, senderJI
 	if err != nil {
 		return fmt.Errorf("invalid chat JID: %w", err)
 	}
-	if err := c.checkActionRate(ctx, chat); err != nil {
+	if err := c.checkSendWindow(ctx, chat); err != nil {
 		return err
 	}
 	var sender types.JID
@@ -354,7 +364,7 @@ func (c *Client) ForwardMessage(ctx context.Context, targetChatJID, sourceChatJI
 		},
 	}
 
-	if err := c.checkActionRate(ctx, target); err != nil {
+	if err := c.checkSendWindow(ctx, target); err != nil {
 		return err
 	}
 
@@ -378,7 +388,7 @@ func (c *Client) SendTyping(ctx context.Context, chatJID string, active bool, ki
 	if err != nil {
 		return fmt.Errorf("invalid chat JID: %w", err)
 	}
-	if err := c.checkActionRate(ctx, chat); err != nil {
+	if err := c.checkSendWindow(ctx, chat); err != nil {
 		return err
 	}
 
@@ -404,15 +414,8 @@ func (c *Client) IsOnWhatsApp(ctx context.Context, phones []string) (map[string]
 		return map[string]bool{}, nil
 	}
 
-	// usync burst guard — WhatsApp rate-limits contact-discovery (usync)
-	// harder than sends, and a parallel fanout that verifies each recipient
-	// trips it first. One IsOnWhatsApp call is one usync regardless of batch
-	// size. The operator override bypasses it, same as sends.
-	if c.limiter != nil && !ratelimit.BypassFromContext(ctx) {
-		if d := c.limiter.AllowUsync(); !d.Allowed {
-			return nil, fmt.Errorf("rate limited: %s — retry in %s (set the X-Rate-Limit-Override header to bypass)",
-				d.Reason, d.RetryAfter.Round(time.Second))
-		}
+	if err := c.checkUsyncWindow(ctx); err != nil {
+		return nil, err
 	}
 
 	// WhatsApp expects a leading '+' on phone queries.

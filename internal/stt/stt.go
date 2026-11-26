@@ -6,7 +6,7 @@
 //
 //	WHATSAPP_MCP_STT_ENDPOINT  - HTTP endpoint (e.g. https://api.openai.com/v1/audio/transcriptions)
 //	WHATSAPP_MCP_STT_API_KEY   - Bearer token for the endpoint
-//	WHATSAPP_MCP_STT_MODEL     - Model name (default: whatsapp-mcp-stt)
+//	WHATSAPP_MCP_STT_MODEL     - Model name (optional)
 //	WHATSAPP_MCP_STT_LANGUAGE  - Language code (optional, e.g. "en")
 package stt
 
@@ -48,11 +48,6 @@ type HTTPClient struct {
 }
 
 // NewHTTPClient creates an STT client from environment variables:
-//
-//	WHATSAPP_MCP_STT_ENDPOINT  - HTTP endpoint URL
-//	WHATSAPP_MCP_STT_API_KEY   - Bearer token (optional)
-//	WHATSAPP_MCP_STT_MODEL     - Model name (default: "whisper-1")
-//	WHATSAPP_MCP_STT_LANGUAGE  - Language code (optional)
 func NewHTTPClient() *HTTPClient {
 	return &HTTPClient{
 		endpoint: os.Getenv("WHATSAPP_MCP_STT_ENDPOINT"),

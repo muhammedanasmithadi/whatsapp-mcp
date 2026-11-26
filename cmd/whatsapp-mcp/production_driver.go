@@ -203,7 +203,6 @@ func (p *productionDriver) MarkMessageFailed(id, reason string) error {
 	return p.c.Store().MarkMessageFailed(id, reason)
 }
 
-// SendMessage sends a WhatsApp message.
 func (p *productionDriver) SendScheduledMessage(ctx context.Context, chatJID, content, mediaPath string) (*client.SendResult, error) {
 	var r client.SendResult
 	if mediaPath != "" {

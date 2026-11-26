@@ -41,7 +41,6 @@ func parseEnabledTools(flagValue string) []string {
 	return names
 }
 
-// enabledToolsFromEnv reports whether the read-only environment switch is set.
 func readOnlyFromEnv() bool {
 	v := os.Getenv("WHATSAPP_MCP_READ_ONLY")
 	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")

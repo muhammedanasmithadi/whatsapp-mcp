@@ -67,7 +67,6 @@ type MessageReader interface {
 // reply configuration. A single row holds the enabled flag and the reply
 // message text.
 type AutoResponderStore interface {
-	GetAutoResponder(ctx context.Context) (enabled bool, message string, err error)
 	SetAutoResponder(ctx context.Context, enabled bool, message string) error
 	CanAutoRespond(ctx context.Context, jid string) (AutoRespondDecision, error)
 	RecordAutoRespond(ctx context.Context, jid string) error

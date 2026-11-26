@@ -83,7 +83,7 @@ func (c *Client) SetGroupPhoto(ctx context.Context, chatJID, photoPath string) (
 	if err != nil {
 		return "", fmt.Errorf("read media file: %w", err)
 	}
-	if err := c.checkActionRate(ctx, chat); err != nil {
+	if err := c.checkSendWindow(ctx, chat); err != nil {
 		return "", err
 	}
 	photoID, err := c.wa.SetGroupPhoto(ctx, chat, data)
@@ -101,7 +101,7 @@ func (c *Client) SetGroupJoinApprovalMode(ctx context.Context, chatJID string, e
 	if err != nil {
 		return err
 	}
-	if err := c.checkActionRate(ctx, chat); err != nil {
+	if err := c.checkSendWindow(ctx, chat); err != nil {
 		return err
 	}
 	if err := c.wa.SetGroupJoinApprovalMode(ctx, chat, enabled); err != nil {
@@ -122,7 +122,7 @@ func (c *Client) SetGroupMemberAddMode(ctx context.Context, chatJID string, mode
 	if err != nil {
 		return err
 	}
-	if err := c.checkActionRate(ctx, chat); err != nil {
+	if err := c.checkSendWindow(ctx, chat); err != nil {
 		return err
 	}
 	if err := c.wa.SetGroupMemberAddMode(ctx, chat, addMode); err != nil {
@@ -169,7 +169,7 @@ func (c *Client) ResolveGroupJoinRequest(ctx context.Context, chatJID string, pa
 	if err != nil {
 		return nil, err
 	}
-	if err := c.checkActionRate(ctx, chat); err != nil {
+	if err := c.checkSendWindow(ctx, chat); err != nil {
 		return nil, err
 	}
 	results, err := c.wa.UpdateGroupRequestParticipants(ctx, chat, jids, change)

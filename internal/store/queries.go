@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// listMessageColumns is the 9-column projection shared by ListMessages and
-// queryContextWindow.
 const listMessageColumns = "messages.timestamp, messages.sender, chats.name, messages.content, messages.is_from_me, chats.jid, messages.id, messages.media_type, messages.is_starred"
 
 // ListMessagesParams holds the filters accepted by ListMessages. Zero values
@@ -254,28 +252,6 @@ func (s *Store) GetChat(ctx context.Context, jid string, includeLastMessage bool
 	}
 	c.PhoneNumber = s.ResolveJIDToPhone(c.JID)
 	return &c, nil
-}
-
-func (s *Store) applyChatSettings(ctx context.Context, c *Chat) {
-	if s.whatsmeowDB == nil {
-		return
-	}
-	var (
-		mutedUntil sql.NullTime
-		pinned     int
-	)
-	err := s.whatsmeowDB.QueryRowContext(ctx,
-		`SELECT cs.pinned, cs.muted_until FROM whatsmeow_chat_settings cs
-		 JOIN whatsmeow_device d ON d.jid = cs.our_jid
-		 WHERE cs.chat_jid = ?`, c.JID).Scan(&pinned, &mutedUntil)
-	if err != nil {
-		return
-	}
-	c.Pinned = pinned != 0
-	c.Muted = mutedUntil.Valid && mutedUntil.Time.After(time.Now())
-	if mutedUntil.Valid {
-		c.MutedUntil = mutedUntil.Time
-	}
 }
 
 func base64Encode(s string) string {
@@ -718,8 +694,6 @@ func (s *Store) scanListMessageRow(row interface {
 		IsStarred: isStarred.Bool,
 	}
 	m.IsGroup = strings.HasSuffix(m.ChatJID, "@g.us")
-	// SenderPhone is resolved after rows are closed to avoid a connection
-	// deadlock on single-connection stores (resolveSenderPhone queries s.db).
 	m.SenderPhone = m.Sender
 	return m, nil
 }
@@ -944,12 +918,6 @@ func (s *Store) resolveSenderPhone(sender string) string {
 	return sender
 }
 
-// chatSelectSQL returns the shared 6-column chat projection (jid, name,
-// last_message_time, plus the latest message's content/sender/is_from_me
-// when includeLastMessage) used by both ListChats and GetChat. alias
-// qualifies the chat column references; pass "chats" for an unaliased FROM
-// clause (ListChats) or a short alias like "c" when the caller appends its
-// own WHERE clause on that alias (GetChat).
 func chatSelectSQL(alias string, includeLastMessage bool) string {
 	from := "chats"
 	if alias != "chats" {
