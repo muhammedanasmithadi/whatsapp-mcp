@@ -82,6 +82,9 @@ type pairDriver interface {
 	NextScheduledMessageTime() (time.Time, bool, error)
 	// ClaimScheduledMessage atomically moves a row to 'sending'.
 	ClaimScheduledMessage(id string) (bool, error)
+	// RequeueScheduledMessage returns a failed send to the pending queue for
+	// a later attempt.
+	RequeueScheduledMessage(id string, attempts int, nextAttempt time.Time) error
 	// MarkMessageSent marks a scheduled message as sent.
 	MarkMessageSent(id, messageID string, sentAt time.Time) error
 	// MarkMessageFailed marks a scheduled message as failed.
@@ -431,6 +434,25 @@ func (s *Server) requestFullHistorySync(ctx context.Context) {
 // queue is empty it re-checks after a short idle interval. Sends are
 // timer-driven (no per-message polling); the idle re-check only detects newly
 // queued messages whose due time is earlier than the current sleep.
+const (
+	maxScheduleAttempts  = 5
+	scheduleRetryBackoff = 30 * time.Second
+)
+
+// retryableSendFailure reports whether a failed scheduled send is worth
+// retrying. These are transport conditions — a busy socket, an in-flight
+// offline-sync replay, a media-connection refresh — rather than a verdict on
+// the message itself.
+func retryableSendFailure(msg string) bool {
+	const markers = "timed out;timeout;i/o timeout;connection reset;connection refused;broken pipe;unexpected eof;EOF;stream:error;stream error;temporarily unavailable;service unavailable;HTTP 5;internal server error;rate limited;too many requests;try again"
+	for _, m := range strings.Split(markers, ";") {
+		if strings.Contains(strings.ToLower(msg), strings.ToLower(m)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) runScheduler(ctx context.Context) {
 	const idleInterval = 30 * time.Second
 	const duePerPass = 3
@@ -495,24 +517,41 @@ func (s *Server) runScheduler(ctx context.Context) {
 			}
 			r, err := s.cfg.Driver.SendScheduledMessage(ctx, m.ChatJID, m.Content, m.MediaPath)
 			sentThisPass++
-			if err != nil {
-				if markErr := s.cfg.Driver.MarkMessageFailed(m.ID, err.Error()); markErr != nil {
+			failure := ""
+			switch {
+			case err != nil:
+				failure = err.Error()
+			case !r.Success:
+				failure = r.Message
+			}
+			if failure != "" {
+				// A transient transport failure is not a verdict on the
+				// message: the socket can be mid offline-sync replay, or
+				// WhatsApp can be briefly slow. Requeue with a backoff so
+				// the send is retried instead of dropped.
+				if retryableSendFailure(failure) && m.Attempts < maxScheduleAttempts {
+					attempts := m.Attempts + 1
+					backoff := time.Duration(attempts) * scheduleRetryBackoff
+					if err := s.cfg.Driver.RequeueScheduledMessage(m.ID, attempts, time.Now().Add(backoff)); err != nil {
+						s.log.Printf("[WARN] scheduled message %s: requeue failed: %v", m.ID, err)
+						if markErr := s.cfg.Driver.MarkMessageFailed(m.ID, failure); markErr != nil {
+							s.log.Printf("[WARN] scheduled message %s: mark failed: %v", m.ID, markErr)
+						}
+					} else {
+						s.log.Printf("[INFO] scheduled message %s deferred (attempt %d/%d): %s", m.ID, attempts, maxScheduleAttempts, failure)
+					}
+					continue
+				}
+				if markErr := s.cfg.Driver.MarkMessageFailed(m.ID, failure); markErr != nil {
 					s.log.Printf("[WARN] scheduled message %s: mark failed: %v", m.ID, markErr)
 				}
-				s.log.Printf("[WARN] scheduled message %s failed: %v", m.ID, err)
+				s.log.Printf("[WARN] scheduled message %s failed: %s", m.ID, failure)
 				continue
 			}
-			if !r.Success {
-				if markErr := s.cfg.Driver.MarkMessageFailed(m.ID, r.Message); markErr != nil {
-					s.log.Printf("[WARN] scheduled message %s: mark failed: %v", m.ID, markErr)
-				}
-				s.log.Printf("[WARN] scheduled message %s failed: %s", m.ID, r.Message)
-			} else {
-				if markErr := s.cfg.Driver.MarkMessageSent(m.ID, r.ID, time.Now()); markErr != nil {
-					s.log.Printf("[WARN] scheduled message %s: mark sent: %v", m.ID, markErr)
-				}
-				s.log.Printf("[INFO] scheduled message %s sent to %s", m.ID, m.ChatJID)
+			if markErr := s.cfg.Driver.MarkMessageSent(m.ID, r.ID, time.Now()); markErr != nil {
+				s.log.Printf("[WARN] scheduled message %s: mark sent: %v", m.ID, markErr)
 			}
+			s.log.Printf("[INFO] scheduled message %s sent to %s", m.ID, m.ChatJID)
 		}
 
 		// Sleep until the next pending message is due. When nothing is

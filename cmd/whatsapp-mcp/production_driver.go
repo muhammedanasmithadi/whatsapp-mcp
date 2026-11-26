@@ -190,6 +190,10 @@ func (p *productionDriver) SendScheduledMessage(ctx context.Context, chatJID, co
 	return &r, nil
 }
 
+func (p *productionDriver) RequeueScheduledMessage(id string, attempts int, nextAttempt time.Time) error {
+	return p.c.Store().RequeueScheduledMessage(id, attempts, nextAttempt)
+}
+
 func (p *productionDriver) Download(ctx context.Context, messageID, chatJID string) client.DownloadResult {
 	return p.c.Download(ctx, messageID, chatJID, "")
 }

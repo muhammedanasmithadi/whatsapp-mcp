@@ -112,6 +112,10 @@ func (p *fakePairDriver) SendScheduledMessage(ctx context.Context, chatJID, cont
 	return &client.SendResult{Success: true, Message: "ok", ID: "fake-id"}, nil
 }
 
+func (p *fakePairDriver) RequeueScheduledMessage(id string, attempts int, nextAttempt time.Time) error {
+	return nil
+}
+
 func (p *fakePairDriver) Download(ctx context.Context, messageID, chatJID string) client.DownloadResult {
 	return client.DownloadResult{Success: false, Message: "not supported in tests"}
 }

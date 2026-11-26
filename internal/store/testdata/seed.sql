@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
     chat_jid TEXT NOT NULL,
     content TEXT NOT NULL,
     media_path TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
     scheduled_at TIMESTAMP NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
