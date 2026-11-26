@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.muhammedanasmithadi/whatsapp-mcp",
   "title": "WhatsApp MCP",
-  "description": "Self-hosted personal WhatsApp bridge with 86 MCP tools over stdio or Streamable HTTP.",
+  "description": "Self-hosted personal WhatsApp bridge with 90 MCP tools over stdio or Streamable HTTP.",
   "repository": {
     "url": "https://github.com/muhammedanasmithadi/whatsapp-mcp",
     "source": "github"

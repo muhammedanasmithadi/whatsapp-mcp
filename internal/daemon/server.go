@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -159,6 +160,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.Driver == nil {
 		return nil, errors.New("daemon.New: Driver required")
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = log.New(os.Stderr, "Daemon ", log.LstdFlags)
 	}
 	return &Server{
 		cfg:          cfg,
@@ -312,7 +316,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if pc, ok := s.cfg.Driver.(pairCoder); ok {
 		coder = pc
 	}
-	handlers := newPairHandlers(s.cache, s.cfg.Driver, coder, s.PublishWS, s.cfg.WebhookSecret)
+	handlers := newPairHandlers(s.cache, s.cfg.Driver, coder, s.PublishWS, s.cfg.WebhookSecret, s.cfg.AuthToken)
 	s.handlers = handlers
 	handlers.mount(mux)
 
@@ -360,7 +364,8 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	// Start the scheduled message scheduler goroutine.
-	go s.runScheduler(ctx)
+	schedulerDone := make(chan struct{})
+	go s.runScheduler(ctx, schedulerDone)
 
 	// Wait for cancellation or a listener failure.
 	select {
@@ -378,6 +383,14 @@ func (s *Server) Run(ctx context.Context) error {
 	s.mu.Lock()
 	s.listenerState = listenerStateShutdown
 	s.mu.Unlock()
+	// A scheduled send can be mid-ack when shutdown starts. Let it finish so
+	// the row is marked sent rather than left 'sending' for the next boot to
+	// reclaim and re-send as a duplicate.
+	select {
+	case <-schedulerDone:
+	case <-time.After(schedulerDrainTimeout):
+		s.log.Printf("[WARN] scheduled messages: drain timed out after %v; an in-flight send may be re-sent on next boot", schedulerDrainTimeout)
+	}
 	s.cfg.Driver.Disconnect()
 	return nil
 }
@@ -435,9 +448,22 @@ func (s *Server) requestFullHistorySync(ctx context.Context) {
 // timer-driven (no per-message polling); the idle re-check only detects newly
 // queued messages whose due time is earlier than the current sleep.
 const (
-	maxScheduleAttempts  = 5
-	scheduleRetryBackoff = 30 * time.Second
+	maxScheduleAttempts   = 5
+	scheduleRetryBackoff  = 30 * time.Second
+	scheduledSendTimeout  = 75 * time.Second
+	schedulerDrainTimeout = 90 * time.Second
 )
+
+// unknownOutcome reports whether a failed send leaves the delivery state
+// unknowable: the context ended (shutdown, deadline) rather than WhatsApp
+// answering. whatsmeow writes the frame before it waits for the ack, so the
+// message may well have been delivered.
+func unknownOutcome(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "context canceled") ||
+		strings.Contains(lower, "context deadline exceeded") ||
+		strings.Contains(lower, "client is closed")
+}
 
 // retryableSendFailure reports whether a failed scheduled send is worth
 // retrying. These are transport conditions — a busy socket, an in-flight
@@ -453,7 +479,8 @@ func retryableSendFailure(msg string) bool {
 	return false
 }
 
-func (s *Server) runScheduler(ctx context.Context) {
+func (s *Server) runScheduler(ctx context.Context, done chan struct{}) {
+	defer close(done)
 	const idleInterval = 30 * time.Second
 	const duePerPass = 3
 	const sendInterval = 10 * time.Second
@@ -515,7 +542,13 @@ func (s *Server) runScheduler(ctx context.Context) {
 				case <-time.After(sendInterval):
 				}
 			}
-			r, err := s.cfg.Driver.SendScheduledMessage(ctx, m.ChatJID, m.Content, m.MediaPath)
+			// Detached on purpose: the run context is cancelled at shutdown,
+			// and cancelling after the frame is on the wire turns a
+			// delivered message into a recorded failure. The drain in Run
+			// bounds how long this can outlive the process.
+			sendCtx, sendCancel := context.WithTimeout(context.Background(), scheduledSendTimeout)
+			r, err := s.cfg.Driver.SendScheduledMessage(sendCtx, m.ChatJID, m.Content, m.MediaPath)
+			sendCancel()
 			sentThisPass++
 			failure := ""
 			switch {
@@ -523,6 +556,13 @@ func (s *Server) runScheduler(ctx context.Context) {
 				failure = err.Error()
 			case !r.Success:
 				failure = r.Message
+			}
+			if unknownOutcome(failure) {
+				// Leave the row 'sending': the next pass (or the next boot)
+				// reclaims it, and re-sending a message that may already have
+				// been delivered is preferable to recording a false failure.
+				s.log.Printf("[INFO] scheduled message %s (chat %s): outcome unknown (%s); left for reclaim", m.ID, m.ChatJID, failure)
+				continue
 			}
 			if failure != "" {
 				// A transient transport failure is not a verdict on the
@@ -533,19 +573,19 @@ func (s *Server) runScheduler(ctx context.Context) {
 					attempts := m.Attempts + 1
 					backoff := time.Duration(attempts) * scheduleRetryBackoff
 					if err := s.cfg.Driver.RequeueScheduledMessage(m.ID, attempts, time.Now().Add(backoff)); err != nil {
-						s.log.Printf("[WARN] scheduled message %s: requeue failed: %v", m.ID, err)
-						if markErr := s.cfg.Driver.MarkMessageFailed(m.ID, failure); markErr != nil {
-							s.log.Printf("[WARN] scheduled message %s: mark failed: %v", m.ID, markErr)
-						}
+						// Leave the row 'sending': the next pass, or the next
+						// boot, reclaims it. Writing a terminal state here would
+						// turn a retryable send into a lost message.
+						s.log.Printf("[WARN] scheduled message %s (chat %s): requeue failed: %v; left for reclaim", m.ID, m.ChatJID, err)
 					} else {
-						s.log.Printf("[INFO] scheduled message %s deferred (attempt %d/%d): %s", m.ID, attempts, maxScheduleAttempts, failure)
+						s.log.Printf("[INFO] scheduled message %s (chat %s): deferred, attempt %d/%d: %s", m.ID, m.ChatJID, attempts, maxScheduleAttempts, failure)
 					}
 					continue
 				}
 				if markErr := s.cfg.Driver.MarkMessageFailed(m.ID, failure); markErr != nil {
 					s.log.Printf("[WARN] scheduled message %s: mark failed: %v", m.ID, markErr)
 				}
-				s.log.Printf("[WARN] scheduled message %s failed: %s", m.ID, failure)
+				s.log.Printf("[WARN] scheduled message %s (chat %s) failed after %d attempt(s): %s", m.ID, m.ChatJID, m.Attempts+1, failure)
 				continue
 			}
 			if markErr := s.cfg.Driver.MarkMessageSent(m.ID, r.ID, time.Now()); markErr != nil {
@@ -619,6 +659,13 @@ func authMiddleware(next http.Handler, token string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if requiresAuth(r.URL.Path) {
 			got := r.Header.Get("Authorization")
+			// The pairing page cannot send an Authorization header: a browser
+			// attaches no such header to an <img>, an EventSource, or a plain
+			// form POST. Accept the same token as a query parameter on those
+			// routes so remote pairing works, and let the page inject it.
+			if got == "" && isBrowserSubresource(r.URL.Path) {
+				got = "Bearer " + r.URL.Query().Get("access_token")
+			}
 			if subtle.ConstantTimeCompare([]byte(got), expected) != 1 {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="whatsapp-mcp"`)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -629,11 +676,23 @@ func authMiddleware(next http.Handler, token string) http.Handler {
 	})
 }
 
+// isBrowserSubresource names the pairing routes a page loads as a sub-resource,
+// where a header is not an option.
+func isBrowserSubresource(path string) bool {
+	return path == "/pair/qr.png" || path == "/pair/events" || path == "/pair/code"
+}
+
 func requiresAuth(path string) bool {
 	if path == "/mcp" || strings.HasPrefix(path, "/mcp/") {
 		return true
 	}
 	if path == "/pair" || strings.HasPrefix(path, "/pair/") {
+		return true
+	}
+	if path == "/ws/events" {
+		return true
+	}
+	if strings.HasPrefix(path, "/webhook/") {
 		return true
 	}
 	return false

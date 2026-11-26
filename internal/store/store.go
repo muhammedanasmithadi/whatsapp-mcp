@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -141,72 +140,11 @@ type ScheduledMessage struct {
 	Error         string    `json:"error,omitempty"`
 }
 
-// stmtCache caches prepared SQL statements to avoid the overhead of
-// re-preparing the same statement on every call. SQLite is a single-writer
-// database, so with MaxOpenConns(1) there is no risk of concurrent
-// preparation of the same statement by multiple connections.
-type stmtCache struct {
-	mu    sync.RWMutex
-	db    *sql.DB
-	stmts map[string]*sql.Stmt
-}
-
-// newStmtCache creates a statement cache bound to the given database.
-func newStmtCache(db *sql.DB) *stmtCache {
-	return &stmtCache{
-		db:    db,
-		stmts: make(map[string]*sql.Stmt),
-	}
-}
-
-// prepare gets or creates a prepared statement for the given query.
-// The statement is cached for reuse across calls. Callers must call
-// stmt.Close() when done; the cache retains the underlying statement
-// for reuse by subsequent callers.
-func (sc *stmtCache) prepare(ctx context.Context, query string) (*sql.Stmt, error) {
-	sc.mu.RLock()
-	stmt, ok := sc.stmts[query]
-	sc.mu.RUnlock()
-	if ok {
-		return stmt, nil
-	}
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	// Double-check after acquiring write lock.
-	if stmt, ok := sc.stmts[query]; ok {
-		return stmt, nil
-	}
-	stmt, err := sc.db.PrepareContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	sc.stmts[query] = stmt
-	return stmt, nil
-}
-
-// close closes all cached prepared statements.
-func (sc *stmtCache) close() error {
-	if sc == nil || sc.stmts == nil {
-		return nil
-	}
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	var firstErr error
-	for _, stmt := range sc.stmts {
-		if err := stmt.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	sc.stmts = make(map[string]*sql.Stmt)
-	return firstErr
-}
-
 // Store handles the message cache and read-only access to whatsmeow's DB.
 type Store struct {
 	db          *sql.DB
 	whatsmeowDB *sql.DB
 	dir         string
-	stmtCache   *stmtCache
 }
 
 // Open creates (if necessary) the store directory and opens both databases.
@@ -261,28 +199,16 @@ func Open(dir string) (*Store, error) {
 		return nil, fmt.Errorf("chmod whatsapp.db: %w", err)
 	}
 
-	return &Store{db: db, whatsmeowDB: waDB, dir: dir, stmtCache: newStmtCache(db)}, nil
+	return &Store{db: db, whatsmeowDB: waDB, dir: dir}, nil
 }
 
 // DB returns the underlying message database handle (tests only).
 func (s *Store) DB() *sql.DB { return s.db }
 
-// PrepareContext returns a cached prepared statement for the given query.
-// The statement is reused across calls; callers must call stmt.Close() when
-// done. The cache retains the underlying statement for reuse.
-func (s *Store) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
-	return s.stmtCache.prepare(ctx, query)
-}
-
-// closeStmtCache closes all cached prepared statements.
-func (s *Store) closeStmtCache() error {
-	return s.stmtCache.close()
-}
-
 // Dir returns the directory backing the store.
 func (s *Store) Dir() string { return s.dir }
 
-// Close releases both database connections and all cached prepared statements.
+// Close releases both database connections.
 func (s *Store) Close() error {
 	if s.whatsmeowDB != nil {
 		_ = s.whatsmeowDB.Close()
@@ -292,7 +218,7 @@ func (s *Store) Close() error {
 			return err
 		}
 	}
-	return s.closeStmtCache()
+	return nil
 }
 
 // ListChatJIDs returns all cached chat JIDs. Used by the full history-sync

@@ -138,11 +138,18 @@ func PlaceholderWaveform(duration uint32) []byte {
 // writing the output to a temp file. Returns the temp file path. The caller
 // is responsible for removing the file.
 func ConvertToOpusOgg(ctx context.Context, inputPath string) (outputPath string, err error) {
+	return ConvertToOpusOggIn(ctx, inputPath, "")
+}
+
+// ConvertToOpusOggIn converts inputPath to an Ogg Opus voice note. outputDir,
+// when non-empty, receives the converted file instead of the OS temp dir; the
+// caller that names it is responsible for removing the file.
+func ConvertToOpusOggIn(ctx context.Context, inputPath, outputDir string) (outputPath string, err error) {
 	if _, lookErr := exec.LookPath("ffmpeg"); lookErr != nil {
 		return "", errors.New("ffmpeg not found on PATH; install ffmpeg to use voice messages")
 	}
 
-	tmp, err := os.CreateTemp("", "mcp-whatsapp-audio-*.ogg")
+	tmp, err := os.CreateTemp(outputDir, "mcp-whatsapp-audio-*.ogg")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}

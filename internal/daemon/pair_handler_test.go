@@ -34,7 +34,7 @@ func newTestHandlers(paired bool, qr string, err error) (*pairHandlers, *fakeRes
 		cache.SetQR(qr)
 	}
 	reset := &fakeResetter{err: err}
-	h := newPairHandlers(cache, reset, nil, nil, nil)
+	h := newPairHandlers(cache, reset, nil, nil, nil, "")
 	return h, reset
 }
 
@@ -52,8 +52,13 @@ func TestHandlePairPage_Unpaired(t *testing.T) {
 	if !strings.Contains(body, "Pair WhatsApp") {
 		t.Fatalf("unpaired body should contain the pairing instructions, got %q", body)
 	}
-	if !strings.Contains(body, `<img src="/pair/qr.png"`) {
+	if !strings.Contains(body, `/pair/qr.png`) {
 		t.Fatal("unpaired body should reference /pair/qr.png")
+	}
+	// The QR and the SSE stream are browser sub-resources: a browser attaches
+	// no Authorization header to them, so the page must carry the token itself.
+	if !strings.Contains(body, `access_token=`) {
+		t.Fatal("pairing page must pass the token to its sub-resources")
 	}
 }
 
@@ -248,7 +253,7 @@ func TestPairReset_RateLimited(t *testing.T) {
 func TestPairTemplate_EscapesToken(t *testing.T) {
 	cache := NewPairCache()
 	cache.SetPaired()
-	h := newPairHandlers(cache, &fakeResetter{}, nil, nil, nil)
+	h := newPairHandlers(cache, &fakeResetter{}, nil, nil, nil, "")
 
 	// Inject a CSRFToken containing a script tag to verify html/template escapes it.
 	// We need to call the template directly since the handler doesn't set CSRFToken yet.
@@ -282,7 +287,7 @@ func (f *fakePairCoder) PairPhone(_ context.Context, _ string) (string, error) {
 
 func TestHandlePairCode_Success(t *testing.T) {
 	cache := NewPairCache()
-	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{code: "ABCD1234"}, nil, nil)
+	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{code: "ABCD1234"}, nil, nil, "")
 	h.csrf = csrfToken{state: csrfTokenIssued, value: "tok"}
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/pair/code", strings.NewReader("csrf_token=tok&phone=+919876543210"))
@@ -298,7 +303,7 @@ func TestHandlePairCode_Success(t *testing.T) {
 
 func TestHandlePairCode_RateLimited(t *testing.T) {
 	cache := NewPairCache()
-	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{}, nil, nil)
+	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{}, nil, nil, "")
 	// Burst is 1; the first request consumes it (it fails CSRF first, but the
 	// limiter has already allowed and spent its token), so the next is 429.
 	w := httptest.NewRecorder()
@@ -312,7 +317,7 @@ func TestHandlePairCode_RateLimited(t *testing.T) {
 
 func TestHandlePairCode_NoCoder(t *testing.T) {
 	cache := NewPairCache()
-	h := newPairHandlers(cache, &fakeResetter{}, nil, nil, nil)
+	h := newPairHandlers(cache, &fakeResetter{}, nil, nil, nil, "")
 	w := httptest.NewRecorder()
 	h.handlePairCode(w, httptest.NewRequest(http.MethodPost, "/pair/code", strings.NewReader("phone=919876543210")))
 	if w.Code != http.StatusNotImplemented {
@@ -322,7 +327,7 @@ func TestHandlePairCode_NoCoder(t *testing.T) {
 
 func TestHandlePairCode_InvalidPhone(t *testing.T) {
 	cache := NewPairCache()
-	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{}, nil, nil)
+	h := newPairHandlers(cache, &fakeResetter{}, &fakePairCoder{}, nil, nil, "")
 	h.csrf = csrfToken{state: csrfTokenIssued, value: "tok"}
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/pair/code", strings.NewReader("csrf_token=tok&phone=0123456"))
@@ -466,7 +471,7 @@ func TestPairCacheSlowSubscriber(t *testing.T) {
 // the state transition logic.
 func TestSSE_HandlerMounted(t *testing.T) {
 	cache := NewPairCache()
-	h := newPairHandlers(cache, &fakeResetter{}, nil, nil, nil)
+	h := newPairHandlers(cache, &fakeResetter{}, nil, nil, nil, "")
 
 	mux := http.NewServeMux()
 	h.mount(mux)

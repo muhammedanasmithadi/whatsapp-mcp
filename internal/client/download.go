@@ -213,6 +213,10 @@ func (c *Client) Download(ctx context.Context, messageID, chatJID, outputPath st
 		waMediaType = whatsmeow.MediaVideo
 	case "audio":
 		waMediaType = whatsmeow.MediaAudio
+	case "sticker":
+		// WhatsApp stores stickers as WebP images; whatsmeow maps
+		// StickerMessage to MediaImage.
+		waMediaType = whatsmeow.MediaImage
 	case "document":
 		waMediaType = whatsmeow.MediaDocument
 	default:

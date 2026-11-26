@@ -3,7 +3,7 @@
   "name": "whatsapp-mcp",
   "display_name": "WhatsApp MCP",
   "version": "0.0.0",
-  "description": "Self-hosted personal WhatsApp bridge for AI agents. 86 tools over stdio or Streamable HTTP, with read-only and allowlist modes.",
+  "description": "Self-hosted personal WhatsApp bridge for AI agents. 90 tools over stdio or Streamable HTTP, with read-only and allowlist modes.",
   "author": {
     "name": "Muhammed Anas Smithadi",
     "url": "https://github.com/muhammedanasmithadi"

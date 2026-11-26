@@ -3,6 +3,7 @@
 package mcp
 
 import (
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -134,7 +135,9 @@ func (s *Server) auditLog(toolName, chatJID, messageID, action, result, details 
 	if s.audit == nil {
 		return
 	}
-	_ = s.audit.AuditLog(toolName, chatJID, messageID, action, result, details)
+	if err := s.audit.AuditLog(toolName, chatJID, messageID, action, result, details); err != nil {
+		log.Printf("[ERROR] audit log write failed for %s/%s: %v", toolName, action, err)
+	}
 }
 
 // addTool registers a tool only if it passes the allowlist filter.
@@ -163,7 +166,11 @@ func (s *Server) AttachHTTP(mux *http.ServeMux) {
 	// Stateless: nothing here is session-scoped (the pairing cache is process-wide
 	// device state), so legacy clients get no Mcp-Session-Id either.
 	httpHandler := server.NewStreamableHTTPServer(s.mcp, server.WithStateLess(true))
+	// Register both forms: a trailing slash in the client config is the most
+	// common typo, and Go's ServeMux matches "/mcp" exactly, so "/mcp/" would
+	// otherwise 404 with no hint.
 	mux.Handle("/mcp", httpHandler)
+	mux.Handle("/mcp/", httpHandler)
 }
 
 // Store returns the underlying message store.

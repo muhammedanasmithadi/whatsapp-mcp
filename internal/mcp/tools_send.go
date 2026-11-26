@@ -9,7 +9,6 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/client"
-	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/media"
 )
 
 // registerSendTools wires outbound-message tools: send_message, send_file,
@@ -204,9 +203,12 @@ func (s *Server) registerSendAudioMessage() {
 		}
 		path := safePath
 		if !strings.HasSuffix(strings.ToLower(path), ".ogg") {
-			converted, err := media.ConvertToOpusOgg(ctx, path)
+			// The converted file must land inside the media root: every send
+			// re-validates media_path against it, so a temp file elsewhere
+			// would be rejected and the send could never succeed.
+			converted, err := s.client.ConvertAudioForSending(ctx, safePath)
 			if err != nil {
-				return errorResult(ErrInvalidParameter("media_path", "valid .ogg audio file", err.Error())), nil
+				return errorResult(ErrInvalidParameter("media_path", "convertible audio file", err.Error())), nil
 			}
 			defer os.Remove(converted)
 			path = converted

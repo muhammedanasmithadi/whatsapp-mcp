@@ -37,6 +37,7 @@ const (
 // pairPageData is the template context for pair pages.
 type pairPageData struct {
 	CSRFToken string
+	AuthToken string // bearer token for sub-resource requests, empty when unauthenticated
 	State     string // current pairing state
 }
 
@@ -103,13 +104,14 @@ type pairHandlers struct {
 	// Webhook HMAC secret for verifying incoming webhook signatures.
 	// If non-empty, the X-Hub-Signature-256 header is required on POST /webhook/.
 	webhookSecret []byte
+	authToken     string
 
 	// Webhook rate limiter - limits webhook POSTs per second.
 	webhookLimiter *Limiter
 }
 
 // newPairHandlers constructs handlers with default rate limiters.
-func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishWS func(evType, data string), webhookSecret []byte) *pairHandlers {
+func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishWS func(evType, data string), webhookSecret []byte, authToken string) *pairHandlers {
 	return &pairHandlers{
 		cache: cache,
 		reset: reset,
@@ -130,6 +132,7 @@ func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishW
 		startedAt:      time.Now(),
 		publishWS:      publishWS,
 		webhookSecret:  webhookSecret,
+		authToken:      authToken,
 	}
 }
 
@@ -422,6 +425,7 @@ func (h *pairHandlers) handlePairPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := pairPageData{
 		CSRFToken: h.generateCSRFToken(),
+		AuthToken: h.authToken,
 		State:     string(h.cache.State()),
 	}
 	if h.cache.Paired() {

@@ -22,7 +22,7 @@ Once paired with your phone (the same way you link WhatsApp Web), the daemon:
 | **Auto-responder** | Event-driven out-of-office replies to incoming 1:1 text messages |
 | **Audit & observability** | Audit log, health check, Prometheus metrics, WebSocket events, SSE pairing events |
 
-The daemon exposes **86 MCP tools** over Streamable HTTP, serves health (`/healthz`) and Prometheus metrics (`/metrics`), and pushes new messages to connected clients over WebSocket (`/ws/events`).
+The daemon exposes **90 MCP tools** over Streamable HTTP, serves health (`/healthz`) and Prometheus metrics (`/metrics`), and pushes new messages to connected clients over WebSocket (`/ws/events`).
 
 ## Architecture
 
@@ -68,7 +68,7 @@ Protocol fixes carried in the fork (also contributed upstream where applicable):
 
 ### Prerequisites
 
-- **Go 1.26+** (build-time only; runtime needs just the compiled binary)
+- **Go 1.27+** (build-time only; runtime needs just the compiled binary)
 - **FFmpeg** (optional, for voice-note transcoding via `send_audio_message`)
 - An MCP client that speaks HTTP (Claude Desktop, Cursor, Claude Code, OpenCode, etc.)
 
@@ -158,7 +158,7 @@ stdout carries JSON-RPC frames only; every diagnostic goes to stderr.
 
 ## MCP tools reference
 
-The server exposes **91 tools**, grouped by domain:
+The server exposes **90 tools**, grouped by domain:
 
 ### Messaging
 

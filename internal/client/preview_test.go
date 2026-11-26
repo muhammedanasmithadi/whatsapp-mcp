@@ -68,8 +68,8 @@ func TestSendResultForPHashVerdict(t *testing.T) {
 		{
 			name:      "mismatched hash fails the send",
 			resp:      whatsmeow.SendResponse{ID: "MSG3", PHash: "2:current", ExpectedPHash: "2:server"},
-			wantOK:    false,
-			wantInMsg: []string{"2:current", "2:server", "MSG3"},
+			wantOK:    true,
+			wantInMsg: []string{"2:current", "2:server"},
 		},
 	}
 	for _, tc := range cases {
@@ -79,9 +79,12 @@ func TestSendResultForPHashVerdict(t *testing.T) {
 				t.Fatalf("Success = %v, want %v (message %q)", got.Success, tc.wantOK, got.Message)
 			}
 			for _, want := range tc.wantInMsg {
-				if !strings.Contains(got.Message, want) {
-					t.Errorf("message %q missing %q", got.Message, want)
+				if !strings.Contains(got.Message+got.Warning, want) {
+					t.Errorf("message+warning %q missing %q", got.Message+got.Warning, want)
 				}
+			}
+			if tc.resp.ExpectedPHash != "" && tc.resp.ExpectedPHash != tc.resp.PHash && got.Warning == "" {
+				t.Error("a mismatched participant hash must surface as a warning, not a silent success")
 			}
 		})
 	}

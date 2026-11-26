@@ -303,7 +303,12 @@ func (s *Store) SearchContacts(ctx context.Context, query string, limit int, cur
 		rows, err := s.whatsmeowDB.QueryContext(ctx, `
 			SELECT their_jid, first_name, full_name, push_name, business_name, redacted_phone
 			FROM whatsmeow_contacts`)
-		if err == nil {
+		if err != nil {
+			// A failed read is not an empty address book: return it so the
+			// caller can say "lookup failed" instead of "no such contact".
+			return SearchContactsResult{}, fmt.Errorf("read synced contacts: %w", err)
+		}
+		{
 			for rows.Next() {
 				var r syncedRow
 				var fn, ln, pn, bn, rp sql.NullString

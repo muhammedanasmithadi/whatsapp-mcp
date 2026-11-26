@@ -42,3 +42,32 @@ func TestScheduleRetryBudget(t *testing.T) {
 		t.Errorf("total retry window = %v, want at most 30 minutes", span)
 	}
 }
+
+func TestUnknownOutcome(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"context canceled", true},
+		{"Error sending message: context canceled", true},
+		{"Error sending message: context deadline exceeded", true},
+		{"websocket client is closed", true},
+		{"info query timed out", false},
+		{"rate limited", false},
+		{"media_path rejected", false},
+	}
+	for _, tc := range cases {
+		if got := unknownOutcome(tc.in); got != tc.want {
+			t.Errorf("unknownOutcome(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSchedulerDrainIsBounded(t *testing.T) {
+	if schedulerDrainTimeout <= 0 || schedulerDrainTimeout > 2*time.Minute {
+		t.Errorf("schedulerDrainTimeout = %v, want a positive bound under 2 minutes", schedulerDrainTimeout)
+	}
+	if scheduledSendTimeout >= schedulerDrainTimeout {
+		t.Errorf("scheduledSendTimeout = %v must be shorter than the drain window %v", scheduledSendTimeout, schedulerDrainTimeout)
+	}
+}

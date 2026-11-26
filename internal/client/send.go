@@ -42,6 +42,10 @@ type SendResult struct {
 	Success bool
 	Message string
 	ID      string
+	// Warning is set when WhatsApp accepted the send but flagged something the
+	// caller must know. A warning is never a reason to retry: the message is
+	// already on its way.
+	Warning string
 	// PHash is the participant-list hash this client declared; ExpectedPHash is
 	// the hash WhatsApp returned in the ack. Both are empty for sends where the
 	// server did not echo a hash.
@@ -166,7 +170,19 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 		c.metricSink.IncMessagesOut()
 	}
 
-	c.persistSent(ctx, plan.jid, resp.ID, message, mediaPath, plan.message)
+	// WhatsApp delivered the message; a cache failure must not flip the
+	// result, because a caller that reads failure retries and sends a second
+	// copy. Report it as a warning and keep the id so the operator can act.
+	if err := c.persistSent(ctx, plan.jid, resp.ID, message, mediaPath, plan.message); err != nil {
+		c.log.Errorf("sent message not cached: %v", err)
+		result := sendResultFor(recipient, resp)
+		if result.Warning != "" {
+			result.Warning += "; the local cache write also failed, so list_messages will not show it"
+		} else {
+			result.Warning = "the local cache write failed, so list_messages will not show this message; edit/delete on it will not work"
+		}
+		return result
+	}
 
 	return sendResultFor(recipient, resp)
 }
@@ -184,12 +200,40 @@ func sendResultFor(recipient string, resp whatsmeow.SendResponse) SendResult {
 		ExpectedPHash: resp.ExpectedPHash,
 	}
 	if resp.ExpectedPHash != "" && resp.ExpectedPHash != resp.PHash {
-		result.Success = false
-		result.Message = fmt.Sprintf(
-			"WhatsApp rejected the fan-out for this send: the server expects participant-list hash %s but this client computed %s, so some recipients did not receive it (message id %s)",
-			resp.ExpectedPHash, resp.PHash, resp.ID)
+		// WhatsApp acknowledged the send (error=0, a server id), so the message
+		// is delivered. The hash it echoes back describes the audience it
+		// computed, which for a Status broadcast is not the set this device can
+		// derive from its own contact table. That is a delivery caveat, not a
+		// failed send: retrying would post the story a second time.
+		result.Warning = fmt.Sprintf(
+			"WhatsApp accepted the send but did not recognize this fan-out: the server expects participant-list hash %s, this client computed %s, so some recipients may not have received it",
+			resp.ExpectedPHash, resp.PHash)
 	}
 	return result
+}
+
+// ConvertAudioForSending converts an audio file to an Ogg Opus voice note
+// inside the configured media root, so the converted file passes the same
+// media-root check as the original. The caller removes it when done.
+func (c *Client) ConvertAudioForSending(ctx context.Context, mediaPath string) (string, error) {
+	safePath, err := c.ValidateMediaPath(mediaPath)
+	if err != nil {
+		return "", fmt.Errorf("media_path rejected: %w", err)
+	}
+	return media.ConvertToOpusOggIn(ctx, safePath, c.mediaRootDir())
+}
+
+// mediaRootDir is the directory the media allowlist resolves to. An empty
+// result means no root is configured, in which case conversion falls back to
+// the OS temp dir.
+func (c *Client) mediaRootDir() string {
+	if c.allowedMediaRoot == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(c.allowedMediaRoot); err == nil {
+		return abs
+	}
+	return c.allowedMediaRoot
 }
 
 // chatKind names the class of chat a JID addresses, for the dry-run summary.
@@ -540,7 +584,7 @@ func documentMimeType(ext string) string {
 
 // persistSent writes a cache row for a message we sent so the local history
 // stays complete regardless of device multiplexing.
-func (c *Client) persistSent(ctx context.Context, recipientJID types.JID, msgID, message, mediaPath string, msg *waProto.Message) {
+func (c *Client) persistSent(ctx context.Context, recipientJID types.JID, msgID, message, mediaPath string, msg *waProto.Message) error {
 	chatJID := recipientJID.String()
 	if !strings.HasSuffix(chatJID, "@g.us") {
 		chatJID = c.store.ResolveLIDToJID(chatJID)
@@ -581,8 +625,8 @@ func (c *Client) persistSent(ctx context.Context, recipientJID types.JID, msgID,
 		DirectPath: storedDirectPath,
 	}, storedMediaKey, storedFileSHA256, storedFileEnc, storedFileLength)
 	if err != nil {
-		c.log.Warnf("Failed to store sent message: %v", err)
-		return
+		return fmt.Errorf("cache sent message: %w", err)
 	}
 	c.log.Infof("[%s] -> %s [%s]: %s", now.Format("2006-01-02 15:04:05"), c.redactor.JID(chatJID), c.redactor.MsgID(msgID), c.redactor.Body(message))
+	return nil
 }
