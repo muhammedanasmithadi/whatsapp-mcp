@@ -16,7 +16,7 @@ Once paired with your phone (the same way you link WhatsApp Web), the daemon:
 | **Presence** | Query contact online/last-seen; set per-chat typing/recording indicators |
 | **Groups** | Create, leave, join via link, participants, name, topic, announce, lock, invite link |
 | **Channels** | Follow/unfollow, mute, list, info, messages |
-| **Contacts** | Local address book (bridge-only; not synced to the phone), search, create, update, delete |
+| **Contacts** | Synced address book (saved, business, push names) with LID resolution, local overrides, search, resolve, diagnose, sync, create, update, delete |
 | **Blocklist & Privacy** | Blocklist, privacy settings (group add, last seen, status, profile, read receipts, online, calls, messages, defense, stickers) |
 | **Scheduling** | Timer-driven scheduled messages that survive restarts |
 | **Auto-responder** | Event-driven out-of-office replies to incoming 1:1 text messages |
@@ -158,7 +158,7 @@ stdout carries JSON-RPC frames only; every diagnostic goes to stderr.
 
 ## MCP tools reference
 
-The server exposes **86 tools**, grouped by domain:
+The server exposes **89 tools**, grouped by domain:
 
 ### Messaging
 
@@ -189,6 +189,7 @@ The server exposes **86 tools**, grouped by domain:
 | `delete_status` | Delete one of your own status updates |
 | `get_status_viewers` | Viewers of a status (WhatsApp does not expose this to linked devices; returns empty list with a note) |
 | `set_status_privacy_setting` | Set who can see your statuses (`all`, `contacts`, `close_friends`, `custom`) |
+
 
 ### Profile & presence
 
@@ -234,12 +235,16 @@ The server exposes **86 tools**, grouped by domain:
 
 | Tool | Description |
 |------|-------------|
-| `list_contacts` | List local address-book contacts |
-| `create_contact` | Create a local contact entry |
+| `list_contacts` | List contacts from the synced WhatsApp address book (saved, business, and push names), with cursor pagination. Local bridge contacts take precedence on name. |
+| `search_contacts` | Search all cached contacts by name, phone, JID, or LID, with cursor pagination |
+| `resolve_contacts` | Resolve a batch of identifiers (phone, JID, LID, or name) to canonical identities with provenance |
+| `diagnose_contacts` | Diagnostic summary: counts by name source, unmapped LIDs, stale rows, last sync |
+| `sync_contacts` | Force a full resync of the address book from WhatsApp (rate-limited, 10 min cooldown) |
+| `create_contact` | Create a local (bridge-only) contact entry |
 | `update_contact` | Update a local contact |
 | `delete_contact` | Delete a local contact |
-| `search_contacts` | Search contacts by name or phone |
 | `is_on_whatsapp` | Check if phone numbers are registered on WhatsApp |
+| `get_contact_info` | Fetch live profile metadata (About, picture, LID, devices, business verification) |
 
 ### Blocklist & privacy
 

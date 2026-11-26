@@ -46,6 +46,9 @@ var expectedToolNames = []string{
 	"list_chats",
 	"list_chats_by_label",
 	"list_contacts",
+	"sync_contacts",
+	"resolve_contacts",
+	"diagnose_contacts",
 	"list_groups",
 	"list_labels",
 	"list_media_messages",
@@ -160,7 +163,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 
 func TestNewServer_ToolCount(t *testing.T) {
 	s := NewServer(nil, nil, nil)
-	const want = 86
+	const want = 89
 	if got := len(s.MCP().ListTools()); got != want {
 		t.Errorf("tool count = %d, want %d", got, want)
 	}
@@ -186,7 +189,7 @@ func TestToolsByDomain(t *testing.T) {
 		"tools_media.go":      {"send_poll", "send_contact_card"},
 		"tools_privacy.go":    {"get_blocklist", "send_presence"},
 		"tools_social.go":     {"list_status_updates", "get_presence"},
-		"tools_contacts.go":   {"list_contacts", "create_contact"},
+		"tools_contacts.go":   {"list_contacts", "sync_contacts", "resolve_contacts", "diagnose_contacts", "create_contact"},
 		"tools_scheduling.go": {"list_scheduled_messages", "schedule_message"},
 		"tools_channels.go":   {"list_channels", "get_channel_info"},
 		"tools_chatstate.go":  {"mute_chat", "pin_message", "star_message"},

@@ -21,11 +21,16 @@ func (s *Server) registerTools() {
 	// Read-only tools are always registered.
 	s.registerQueryTools()
 
+	// resolve_contacts and diagnose_contacts are read-only.
+	s.registerResolveContacts()
+	s.registerDiagnoseContacts()
+
 	if s.readOnly {
 		// Safe subset only: no send, edit, delete, mark-read, group mutation,
 		// blocklist mutation, privacy or status changes. History backfill and
 		// media download are kept because they are read-side operations.
 		s.registerRequestSync()
+		s.registerSyncContacts()
 		s.registerDownloadMedia()
 		s.registerRecoverMedia()
 		s.registerTranscribeVoiceNote()
@@ -53,6 +58,7 @@ func (s *Server) registerTools() {
 
 	// Local contact book and the message scheduler queue.
 	s.registerContactActionTools()
+	s.registerSyncContacts()
 	s.registerSchedulingActionTools()
 
 	// Channels and chat-level settings backed by WhatsApp app state.
