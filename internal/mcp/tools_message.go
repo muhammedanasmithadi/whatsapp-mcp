@@ -28,6 +28,7 @@ func (s *Server) registerMessageTools() {
 	s.registerTranscribeVoiceNote()
 	s.registerArchiveChat()
 	s.registerUnarchiveChat()
+	s.registerDeleteChat()
 }
 
 // -- edit_message -----------------------------------------------------------
@@ -385,7 +386,7 @@ type archiveChatArgs struct {
 
 func (s *Server) registerArchiveChat() {
 	tool := mcp.NewTool("archive_chat",
-		mcp.WithDescription("Archive a chat so it no longer appears in normal chat listings. Archived chats are hidden from list_chats but all messages are preserved. Use unarchive_chat to restore visibility. Read-only by WhatsApp (no message is modified locally). Returns the plain-text string `Archived chat <chat_jid>`."),
+		mcp.WithDescription("Archive a chat so it drops out of the default chat listing on the phone and every linked device. Messages are preserved; use unarchive_chat to restore it. Use archive_chat on the self chat to avoid archiving a chat you still write to. Returns {success, chat_jid, archived: true}."),
 		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -393,15 +394,15 @@ func (s *Server) registerArchiveChat() {
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a archiveChatArgs) (*mcp.CallToolResult, error) {
-		if a.ChatJID == "" {
-			return errorResult(ErrInvalidParameter("chat_jid", "non-empty string", "empty string")), nil
+		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
 		}
-		if err := s.client.Store().ArchiveChat(a.ChatJID); err != nil {
+		if err := s.client.ArchiveChat(ctx, a.ChatJID); err != nil {
 			s.auditLog("archive_chat", a.ChatJID, "", "archive", "error", err.Error())
-			return errorResult(ErrInternal(err.Error())), nil
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error archiving the chat", true)), nil
 		}
 		s.auditLog("archive_chat", a.ChatJID, "", "archive", "success", "archived")
-		return mcp.NewToolResultText(fmt.Sprintf("Archived chat %s", a.ChatJID)), nil
+		return s.toolOK("archive_chat", a.ChatJID, "", "archive", "archived", map[string]any{"success": true, "chat_jid": a.ChatJID, "archived": true})
 	}))
 }
 
@@ -413,7 +414,7 @@ type unarchiveChatArgs struct {
 
 func (s *Server) registerUnarchiveChat() {
 	tool := mcp.NewTool("unarchive_chat",
-		mcp.WithDescription("Unarchive a previously archived chat so it reappears in normal chat listings. Read-only by WhatsApp (no message is modified locally). Returns the plain-text string `Unarchived chat <chat_jid>`."),
+		mcp.WithDescription("Unarchive a previously archived chat so it reappears in normal chat listings on the phone and every linked device. Returns {success, chat_jid, archived: false}."),
 		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -421,14 +422,42 @@ func (s *Server) registerUnarchiveChat() {
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
 	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a unarchiveChatArgs) (*mcp.CallToolResult, error) {
-		if a.ChatJID == "" {
-			return errorResult(ErrInvalidParameter("chat_jid", "non-empty string", "empty string")), nil
+		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
 		}
-		if err := s.client.Store().UnarchiveChat(a.ChatJID); err != nil {
+		if err := s.client.UnarchiveChat(ctx, a.ChatJID); err != nil {
 			s.auditLog("unarchive_chat", a.ChatJID, "", "unarchive", "error", err.Error())
-			return errorResult(ErrInternal(err.Error())), nil
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error unarchiving the chat", true)), nil
 		}
 		s.auditLog("unarchive_chat", a.ChatJID, "", "unarchive", "success", "unarchived")
-		return mcp.NewToolResultText(fmt.Sprintf("Unarchived chat %s", a.ChatJID)), nil
+		return s.toolOK("unarchive_chat", a.ChatJID, "", "unarchive", "unarchived", map[string]any{"success": true, "chat_jid": a.ChatJID, "archived": false})
+	}))
+}
+
+type deleteChatArgs struct {
+	ChatJID     string `json:"chat_jid"`
+	DeleteMedia bool   `json:"delete_media,omitempty"`
+}
+
+func (s *Server) registerDeleteChat() {
+	tool := mcp.NewTool("delete_chat",
+		mcp.WithDescription("Delete a chat from the WhatsApp chat list on the phone and every linked device, and clear this bridge's cached rows for it: messages, read position, queued messages, and label associations. delete_media also asks the phone to drop the chat's media files. WhatsApp keeps the history on the phone until its own retention window clears; this bridge forgets it immediately. Irreversible from this bridge — re-read the chat afterwards starts its history from scratch. Use archive_chat instead when you only want the chat out of the list. Returns {success, chat_jid}."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(jidDesc)),
+		mcp.WithBoolean("delete_media", mcp.DefaultBool(false), mcp.Description("also delete the chat's media files on the phone (defaults to false)")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(true),
+	)
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a deleteChatArgs) (*mcp.CallToolResult, error) {
+		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
+			return r, nil
+		}
+		if err := s.client.DeleteChat(ctx, a.ChatJID, a.DeleteMedia); err != nil {
+			s.auditLog("delete_chat", a.ChatJID, "", "delete_chat", "error", err.Error())
+			return errorResult(ErrWhatsAppAPI(err.Error(), "WhatsApp API returned an error deleting the chat", true)), nil
+		}
+		s.auditLog("delete_chat", a.ChatJID, "", "delete_chat", "success", "chat deleted")
+		return s.toolOK("delete_chat", a.ChatJID, "", "delete_chat", "chat deleted", map[string]any{"success": true, "chat_jid": a.ChatJID})
 	}))
 }

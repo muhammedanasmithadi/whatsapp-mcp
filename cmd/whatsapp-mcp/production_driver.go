@@ -214,6 +214,8 @@ func (p *productionDriver) SendScheduledMessage(ctx context.Context, chatJID, co
 	return &r, nil
 }
 
+func (p *productionDriver) IsConnected() bool { return p.c.IsConnected() }
+
 func (p *productionDriver) RequeueScheduledMessage(id string, attempts int, nextAttempt time.Time) error {
 	return p.c.Store().RequeueScheduledMessage(id, attempts, nextAttempt)
 }

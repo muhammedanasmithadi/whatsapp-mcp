@@ -75,16 +75,27 @@ type batchSendMessageArgs struct {
 func (s *Server) registerBatchSendMessages() {
 	tool := mcp.NewTool("batch_send_messages",
 		mcp.WithDescription("Send multiple WhatsApp text messages in a single call. Each message is sent independently; results are returned per-message. Rate limiting applies per message as with send_message. Returns a JSON array of results, one per input message, each with {success, message, id or error}."),
-		mcp.WithArray("messages", mcp.Required(), mcp.Items(map[string]any{"type": "object"}), mcp.Description("array of message objects, each with `recipient` and `message` fields, and optional `mark_chat_read` boolean.")),
+		mcp.WithArray("messages", mcp.Required(), mcp.MaxItems(50), mcp.Items(map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"recipient":      map[string]any{"type": "string", "description": recipientDesc},
+				"message":        map[string]any{"type": "string", "description": "message body text"},
+				"mark_chat_read": map[string]any{"type": "boolean", "description": "if true, also ack recent incoming messages in the chat (defaults to false)"},
+			},
+			"required": []string{"recipient", "message"},
+		}), mcp.Description("array of 1 to 50 message objects, each with `recipient` and `message` fields, and optional `mark_chat_read` boolean.")),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a batchSendMessageArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a batchSendMessageArgs) (*mcp.CallToolResult, error) {
 		if len(a.Messages) == 0 {
 			return errorResult(ErrInvalidParameter("messages", "non-empty array", "empty array")), nil
 		}
+		// The override rides on the request, not the batch, so an operator
+		// bypass reaches every message in this call as it does for send_message.
+		ctx = withRateLimitOverride(ctx, req)
 		if len(a.Messages) > 50 {
 			return errorResult(ErrInvalidParameter("messages", "at most 50 messages", fmt.Sprintf("%d messages", len(a.Messages)))), nil
 		}

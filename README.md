@@ -22,7 +22,7 @@ Once paired with your phone (the same way you link WhatsApp Web), the daemon:
 | **Auto-responder** | Event-driven out-of-office replies to incoming 1:1 text messages |
 | **Audit & observability** | Audit log, health check, Prometheus metrics, WebSocket events, SSE pairing events |
 
-The daemon exposes **100 MCP tools** over Streamable HTTP, serves health (`/healthz`) and Prometheus metrics (`/metrics`), and pushes new messages to connected clients over WebSocket (`/ws/events`).
+The daemon exposes **101 MCP tools** over Streamable HTTP, serves health (`/healthz`) and Prometheus metrics (`/metrics`), and pushes new messages to connected clients over WebSocket (`/ws/events`).
 
 ## Architecture
 
@@ -158,7 +158,7 @@ stdout carries JSON-RPC frames only; every diagnostic goes to stderr.
 
 ## MCP tools reference
 
-The server exposes **100 tools**, grouped by domain:
+The server exposes **101 tools**, grouped by domain:
 
 ### Messaging
 
@@ -300,8 +300,9 @@ hash before posting.
 |------|-------------|
 | `mute_chat` | Mute/unmute a chat |
 | `pin_chat` | Pin/unpin a chat |
-| `archive_chat` | Archive a chat so it drops out of the default listing |
-| `unarchive_chat` | Restore an archived chat to the default listing |
+| `archive_chat` | Archive a chat on WhatsApp and this bridge (hidden from the default list, messages kept) |
+| `unarchive_chat` | Restore an archived chat to the default list |
+| `delete_chat` | Delete a chat from WhatsApp and clear this bridge's cached rows for it (irreversible here; archive_chat if you only want it out of the list) |
 | `set_disappearing_timer` | Set disappearing-message timer |
 | `star_message` | Star/unstar a message |
 
@@ -359,6 +360,41 @@ This tool connects an AI agent to your personal WhatsApp account. Treat it accor
 ## Media
 
 `WHATSAPP_MCP_MEDIA_ROOT` (default `<store>/uploads/`) is the only directory send/download tools may touch. Paths outside the root, including symlinks that resolve outside it, are rejected.
+
+### Voice-note transcription
+
+`transcribe_voice_note` needs an OpenAI-compatible endpoint:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `WHATSAPP_MCP_STT_ENDPOINT` | unset | base URL of the transcription service; unset disables the tool |
+| `WHATSAPP_MCP_STT_API_KEY` | unset | bearer token for that service |
+| `WHATSAPP_MCP_STT_MODEL` | unset | model name sent with the request |
+| `WHATSAPP_MCP_STT_LANGUAGE` | unset | BCP-47 hint, e.g. `en` |
+
+Both transports read these: `serve` and `stdio`.
+
+## Rate limits
+
+The daemon throttles outbound work so a client (or the LLM driving it) cannot fan out faster than WhatsApp tolerates: a 10-second floor between sends, 200 sends per hour, 60 per hour to numbers with no prior inbound history, and 30 `is_on_whatsapp` lookups per minute. Every send tool charges the limiter, and a send that fails before reaching WhatsApp refunds it.
+
+Operators can bypass the limiter for one request with the `X-Rate-Limit-Override` header on `/mcp`. The model driving the tools cannot forge it: the MCP layer sets the bypass only when the HTTP request carried the header.
+
+## Backup
+
+The store holds the only copy of the session and the message cache. Back up both files with the daemon stopped, then restore them in place:
+
+```sh
+systemctl --user stop whatsapp-mcp     # or: kill <pid>
+cp ~/.local/share/whatsapp-mcp/store/messages.db ~/.local/share/whatsapp-mcp/store/whatsapp.db <backup-dir>/
+systemctl --user start whatsapp-mcp
+```
+
+`whatsapp.db` is the WhatsApp session; losing it means re-pairing. `messages.db` is the message cache and can be rebuilt by syncing.
+
+## Claude Code hooks
+
+`docs/hooks/` ships a SessionStart hook that starts the daemon and prints the pairing URL when this repo is opened in Claude Code. See `docs/hooks/setup.sh`.
 
 ## Operations
 

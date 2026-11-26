@@ -179,6 +179,11 @@ func (s *Store) ListChats(ctx context.Context, query string, limit, page int, in
 	if limit <= 0 {
 		limit = 20
 	}
+	// Cap like every other paged read: one unbounded call would pull the whole
+	// chat history into the response and the 1 MB body limit.
+	if limit > 200 {
+		limit = 200
+	}
 	if page < 0 {
 		page = 0
 	}

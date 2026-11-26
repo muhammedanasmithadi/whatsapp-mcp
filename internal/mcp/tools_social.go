@@ -308,10 +308,11 @@ func (s *Server) registerSendStatus() {
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a sendStatusArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a sendStatusArgs) (*mcp.CallToolResult, error) {
 		if r := requireNonEmpty("media_path", a.MediaPath); r != nil {
 			return r, nil
 		}
+		ctx = withRateLimitOverride(ctx, req)
 		r := s.client.SendStatus(ctx, a.MediaPath, a.Caption)
 		if !r.Success {
 			return s.toolErr("send_status", "", "", "send_status", fmt.Errorf("send status: %s", r.Message)), nil

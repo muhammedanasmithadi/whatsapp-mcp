@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -496,11 +497,14 @@ func callPairingStatus(t *testing.T, s *Server) map[string]any {
 // the WhatsApp client — so passing a nil client here must not panic.
 func TestPairingStatus_NilCache(t *testing.T) {
 	env := callPairingStatus(t, NewServer(nil, nil, nil))
-	if env["state"] != "error" {
-		t.Errorf("state = %v, want error", env["state"])
+	if env["state"] != "disconnected" {
+		t.Errorf("state = %v, want disconnected", env["state"])
 	}
-	if env["detail"] != "pairing cache unavailable" {
-		t.Errorf("detail = %v, want pairing cache unavailable", env["detail"])
+	// The stdio transport owns no pairing flow, so the detail must say where
+	// pairing happens rather than blaming a missing cache.
+	detail, _ := env["detail"].(string)
+	if !strings.Contains(detail, "no pairing flow") {
+		t.Errorf("detail = %q, want the transport explanation", detail)
 	}
 }
 

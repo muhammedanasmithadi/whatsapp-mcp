@@ -96,6 +96,9 @@ type pairDriver interface {
 	SendScheduledMessage(ctx context.Context, chatJID, content, mediaPath string) (*client.SendResult, error)
 	// Download fetches one cached message's media to the media root.
 	Download(ctx context.Context, messageID, chatJID string) client.DownloadResult
+	// IsConnected reports whether the WhatsApp socket is live. Pairing state
+	// alone cannot tell an operator that sends will fail.
+	IsConnected() bool
 }
 
 // Config configures a daemon Server. Addr may be "host:port" or "host:0"

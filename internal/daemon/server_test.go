@@ -104,6 +104,8 @@ func (f *fakePairDriver) MarkMessageFailed(id, reason string) error {
 	return nil
 }
 
+func (p *fakePairDriver) IsConnected() bool { return true }
+
 func (p *fakePairDriver) SendMessage(ctx context.Context, chatJID string, content string) (*client.SendResult, error) {
 	return &client.SendResult{Success: true, Message: "ok", ID: "fake-id"}, nil
 }

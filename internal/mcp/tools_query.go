@@ -514,7 +514,9 @@ func (s *Server) registerPairingStatus() {
 		ready := false
 		// Short-circuits before touching s.client unless we are paired, so a
 		// nil cache or unpaired state never dereferences the WhatsApp client.
-		if s.cache != nil && s.cache.Paired() && s.client.IsConnected() {
+		// stdio has no pair cache, but its device is always paired; the client
+		// answers for it so the tool does not claim an error it does not have.
+		if s.client != nil && (s.cache == nil || s.cache.Paired()) && s.client.IsConnected() {
 			if wa := s.client.WA(); wa != nil && wa.Store != nil && wa.Store.ID != nil {
 				ownJID = wa.Store.ID.String()
 				ownPhone = wa.Store.ID.User
@@ -529,8 +531,11 @@ func (s *Server) registerPairingStatus() {
 			resp["own_jid"] = ownJID
 			resp["own_phone"] = ownPhone
 		case s.cache == nil:
-			resp["state"] = "error"
-			resp["detail"] = "pairing cache unavailable"
+			// No cache and no connection: the transport (stdio) owns no
+			// pairing flow, so report the socket state instead of pretending
+			// the cache is broken.
+			resp["state"] = "disconnected"
+			resp["detail"] = "not connected to WhatsApp; this transport has no pairing flow, use serve mode to pair"
 		case s.cache.QR() != "":
 			resp["state"] = "awaiting_qr"
 			resp["qr_payload"] = s.cache.QR()

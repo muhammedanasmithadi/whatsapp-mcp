@@ -293,6 +293,33 @@ func (s *Store) SetChatMuteState(chatJID string, mutedUntil time.Time) error {
 	return err
 }
 
+// DeleteChat removes a chat and its cached rows: messages, the chat itself,
+// and the rows that reference it. Scheduled messages and label associations go
+// too, because they point at a chat that no longer exists.
+func (s *Store) DeleteChat(ctx context.Context, chatJID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		"DELETE FROM messages WHERE chat_jid = ?",
+		"DELETE FROM poll_votes WHERE poll_chat_jid = ?",
+		"DELETE FROM message_read_positions WHERE chat_jid = ?",
+		"DELETE FROM label_associations WHERE chat_jid = ?",
+		"DELETE FROM scheduled_messages WHERE chat_jid = ?",
+		"DELETE FROM chats WHERE jid = ?",
+	} {
+		if _, err := tx.ExecContext(ctx, stmt, chatJID); err != nil {
+			if strings.Contains(err.Error(), "no such table") {
+				continue
+			}
+			return fmt.Errorf("%s: %w", stmt, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // ArchiveChat archives a chat so it no longer appears in normal chat listings.
 // Read-only chats remain in the database and can be unarchived later.
 func (s *Store) ArchiveChat(chatJID string) error {

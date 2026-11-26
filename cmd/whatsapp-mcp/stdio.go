@@ -17,6 +17,7 @@ import (
 	mcpsrv "github.com/muhammedanasmithadi/whatsapp-mcp/internal/mcp"
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/stt"
 )
 
 // parseEnabledTools resolves the -enabled-tools flag against its environment
@@ -106,6 +107,12 @@ func runStdio(storeDir string, redactor *security.Redactor, args []string) int {
 		deviceName = "WhatsApp MCP"
 	}
 
+	var sttClient stt.Client
+	if ep := os.Getenv("WHATSAPP_MCP_STT_ENDPOINT"); ep != "" {
+		sttClient = stt.NewHTTPClient()
+		fmt.Fprintf(os.Stderr, "voice-note transcription enabled: %s\n", ep)
+	}
+
 	c, err := client.New(context.Background(), client.Config{
 		StoreDir:         storeDir,
 		Store:            st,
@@ -113,6 +120,7 @@ func runStdio(storeDir string, redactor *security.Redactor, args []string) int {
 		AllowedMediaRoot: allowedMediaRoot,
 		Redactor:         redactor,
 		DeviceName:       deviceName,
+		STTClient:        sttClient,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "init client: %v\n", err)

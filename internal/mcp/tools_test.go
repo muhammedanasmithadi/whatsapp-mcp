@@ -16,6 +16,7 @@ var expectedToolNames = []string{
 	"create_contact",
 	"create_channel",
 	"create_group",
+	"delete_chat",
 	"delete_contact",
 	"delete_message",
 	"delete_status",
@@ -174,7 +175,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 
 func TestNewServer_ToolCount(t *testing.T) {
 	s := NewServer(nil, nil, nil)
-	const want = 100
+	const want = 101
 	if got := len(s.MCP().ListTools()); got != want {
 		t.Errorf("tool count = %d, want %d", got, want)
 	}

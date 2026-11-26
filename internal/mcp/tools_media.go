@@ -36,7 +36,7 @@ func (s *Server) registerSendPoll() {
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a sendPollArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a sendPollArgs) (*mcp.CallToolResult, error) {
 		if r := requireNonEmpty("recipient", a.Recipient); r != nil {
 			return r, nil
 		}
@@ -49,6 +49,7 @@ func (s *Server) registerSendPoll() {
 		if len(a.Options) > 32 {
 			return mcp.NewToolResultError("options: max 32 entries"), nil
 		}
+		ctx = withRateLimitOverride(ctx, req)
 		r := s.client.SendPoll(ctx, a.Recipient, a.Question, a.Options, a.SelectableCount)
 		if !r.Success {
 			return s.toolErr("send_poll", a.Recipient, "", "send_poll", fmt.Errorf("%s", r.Message)), nil
@@ -74,7 +75,7 @@ func (s *Server) registerSendPollVote() {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a sendPollVoteArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a sendPollVoteArgs) (*mcp.CallToolResult, error) {
 		if r := requireNonEmpty("chat_jid", a.ChatJID); r != nil {
 			return r, nil
 		}
@@ -87,6 +88,7 @@ func (s *Server) registerSendPollVote() {
 		if len(a.Options) > 32 {
 			return mcp.NewToolResultError("options: max 32 entries"), nil
 		}
+		ctx = withRateLimitOverride(ctx, req)
 		r := s.client.SendPollVote(ctx, a.ChatJID, a.PollMessageID, a.Options)
 		if !r.Success {
 			return s.toolErr("send_poll_vote", a.ChatJID, a.PollMessageID, "send_poll_vote", fmt.Errorf("%s", r.Message)), nil
@@ -147,13 +149,14 @@ func (s *Server) registerSendContactCard() {
 		mcp.WithIdempotentHintAnnotation(false),
 		mcp.WithOpenWorldHintAnnotation(true),
 	)
-	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, a sendContactCardArgs) (*mcp.CallToolResult, error) {
+	s.addTool(tool, mcp.NewTypedToolHandler(func(ctx context.Context, req mcp.CallToolRequest, a sendContactCardArgs) (*mcp.CallToolResult, error) {
 		if r := requireNonEmpty("recipient", a.Recipient); r != nil {
 			return r, nil
 		}
 		if a.Name == "" && a.VCard == "" {
 			return mcp.NewToolResultError("name: required when vcard is not provided"), nil
 		}
+		ctx = withRateLimitOverride(ctx, req)
 		r := s.client.SendContactCard(ctx, a.Recipient, a.Name, a.Phone, a.VCard)
 		if !r.Success {
 			return s.toolErr("send_contact_card", a.Recipient, "", "send_contact_card", fmt.Errorf("%s", r.Message)), nil

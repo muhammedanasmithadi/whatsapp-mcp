@@ -114,3 +114,80 @@ func (c *Client) SetDisappearingTimer(ctx context.Context, recipient string, dur
 	}
 	return c.wa.SetDisappearingTimer(ctx, jid.ToNonAD(), duration, time.Now())
 }
+
+// ArchiveChat archives a chat in WhatsApp's app state so the phone and other
+// linked devices see it, and records the flag locally so get_chat agrees.
+func (c *Client) ArchiveChat(ctx context.Context, chatJID string) error {
+	if !c.wa.IsConnected() {
+		return errors.New("not connected to WhatsApp")
+	}
+	jid, err := parseRecipient(chatJID)
+	if err != nil {
+		return err
+	}
+	jid = jid.ToNonAD()
+	rowJID := c.chatRowJID(jid)
+	last := c.lastChatMessageTime(ctx, rowJID)
+	if err := c.wa.SendAppState(ctx, appstate.BuildArchive(jid, true, last, nil)); err != nil {
+		return fmt.Errorf("archive chat: %w", err)
+	}
+	if err := c.store.ArchiveChat(rowJID); err != nil {
+		c.log.Warnf("Record archive for %s: %v", rowJID, err)
+	}
+	return nil
+}
+
+// UnarchiveChat reverses ArchiveChat on both WhatsApp and the local row.
+func (c *Client) UnarchiveChat(ctx context.Context, chatJID string) error {
+	if !c.wa.IsConnected() {
+		return errors.New("not connected to WhatsApp")
+	}
+	jid, err := parseRecipient(chatJID)
+	if err != nil {
+		return err
+	}
+	jid = jid.ToNonAD()
+	rowJID := c.chatRowJID(jid)
+	last := c.lastChatMessageTime(ctx, rowJID)
+	if err := c.wa.SendAppState(ctx, appstate.BuildArchive(jid, false, last, nil)); err != nil {
+		return fmt.Errorf("unarchive chat: %w", err)
+	}
+	if err := c.store.UnarchiveChat(rowJID); err != nil {
+		c.log.Warnf("Record unarchive for %s: %v", rowJID, err)
+	}
+	return nil
+}
+
+// DeleteChat removes a chat from WhatsApp's chat list and clears this bridge's
+// cached rows for it. deleteMedia asks the phone to drop the media files too.
+// The message history disappears from this bridge immediately; WhatsApp keeps
+// it until its own retention window clears on the phone.
+func (c *Client) DeleteChat(ctx context.Context, chatJID string, deleteMedia bool) error {
+	if !c.wa.IsConnected() {
+		return errors.New("not connected to WhatsApp")
+	}
+	jid, err := parseRecipient(chatJID)
+	if err != nil {
+		return err
+	}
+	jid = jid.ToNonAD()
+	rowJID := c.chatRowJID(jid)
+	last := c.lastChatMessageTime(ctx, rowJID)
+	if err := c.wa.SendAppState(ctx, appstate.BuildDeleteChat(jid, last, nil, deleteMedia)); err != nil {
+		return fmt.Errorf("delete chat: %w", err)
+	}
+	if err := c.store.DeleteChat(ctx, rowJID); err != nil {
+		c.log.Warnf("Clear cached chat %s: %v", rowJID, err)
+	}
+	return nil
+}
+
+// lastChatMessageTime is the range anchor WhatsApp's chat actions expect. A
+// zero time makes whatsmeow use now.
+func (c *Client) lastChatMessageTime(ctx context.Context, rowJID string) time.Time {
+	chat, err := c.store.GetChat(ctx, rowJID, false)
+	if err != nil || chat == nil {
+		return time.Time{}
+	}
+	return chat.LastMessageTime
+}

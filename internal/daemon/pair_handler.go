@@ -87,6 +87,8 @@ type pairHandlers struct {
 
 	startedAt time.Time
 
+	driver pairDriver
+
 	// Metrics counters (Prometheus text format at /metrics).
 	metrics struct {
 		messagesIn  int64
@@ -112,7 +114,7 @@ type pairHandlers struct {
 
 // newPairHandlers constructs handlers with default rate limiters.
 func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishWS func(evType, data string), webhookSecret []byte, authToken string) *pairHandlers {
-	return &pairHandlers{
+	handlers := &pairHandlers{
 		cache: cache,
 		reset: reset,
 		coder: coder,
@@ -134,6 +136,10 @@ func newPairHandlers(cache *PairCache, reset resetter, coder pairCoder, publishW
 		webhookSecret:  webhookSecret,
 		authToken:      authToken,
 	}
+	if driver, ok := reset.(pairDriver); ok {
+		handlers.driver = driver
+	}
+	return handlers
 }
 
 // generateCSRFToken creates a new random CSRF token, stores it in the
@@ -250,6 +256,16 @@ type healthzResponse struct {
 // handleHealth reports daemon liveness and pairing state. Intentionally
 // lightweight and always available (no auth, no rate limit) so systemd,
 // load balancers, and MCP clients can probe it cheaply.
+// connected reports whether the WhatsApp socket is live. The pairing cache
+// cannot answer that: a paired device whose socket dropped still says paired,
+// and every tool would fail while healthz claimed otherwise.
+func (h *pairHandlers) connected() bool {
+	if h.driver == nil {
+		return false
+	}
+	return h.driver.IsConnected()
+}
+
 func (h *pairHandlers) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "GET required", http.StatusMethodNotAllowed)
@@ -257,7 +273,7 @@ func (h *pairHandlers) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	snap := h.cache.Snapshot()
 	resp := healthzResponse{
-		Connected: h.cache.Paired(),
+		Connected: h.connected(),
 		Paired:    h.cache.Paired(),
 		UptimeSec: int64(time.Since(h.startedAt).Seconds()),
 		State:     string(snap.State),

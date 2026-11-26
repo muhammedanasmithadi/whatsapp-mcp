@@ -37,7 +37,7 @@ func runServe(storeDir string, redactor *security.Redactor, args []string) int {
 	fs.StringVar(&addr, "addr", "", "HTTP bind address (default: 127.0.0.1:8765, env WHATSAPP_MCP_ADDR)")
 	fs.BoolVar(&allowRemote, "allow-remote", false, "allow binding to a non-loopback address")
 	fs.BoolVar(&readOnly, "read-only", false, "expose only read/query tools; disable send, edit, delete, mark-read, group/privacy mutations (env WHATSAPP_MCP_READ_ONLY)")
-	fs.StringVar(&logFormat, "log-format", "text", "log output format: text (default) or json")
+	fs.StringVar(&logFormat, "log-format", "", "log output format: text (default) or json; also settable with WHATSAPP_MCP_LOG_FORMAT")
 	fs.BoolVar(&fullHistorySync, "full-history-sync", false, "after pairing, request full history sync for all cached chats (env WHATSAPP_MCP_FULL_HISTORY_SYNC)")
 	fs.StringVar(&enabledTools, "enabled-tools", "", "comma-separated list of tool names to enable; if set, only these tools are registered (env WHATSAPP_MCP_ENABLED_TOOLS)")
 	if err := fs.Parse(args); err != nil {
