@@ -24,9 +24,7 @@ func (c *Client) SendLocation(ctx context.Context, recipient string, latitude, l
 		return SendResult{Success: false, Message: err.Error()}
 	}
 	if err := c.checkSendWindow(ctx, recipientJID); err != nil {
-		if c.metricSink != nil {
-			c.metricSink.IncRateLimited()
-		}
+		c.incRateLimited()
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
@@ -45,19 +43,13 @@ func (c *Client) SendLocation(ctx context.Context, recipient string, latitude, l
 		LocationMessage:    location,
 	}
 
-	if c.metricSink != nil {
-		c.metricSink.IncSends()
-	}
+	c.incSends()
 	resp, err := c.wa.SendMessage(ctx, recipientJID, msg)
 	if err != nil {
-		if c.metricSink != nil {
-			c.metricSink.IncErrors()
-		}
+		c.incErrors()
 		return SendResult{Success: false, Message: fmt.Sprintf("Error sending location: %v", err)}
 	}
-	if c.metricSink != nil {
-		c.metricSink.IncMessagesOut()
-	}
+	c.incMessagesOut()
 
 	label := name
 	if label == "" {

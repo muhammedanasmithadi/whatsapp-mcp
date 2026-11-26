@@ -703,6 +703,19 @@ func (s *Store) scanListMessageRow(row interface {
 // (timestamp, id) are returned. Fetches limit+1 rows to detect has_more.
 // Ordering is always timestamp DESC, id DESC.
 func (s *Store) ListMessagesCursor(ctx context.Context, params ListMessagesParams) (*ListMessagesResult, error) {
+	return s.listMessagesPage(ctx, params, false)
+}
+
+// ListMediaMessages returns the same page of messages restricted to rows that
+// carry media, sharing the pagination pipeline with ListMessagesCursor.
+func (s *Store) ListMediaMessages(ctx context.Context, params ListMessagesParams) (*ListMessagesResult, error) {
+	return s.listMessagesPage(ctx, params, true)
+}
+
+// listMessagesPage is the one keyset-pagination pipeline both message-list
+// tools use; mediaOnly adds the has-media filter and drops the text search,
+// which is the whole difference between them.
+func (s *Store) listMessagesPage(ctx context.Context, params ListMessagesParams, mediaOnly bool) (*ListMessagesResult, error) {
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 20
@@ -716,6 +729,9 @@ func (s *Store) ListMessagesCursor(ctx context.Context, params ListMessagesParam
 		args         []any
 	)
 
+	if mediaOnly {
+		whereClauses = append(whereClauses, "messages.media_type != '' AND messages.media_type IS NOT NULL")
+	}
 	if !params.After.IsZero() {
 		whereClauses = append(whereClauses, "messages.timestamp > ?")
 		args = append(args, params.After)
@@ -732,8 +748,8 @@ func (s *Store) ListMessagesCursor(ctx context.Context, params ListMessagesParam
 		whereClauses = append(whereClauses, "messages.chat_jid = ?")
 		args = append(args, params.ChatJID)
 	}
-	if params.Query != "" {
-		whereClauses = append(whereClauses, "LOWER(messages.content) LIKE LOWER(?)")
+	if !mediaOnly && params.Query != "" {
+		whereClauses = append(whereClauses, "LOWER(messages.content) LIKE LOWER(?) ESCAPE '\\'")
 		args = append(args, "%"+escapeLike(params.Query)+"%")
 	}
 	if params.Cursor != "" {
@@ -759,7 +775,7 @@ func (s *Store) ListMessagesCursor(ctx context.Context, params ListMessagesParam
 
 	rows, err := s.db.QueryContext(ctx, b.String(), args...)
 	if err != nil {
-		return nil, fmt.Errorf("list messages cursor: %w", err)
+		return nil, fmt.Errorf("list messages: %w", err)
 	}
 	defer rows.Close()
 
@@ -785,110 +801,6 @@ func (s *Store) ListMessagesCursor(ctx context.Context, params ListMessagesParam
 		result = result[:limit]
 	}
 
-	// Only emit a next_cursor when there are more rows to fetch. On the last
-	// page the cursor would point at the final message, which is useless.
-	var nextCursor string
-	if hasMore && len(result) > 0 {
-		last := result[len(result)-1]
-		nextCursor = encodeCursor(last.Timestamp, last.ID)
-	}
-
-	return &ListMessagesResult{
-		Messages:   result,
-		NextCursor: nextCursor,
-		HasMore:    hasMore,
-		Count:      len(result),
-	}, nil
-}
-
-// ListMediaMessages returns messages that have media attached (media_type != ""),
-// using the same keyset-pagination contract as ListMessagesCursor.
-func (s *Store) ListMediaMessages(ctx context.Context, params ListMessagesParams) (*ListMessagesResult, error) {
-	params.Query = "" // media listing does not do substring matching
-	return s.listMessagesWithMediaFilter(ctx, params)
-}
-
-func (s *Store) listMessagesWithMediaFilter(ctx context.Context, params ListMessagesParams) (*ListMessagesResult, error) {
-	limit := params.Limit
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
-	}
-
-	var (
-		whereClauses []string
-		args         []any
-	)
-
-	// Only messages that actually have media.
-	whereClauses = append(whereClauses, "messages.media_type != '' AND messages.media_type IS NOT NULL")
-
-	if !params.After.IsZero() {
-		whereClauses = append(whereClauses, "messages.timestamp > ?")
-		args = append(args, params.After)
-	}
-	if !params.Before.IsZero() {
-		whereClauses = append(whereClauses, "messages.timestamp < ?")
-		args = append(args, params.Before)
-	}
-	if params.SenderPhone != "" {
-		whereClauses = append(whereClauses, "messages.sender = ?")
-		args = append(args, params.SenderPhone)
-	}
-	if params.ChatJID != "" {
-		whereClauses = append(whereClauses, "messages.chat_jid = ?")
-		args = append(args, params.ChatJID)
-	}
-	if params.Cursor != "" {
-		cursorTs, cursorID, err := decodeCursor(params.Cursor)
-		if err != nil {
-			return nil, fmt.Errorf("invalid cursor: %w", err)
-		}
-		whereClauses = append(whereClauses,
-			"(messages.timestamp < ? OR (messages.timestamp = ? AND messages.id < ?))")
-		args = append(args, cursorTs, cursorTs, cursorID)
-	}
-
-	var b strings.Builder
-	b.WriteString("SELECT " + listMessageColumns + " FROM messages")
-	b.WriteString(" JOIN chats ON messages.chat_jid = chats.jid")
-	b.WriteString(" WHERE ")
-	b.WriteString(strings.Join(whereClauses, " AND "))
-	b.WriteString(" ORDER BY messages.timestamp DESC, messages.id DESC")
-	b.WriteString(" LIMIT ?")
-	args = append(args, limit+1)
-
-	rows, err := s.db.QueryContext(ctx, b.String(), args...)
-	if err != nil {
-		return nil, fmt.Errorf("list media messages: %w", err)
-	}
-	defer rows.Close()
-
-	var result []Message
-	for rows.Next() {
-		m, err := s.scanListMessageRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, m)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	rows.Close()
-
-	for i := range result {
-		result[i].SenderPhone = s.resolveSenderPhone(result[i].Sender)
-	}
-
-	hasMore := len(result) > limit
-	if hasMore {
-		result = result[:limit]
-	}
-
-	// Only emit a next_cursor when there are more rows to fetch.
 	var nextCursor string
 	if hasMore && len(result) > 0 {
 		last := result[len(result)-1]

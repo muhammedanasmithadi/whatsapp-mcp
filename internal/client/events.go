@@ -273,15 +273,11 @@ func (c *Client) handleMessage(msg *events.Message) {
 					c.redactor.MsgID(msg.Info.ID), c.redactor.JID(nm.chatJID))
 			} else {
 				c.log.Warnf("Failed to apply edit to message %s: %v", c.redactor.MsgID(msg.Info.ID), err)
-				if c.metricSink != nil {
-					c.metricSink.IncErrors()
-				}
+				c.incErrors()
 				return
 			}
 		} else {
-			if c.metricSink != nil {
-				c.metricSink.IncMessagesIn()
-			}
+			c.incMessagesIn()
 			c.log.Infof("[%s] %s %s: EDITED %s", msg.Info.Timestamp.Format("2006-01-02 15:04:05"),
 				"<-", c.redactor.JID(nm.msg.Sender), c.redactor.JID(nm.chatJID))
 			return
@@ -305,9 +301,7 @@ func (c *Client) handleMessage(msg *events.Message) {
 	err := c.store.StoreMessage(context.Background(), nm.msg, nm.mediaKey, nm.fileSHA256, nm.fileEncSHA256, nm.fileLength)
 
 	if err == nil {
-		if c.metricSink != nil {
-			c.metricSink.IncMessagesIn()
-		}
+		c.incMessagesIn()
 		if c.onIncomingMsg != nil {
 			payload := fmt.Sprintf(`{"chat_jid":"%s","sender":"%s","content":"%s","media_type":"%s","timestamp":"%s"}`,
 				c.redactor.JID(nm.msg.ChatJID), c.redactor.JID(nm.msg.Sender), c.redactor.Body(nm.msg.Content),
@@ -399,9 +393,7 @@ func (c *Client) handleMessage(msg *events.Message) {
 
 	if err != nil {
 		c.log.Warnf("Failed to store message: %v", err)
-		if c.metricSink != nil {
-			c.metricSink.IncErrors()
-		}
+		c.incErrors()
 		return
 	}
 
@@ -541,14 +533,10 @@ func (c *Client) handleHistorySync(historySync *events.HistorySync) {
 
 			if err := c.store.StoreMessage(ctx, nm.msg, nm.mediaKey, nm.fileSHA256, nm.fileEncSHA256, nm.fileLength); err != nil {
 				c.log.Warnf("Failed to store history message: %v", err)
-				if c.metricSink != nil {
-					c.metricSink.IncErrors()
-				}
+				c.incErrors()
 				continue
 			}
-			if c.metricSink != nil {
-				c.metricSink.IncMessagesIn()
-			}
+			c.incMessagesIn()
 			syncedCount++
 			if nm.msg.MediaType != "" {
 				c.log.Infof("Stored message: [%s] %s -> %s: [%s: %s] %s",
@@ -583,9 +571,7 @@ func (c *Client) importStatusV3Messages(ctx context.Context, ownID string, messa
 	// exists without overwriting a name learned from live traffic.
 	if err := c.store.EnsureChat(store.StatusBroadcastJID, "Status"); err != nil {
 		c.log.Warnf("Failed to ensure status chat row: %v", err)
-		if c.metricSink != nil {
-			c.metricSink.IncErrors()
-		}
+		c.incErrors()
 		return 0
 	}
 	stored := 0
@@ -657,14 +643,10 @@ func (c *Client) importStatusV3Messages(ctx context.Context, ownID string, messa
 		}
 		if err := c.store.StoreMessage(ctx, nm.msg, nm.mediaKey, nm.fileSHA256, nm.fileEncSHA256, nm.fileLength); err != nil {
 			c.log.Warnf("Failed to store status history message %s: %v", c.redactor.MsgID(msgID), err)
-			if c.metricSink != nil {
-				c.metricSink.IncErrors()
-			}
+			c.incErrors()
 			continue
 		}
-		if c.metricSink != nil {
-			c.metricSink.IncMessagesIn()
-		}
+		c.incMessagesIn()
 		stored++
 		c.log.Infof("[%s] status <- %s: [%s] %s",
 			timestamp.Format("2006-01-02 15:04:05"), c.redactor.JID(nm.msg.Sender),
@@ -887,9 +869,7 @@ func extractPollOptionNames(pc *waProto.PollCreationMessage) []string {
 
 // handleLabelEdit stores a label edit event (label created/updated/deleted).
 func (c *Client) handleLabelEdit(evt *events.LabelEdit) {
-	if c.metricSink != nil {
-		c.metricSink.IncMessagesIn()
-	}
+	c.incMessagesIn()
 	labelID := evt.LabelID
 	labelName := ""
 	color := ""
@@ -911,9 +891,7 @@ func (c *Client) handleLabelEdit(evt *events.LabelEdit) {
 
 // handleLabelAssociationChat stores a label association event (chat labeled/unlabeled).
 func (c *Client) handleLabelAssociationChat(evt *events.LabelAssociationChat) {
-	if c.metricSink != nil {
-		c.metricSink.IncMessagesIn()
-	}
+	c.incMessagesIn()
 	chatJID := evt.JID.String()
 	labelID := evt.LabelID
 	labeled := store.LabelUnlabeled

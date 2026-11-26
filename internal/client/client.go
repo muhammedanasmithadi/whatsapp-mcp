@@ -198,6 +198,36 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 
 // SetMetricSink sets the metrics sink after construction. Useful when the
 // sink (the daemon's pairHandlers) is created after the client.
+func (c *Client) incMessagesIn() {
+	if c.metricSink != nil {
+		c.metricSink.IncMessagesIn()
+	}
+}
+
+func (c *Client) incMessagesOut() {
+	if c.metricSink != nil {
+		c.metricSink.IncMessagesOut()
+	}
+}
+
+func (c *Client) incSends() {
+	if c.metricSink != nil {
+		c.metricSink.IncSends()
+	}
+}
+
+func (c *Client) incErrors() {
+	if c.metricSink != nil {
+		c.metricSink.IncErrors()
+	}
+}
+
+func (c *Client) incRateLimited() {
+	if c.metricSink != nil {
+		c.metricSink.IncRateLimited()
+	}
+}
+
 func (c *Client) SetMetricSink(sink MetricSink) {
 	c.metricSink = sink
 }

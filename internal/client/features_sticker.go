@@ -113,22 +113,16 @@ func (c *Client) SendSticker(ctx context.Context, recipient, mediaPath string) S
 	}
 
 	if err := c.checkSendWindow(ctx, recipientJID); err != nil {
-		if c.metricSink != nil {
-			c.metricSink.IncRateLimited()
-		}
+		c.incRateLimited()
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
 	resp, err := c.wa.Upload(ctx, asset.data, whatsmeow.MediaImage)
 	if err != nil {
-		if c.metricSink != nil {
-			c.metricSink.IncErrors()
-		}
+		c.incErrors()
 		return SendResult{Success: false, Message: fmt.Sprintf("Error uploading sticker: %v", err)}
 	}
-	if c.metricSink != nil {
-		c.metricSink.IncSends()
-	}
+	c.incSends()
 
 	msg := &waE2E.Message{
 		MessageContextInfo: c.ephemeralContextInfo(ctx, recipientJID),
@@ -153,14 +147,10 @@ func (c *Client) SendSticker(ctx context.Context, recipient, mediaPath string) S
 
 	sendResp, err := c.wa.SendMessage(ctx, recipientJID, msg)
 	if err != nil {
-		if c.metricSink != nil {
-			c.metricSink.IncErrors()
-		}
+		c.incErrors()
 		return SendResult{Success: false, Message: fmt.Sprintf("Error sending sticker: %v", err)}
 	}
-	if c.metricSink != nil {
-		c.metricSink.IncMessagesOut()
-	}
+	c.incMessagesOut()
 
 	if err := c.persistSent(ctx, recipientJID, sendResp.ID, "[sticker]", asset.path, msg); err != nil {
 		c.log.Errorf("sent sticker not cached: %v", err)

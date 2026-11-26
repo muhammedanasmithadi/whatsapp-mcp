@@ -148,21 +148,15 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 
 	rateWasContact := c.IsKnownContact(plan.jid)
 	if err := c.checkSendWindow(ctx, plan.jid); err != nil {
-		if c.metricSink != nil {
-			c.metricSink.IncRateLimited()
-		}
+		c.incRateLimited()
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
-	if c.metricSink != nil {
-		c.metricSink.IncSends()
-	}
+	c.incSends()
 
 	resp, err := c.wa.SendMessage(ctx, plan.jid, plan.message)
 	if err != nil {
-		if c.metricSink != nil {
-			c.metricSink.IncErrors()
-		}
+		c.incErrors()
 		// The send never reached WhatsApp, so give the budget back rather than
 		// letting a flapping socket consume messages the operator can never
 		// send. Whatsmeow writes the frame before it waits for the ack, so a
@@ -173,9 +167,7 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 		return SendResult{Success: false, Message: fmt.Sprintf("Error sending message: %v", err)}
 	}
 
-	if c.metricSink != nil {
-		c.metricSink.IncMessagesOut()
-	}
+	c.incMessagesOut()
 
 	// WhatsApp delivered the message; a cache failure must not flip the
 	// result, because a caller that reads failure retries and sends a second
