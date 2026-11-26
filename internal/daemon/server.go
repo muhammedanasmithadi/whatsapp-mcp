@@ -88,6 +88,8 @@ type pairDriver interface {
 	MarkMessageFailed(id, reason string) error
 	// SendMessage sends a WhatsApp message.
 	SendMessage(ctx context.Context, chatJID string, content string) (*client.SendResult, error)
+	// SendScheduledMessage sends a queued message, which may carry media.
+	SendScheduledMessage(ctx context.Context, chatJID, content, mediaPath string) (*client.SendResult, error)
 	// Download fetches one cached message's media to the media root.
 	Download(ctx context.Context, messageID, chatJID string) client.DownloadResult
 }
@@ -491,7 +493,7 @@ func (s *Server) runScheduler(ctx context.Context) {
 				case <-time.After(sendInterval):
 				}
 			}
-			r, err := s.cfg.Driver.SendMessage(ctx, m.ChatJID, m.Content)
+			r, err := s.cfg.Driver.SendScheduledMessage(ctx, m.ChatJID, m.Content, m.MediaPath)
 			sentThisPass++
 			if err != nil {
 				if markErr := s.cfg.Driver.MarkMessageFailed(m.ID, err.Error()); markErr != nil {

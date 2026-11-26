@@ -502,7 +502,7 @@ func TestOpen_StorePermissions(t *testing.T) {
 func TestClaimScheduledMessage(t *testing.T) {
 	s := openTestStore(t)
 	chat := "447700000001@s.whatsapp.net"
-	if err := s.StoreScheduledMessage("m1", chat, "hi", time.Now().Add(time.Hour)); err != nil {
+	if err := s.StoreScheduledMessage("m1", chat, "hi", "", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	// First claim wins.

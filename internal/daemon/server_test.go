@@ -108,6 +108,10 @@ func (p *fakePairDriver) SendMessage(ctx context.Context, chatJID string, conten
 	return &client.SendResult{Success: true, Message: "ok", ID: "fake-id"}, nil
 }
 
+func (p *fakePairDriver) SendScheduledMessage(ctx context.Context, chatJID, content, mediaPath string) (*client.SendResult, error) {
+	return &client.SendResult{Success: true, Message: "ok", ID: "fake-id"}, nil
+}
+
 func (p *fakePairDriver) Download(ctx context.Context, messageID, chatJID string) client.DownloadResult {
 	return client.DownloadResult{Success: false, Message: "not supported in tests"}
 }

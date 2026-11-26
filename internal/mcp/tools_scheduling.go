@@ -31,6 +31,7 @@ func (s *Server) registerSchedulingActionTools() {
 type scheduleMessageArgs struct {
 	ChatJID      string `json:"chat_jid"`
 	Message      string `json:"message"`
+	MediaPath    string `json:"media_path,omitempty"`
 	ScheduledAt  string `json:"scheduled_at,omitempty"`
 	DelaySeconds int64  `json:"delay_seconds,omitempty"`
 }
@@ -48,9 +49,10 @@ func newScheduledID() (string, error) {
 
 func (s *Server) registerScheduleMessage() {
 	tool := mcp.NewTool("schedule_message",
-		mcp.WithDescription("Queue a WhatsApp text message to be sent later by the paired account. Provide exactly one of scheduled_at (RFC 3339 with offset, e.g. 2026-11-07T09:00:00+05:30) or delay_seconds (1 to 31536000). The daemon sends it with a timer at the due time; the queue survives restarts. The message is sent even if the MCP client that queued it is gone. If WhatsApp is disconnected when it comes due, the send fails and is recorded as failed — reconnect first for reliable delivery. Use list_scheduled_messages to inspect the queue and cancel_scheduled_message to remove a pending item before it sends. Returns the stored scheduled message with its id and status."),
+		mcp.WithDescription("Queue a WhatsApp message, text or media, to be sent later by the paired account. Provide exactly one of scheduled_at (RFC 3339 with offset, e.g. 2026-11-07T09:00:00+05:30) or delay_seconds (1 to 31536000). The daemon sends it with a timer at the due time; the queue survives restarts. The message is sent even if the MCP client that queued it is gone. If WhatsApp is disconnected when it comes due, the send fails and is recorded as failed — reconnect first for reliable delivery. Use list_scheduled_messages to inspect the queue and cancel_scheduled_message to remove a pending item before it sends. Returns the stored scheduled message with its id and status."),
 		mcp.WithString("chat_jid", mcp.Required(), mcp.Description(recipientDesc)),
-		mcp.WithString("message", mcp.Required(), mcp.Description("message body text")),
+		mcp.WithString("message", mcp.Required(), mcp.Description("message body text, or the caption when media_path is set")),
+		mcp.WithString("media_path", mcp.Description("absolute path to an image, audio, video or document under the media root; schedules a media message with this caption")),
 		mcp.WithString("scheduled_at", mcp.Description("absolute send time as RFC 3339 with offset (e.g. 2026-11-07T09:00:00+05:30)")),
 		mcp.WithNumber("delay_seconds", mcp.Description("relative delay in seconds (alternative to scheduled_at)")),
 		mcp.WithReadOnlyHintAnnotation(false),
@@ -64,6 +66,12 @@ func (s *Server) registerScheduleMessage() {
 		}
 		if strings.TrimSpace(a.Message) == "" {
 			return errorResult(ErrInvalidParameter("message", "non-empty string", "empty string")), nil
+		}
+		mediaPath := strings.TrimSpace(a.MediaPath)
+		if mediaPath != "" {
+			if _, err := s.client.ValidateMediaPath(mediaPath); err != nil {
+				return s.toolErr("schedule_message", a.ChatJID, "", "schedule", fmt.Errorf("media_path rejected: %w", err)), nil
+			}
 		}
 		if len(a.Message) > maxScheduledMessageBytes {
 			return errorResult(ErrInvalidParameter("message", "at most 65536 bytes", fmt.Sprintf("%d bytes", len(a.Message)))), nil
@@ -110,13 +118,14 @@ func (s *Server) registerScheduleMessage() {
 		if err != nil {
 			return s.toolErr("schedule_message", chatJID, "", "schedule", fmt.Errorf("generate id: %w", err)), nil
 		}
-		if err := s.scheduling.StoreScheduledMessage(id, chatJID, a.Message, when); err != nil {
+		if err := s.scheduling.StoreScheduledMessage(id, chatJID, a.Message, mediaPath, when); err != nil {
 			return s.toolErr("schedule_message", chatJID, id, "schedule", err), nil
 		}
 		return s.toolOK("schedule_message", chatJID, id, "schedule", when.Format(time.RFC3339), store.ScheduledMessage{
 			ID:          id,
 			ChatJID:     chatJID,
 			Content:     a.Message,
+			MediaPath:   mediaPath,
 			ScheduledAt: when,
 			Status:      "pending",
 		})

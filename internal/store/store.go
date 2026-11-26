@@ -132,6 +132,7 @@ type ScheduledMessage struct {
 	ID            string    `json:"id"`
 	ChatJID       string    `json:"chat_jid"`
 	Content       string    `json:"content"`
+	MediaPath     string    `json:"media_path,omitempty"`
 	ScheduledAt   time.Time `json:"scheduled_at"`
 	Status        string    `json:"status"` // pending, sent, failed
 	SentAt        time.Time `json:"sent_at,omitempty"`
@@ -843,10 +844,10 @@ func (s *Store) ListEvidence(lid string) ([]map[string]any, error) {
 }
 
 // StoreScheduledMessage inserts a scheduled message.
-func (s *Store) StoreScheduledMessage(id, chatJID, content string, scheduledAt time.Time) error {
+func (s *Store) StoreScheduledMessage(id, chatJID, content, mediaPath string, scheduledAt time.Time) error {
 	_, err := s.db.Exec(
-		"INSERT OR REPLACE INTO scheduled_messages (id, chat_jid, content, scheduled_at) VALUES (?, ?, ?, ?)",
-		id, chatJID, content, scheduledAt,
+		"INSERT OR REPLACE INTO scheduled_messages (id, chat_jid, content, media_path, scheduled_at) VALUES (?, ?, ?, ?, ?)",
+		id, chatJID, content, mediaPath, scheduledAt,
 	)
 	return err
 }
@@ -874,7 +875,7 @@ func (s *Store) NextScheduledMessageTime() (time.Time, bool, error) {
 // reclaimed after a crash so a message is never stuck in-flight forever.
 func (s *Store) GetPendingScheduledMessages(ctx context.Context) ([]ScheduledMessage, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, chat_jid, content, scheduled_at FROM scheduled_messages
+		SELECT id, chat_jid, content, media_path, scheduled_at FROM scheduled_messages
 		WHERE status IN ('pending', 'sending') AND scheduled_at <= ?
 		ORDER BY scheduled_at ASC
 	`, time.Now())
@@ -884,10 +885,14 @@ func (s *Store) GetPendingScheduledMessages(ctx context.Context) ([]ScheduledMes
 	defer rows.Close()
 	var msgs []ScheduledMessage
 	for rows.Next() {
-		var m ScheduledMessage
-		if err := rows.Scan(&m.ID, &m.ChatJID, &m.Content, &m.ScheduledAt); err != nil {
+		var (
+			m         ScheduledMessage
+			mediaPath sql.NullString
+		)
+		if err := rows.Scan(&m.ID, &m.ChatJID, &m.Content, &mediaPath, &m.ScheduledAt); err != nil {
 			return nil, err
 		}
+		m.MediaPath = mediaPath.String
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()
@@ -915,7 +920,7 @@ func (s *Store) MarkMessageFailed(id, reason string) error {
 // first. status filters to pending, sent, or failed; an empty string returns
 // every state.
 func (s *Store) ListScheduledMessages(status string) ([]ScheduledMessage, error) {
-	query := `SELECT id, chat_jid, content, scheduled_at, status,
+	query := `SELECT id, chat_jid, content, media_path, scheduled_at, status,
 		sent_at, COALESCE(sent_message_id, ''), COALESCE(error, '')
 		FROM scheduled_messages`
 	args := []any{}
@@ -933,12 +938,14 @@ func (s *Store) ListScheduledMessages(status string) ([]ScheduledMessage, error)
 	var msgs []ScheduledMessage
 	for rows.Next() {
 		var (
-			m      ScheduledMessage
-			sentAt sql.NullTime
+			m         ScheduledMessage
+			mediaPath sql.NullString
+			sentAt    sql.NullTime
 		)
-		if err := rows.Scan(&m.ID, &m.ChatJID, &m.Content, &m.ScheduledAt, &m.Status, &sentAt, &m.SentMessageID, &m.Error); err != nil {
+		if err := rows.Scan(&m.ID, &m.ChatJID, &m.Content, &mediaPath, &m.ScheduledAt, &m.Status, &sentAt, &m.SentMessageID, &m.Error); err != nil {
 			return nil, err
 		}
+		m.MediaPath = mediaPath.String
 		if sentAt.Valid {
 			m.SentAt = sentAt.Time
 		}
@@ -1170,6 +1177,7 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
 	id TEXT PRIMARY KEY,
 	chat_jid TEXT NOT NULL,
 	content TEXT NOT NULL,
+	media_path TEXT NOT NULL DEFAULT '',
 	scheduled_at TIMESTAMP NOT NULL,
 	status TEXT NOT NULL DEFAULT 'pending',
 	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1286,7 +1294,7 @@ func migrateSchema(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("pragma table_info(scheduled_messages): %w", err)
 	}
-	hasScheduleError := false
+	var hasScheduleError, hasScheduleMediaPath bool
 	for schedRows.Next() {
 		var (
 			cid        int
@@ -1300,13 +1308,12 @@ func migrateSchema(db *sql.DB) error {
 			schedRows.Close()
 			return fmt.Errorf("scan table_info(scheduled_messages): %w", err)
 		}
-		if name == "error" {
+		switch name {
+		case "error":
 			hasScheduleError = true
+		case "media_path":
+			hasScheduleMediaPath = true
 		}
-	}
-	if err := schedRows.Err(); err != nil {
-		schedRows.Close()
-		return fmt.Errorf("iterate table_info(scheduled_messages): %w", err)
 	}
 	if err := schedRows.Close(); err != nil {
 		return fmt.Errorf("close table_info(scheduled_messages): %w", err)
@@ -1318,6 +1325,11 @@ func migrateSchema(db *sql.DB) error {
 		if !hasScheduleError {
 			if _, err := db.Exec("ALTER TABLE scheduled_messages ADD COLUMN error TEXT"); err != nil {
 				return fmt.Errorf("add column error: %w", err)
+			}
+		}
+		if !hasScheduleMediaPath {
+			if _, err := db.Exec("ALTER TABLE scheduled_messages ADD COLUMN media_path TEXT NOT NULL DEFAULT ''"); err != nil {
+				return fmt.Errorf("add column media_path: %w", err)
 			}
 		}
 	}

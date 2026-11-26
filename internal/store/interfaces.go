@@ -26,7 +26,7 @@ type SchedulingStore interface {
 	// EnsureChat creates a chat row if the JID is not cached yet, preserving
 	// any existing row.
 	EnsureChat(jid, name string) error
-	StoreScheduledMessage(id, chatJID, content string, scheduledAt time.Time) error
+	StoreScheduledMessage(id, chatJID, content, mediaPath string, scheduledAt time.Time) error
 	ListScheduledMessages(status string) ([]ScheduledMessage, error)
 	CancelScheduledMessage(id string) (bool, error)
 	ClaimScheduledMessage(id string) (bool, error)

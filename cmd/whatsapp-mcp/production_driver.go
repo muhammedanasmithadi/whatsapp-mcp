@@ -180,6 +180,16 @@ func (p *productionDriver) MarkMessageFailed(id, reason string) error {
 }
 
 // SendMessage sends a WhatsApp message.
+func (p *productionDriver) SendScheduledMessage(ctx context.Context, chatJID, content, mediaPath string) (*client.SendResult, error) {
+	var r client.SendResult
+	if mediaPath != "" {
+		r = p.c.SendMediaWithOptions(ctx, client.SendMediaOptions{Recipient: chatJID, Caption: content, MediaPath: mediaPath})
+	} else {
+		r = p.c.Send(ctx, chatJID, content)
+	}
+	return &r, nil
+}
+
 func (p *productionDriver) Download(ctx context.Context, messageID, chatJID string) client.DownloadResult {
 	return p.c.Download(ctx, messageID, chatJID, "")
 }
