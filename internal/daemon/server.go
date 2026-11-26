@@ -544,7 +544,12 @@ func (s *Server) onLoggedOut(ctx context.Context) func() {
 			_ = s.cfg.Driver.Connect(ctx, s.onLoggedOut(ctx))
 		}
 		go func() {
-			_ = s.cfg.Driver.StartPairing(ctx, onQR, onPairSuccess)
+			if err := s.cfg.Driver.StartPairing(ctx, onQR, onPairSuccess); err != nil {
+				s.cache.SetError("pairing: " + err.Error())
+				if s.log != nil {
+					s.log.Printf("[ERROR] re-pairing after logout failed: %v", err)
+				}
+			}
 		}()
 	}
 }
