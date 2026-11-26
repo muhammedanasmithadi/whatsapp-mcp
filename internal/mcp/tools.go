@@ -21,6 +21,9 @@ func (s *Server) registerTools() {
 	// Read-only tools are always registered.
 	s.registerQueryTools()
 
+	// preview_send is read-only: it builds the payload without sending it.
+	s.registerPreviewSend()
+
 	// resolve_contacts and diagnose_contacts are read-only.
 	s.registerResolveContacts()
 	s.registerDiagnoseContacts()

@@ -20,11 +20,33 @@ import (
 	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/store"
 )
 
+// statusEphemeralSecs is the lifetime of a Status (Story) update. Statuses are
+// ephemeral (24h) and the phone client expects the message-level ephemeral
+// context to be set; without it a posted video can fail to play.
+const statusEphemeralSecs uint32 = 86400
+
+// applyStatusEphemeral marks each media submessage of a status update with the
+// 24h expiration the phone client expects on the media itself.
+func applyStatusEphemeral(msg *waProto.Message) {
+	expiration := proto.Uint32(statusEphemeralSecs)
+	if msg.VideoMessage != nil {
+		msg.VideoMessage.ContextInfo = &waProto.ContextInfo{Expiration: expiration}
+	}
+	if msg.ImageMessage != nil {
+		msg.ImageMessage.ContextInfo = &waProto.ContextInfo{Expiration: expiration}
+	}
+}
+
 // SendResult is the public return value from Send/SendMediaWithOptions.
 type SendResult struct {
 	Success bool
 	Message string
 	ID      string
+	// PHash is the participant-list hash this client declared; ExpectedPHash is
+	// the hash WhatsApp returned in the ack. Both are empty for sends where the
+	// server did not echo a hash.
+	PHash         string
+	ExpectedPHash string
 }
 
 // SendMediaOptions bundles the inputs to SendMediaWithOptions so callers can
@@ -46,42 +68,93 @@ func (c *Client) SendMediaWithOptions(ctx context.Context, opts SendMediaOptions
 	return c.send(ctx, opts.Recipient, opts.Caption, opts.MediaPath, opts.ViewOnce)
 }
 
+type outboundPlan struct {
+	jid     types.JID
+	message *waProto.Message
+	preview SendPreview
+}
+
+// planOutbound resolves a send target and builds the exact protocol message
+// the send path would transmit, together with the dry-run summary of it. When
+// upload is false no media bytes leave the machine: the media is read, typed
+// and probed, but never uploaded, so the message keeps its local shape only.
+func (c *Client) planOutbound(ctx context.Context, recipient, message, mediaPath string, viewOnce, upload bool) (*outboundPlan, error) {
+	recipientJID, err := parseRecipient(recipient)
+	if err != nil {
+		return nil, err
+	}
+
+	isStatus := recipientJID.String() == store.StatusBroadcastJID
+	msg := &waProto.Message{
+		MessageContextInfo: c.ephemeralContextInfo(ctx, recipientJID),
+	}
+	if isStatus && msg.MessageContextInfo == nil {
+		msg.MessageContextInfo = &waProto.MessageContextInfo{
+			MessageAddOnDurationInSecs: proto.Uint32(statusEphemeralSecs),
+		}
+	}
+
+	preview := SendPreview{
+		Recipient:   recipient,
+		ResolvedJID: recipientJID.String(),
+		ChatKind:    chatKind(recipientJID),
+		ViewOnce:    viewOnce,
+	}
+
+	if mediaPath != "" {
+		asset, err := c.loadMedia(ctx, mediaPath, upload)
+		if err != nil {
+			return nil, err
+		}
+		c.fillMediaMessage(msg, asset, message, viewOnce)
+		if isStatus {
+			applyStatusEphemeral(msg)
+			preview.EphemeralSecs = statusEphemeralSecs
+		}
+		preview.Media = asset.preview()
+		preview.MessageKind = mediaKindName(asset.kind)
+	} else {
+		msg.Conversation = proto.String(message)
+		preview.MessageKind = "text"
+	}
+	preview.Text = message
+	preview.TextChars = len(message)
+
+	if isStatus && !upload {
+		audience, err := c.statusAudience(ctx)
+		if err != nil {
+			preview.Warnings = append(preview.Warnings, err.Error())
+		} else {
+			preview.Audience = audience
+		}
+	}
+
+	return &outboundPlan{jid: recipientJID, message: msg, preview: preview}, nil
+}
+
 // send is the unified implementation shared by Send and SendMediaWithOptions.
 func (c *Client) send(ctx context.Context, recipient, message, mediaPath string, viewOnce bool) SendResult {
 	if !c.wa.IsConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
 	}
 
-	recipientJID, err := parseRecipient(recipient)
+	plan, err := c.planOutbound(ctx, recipient, message, mediaPath, viewOnce, true)
 	if err != nil {
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
-	if err := c.checkSendRate(ctx, recipientJID); err != nil {
+	if err := c.checkSendRate(ctx, plan.jid); err != nil {
 		if c.metricSink != nil {
 			c.metricSink.IncRateLimited()
 		}
 		return SendResult{Success: false, Message: err.Error()}
 	}
 
-	// Detect disappearing timer for group chats; direct chats default to 0.
-	msg := &waProto.Message{
-		MessageContextInfo: c.ephemeralContextInfo(ctx, recipientJID),
-	}
-
-	if mediaPath != "" {
-		if err := c.attachMedia(ctx, msg, mediaPath, message, viewOnce); err != nil {
-			return SendResult{Success: false, Message: err.Error()}
-		}
-	} else {
-		msg.Conversation = proto.String(message)
-	}
-
 	if c.metricSink != nil {
 		c.metricSink.IncSends()
 	}
 
-	resp, err := c.wa.SendMessage(ctx, recipientJID, msg)
+	resp, err := c.wa.SendMessage(ctx, plan.jid, plan.message)
 	if err != nil {
 		if c.metricSink != nil {
 			c.metricSink.IncErrors()
@@ -93,13 +166,58 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 		c.metricSink.IncMessagesOut()
 	}
 
-	// Cache the sent message so local history stays complete.
-	c.persistSent(ctx, recipientJID, resp.ID, message, mediaPath, msg)
+	c.persistSent(ctx, plan.jid, resp.ID, message, mediaPath, plan.message)
 
-	return SendResult{
-		Success: true,
-		Message: fmt.Sprintf("Message sent to %s", recipient),
-		ID:      resp.ID,
+	return sendResultFor(recipient, resp)
+}
+
+// sendResultFor turns a whatsmeow ack into the public SendResult. When the
+// server returns a participant-list hash that differs from the one this client
+// declared, WhatsApp did not accept the fan-out, so the send is reported as a
+// failure carrying both hashes and the message id instead of a blind success.
+func sendResultFor(recipient string, resp whatsmeow.SendResponse) SendResult {
+	result := SendResult{
+		Success:       true,
+		Message:       fmt.Sprintf("Message sent to %s", recipient),
+		ID:            resp.ID,
+		PHash:         resp.PHash,
+		ExpectedPHash: resp.ExpectedPHash,
+	}
+	if resp.ExpectedPHash != "" && resp.ExpectedPHash != resp.PHash {
+		result.Success = false
+		result.Message = fmt.Sprintf(
+			"WhatsApp rejected the fan-out for this send: the server expects participant-list hash %s but this client computed %s, so some recipients did not receive it (message id %s)",
+			resp.ExpectedPHash, resp.PHash, resp.ID)
+	}
+	return result
+}
+
+// chatKind names the class of chat a JID addresses, for the dry-run summary.
+func chatKind(jid types.JID) string {
+	switch jid.Server {
+	case types.GroupServer:
+		return "group"
+	case types.BroadcastServer:
+		return "broadcast"
+	case types.NewsletterServer:
+		return "newsletter"
+	case types.BotServer:
+		return "bot"
+	default:
+		return "contact"
+	}
+}
+
+func mediaKindName(kind whatsmeow.MediaType) string {
+	switch kind {
+	case whatsmeow.MediaImage:
+		return "image"
+	case whatsmeow.MediaAudio:
+		return "audio"
+	case whatsmeow.MediaVideo:
+		return "video"
+	default:
+		return "document"
 	}
 }
 
@@ -176,33 +294,105 @@ func parseRecipient(recipient string) (types.JID, error) {
 	return types.JID{User: canonical, Server: types.DefaultUserServer}, nil
 }
 
-// attachMedia uploads mediaPath and populates the appropriate message field.
-// When viewOnce is true, the resulting Image/Video/Audio submessage is flagged
-// as view-once. DocumentMessage has no view-once support in WhatsApp clients,
-// so the flag is silently ignored for documents.
-func (c *Client) attachMedia(ctx context.Context, msg *waProto.Message, mediaPath, caption string, viewOnce bool) error {
+// mediaAsset is a media file resolved for sending: validated on disk, typed by
+// extension, probed for its playable shape, and — on a real send only —
+// uploaded to WhatsApp's media servers.
+type mediaAsset struct {
+	path        string
+	data        []byte
+	kind        whatsmeow.MediaType
+	mime        string
+	video       media.VideoInfo
+	thumb       []byte
+	seconds     uint32
+	waveform    []byte
+	upload      *whatsmeow.UploadResponse
+	thumbUpload *whatsmeow.UploadResponse
+}
+
+func (a *mediaAsset) preview() *MediaPreview {
+	p := &MediaPreview{
+		Path:         a.path,
+		Bytes:        len(a.data),
+		Kind:         mediaKindName(a.kind),
+		MimeType:     a.mime,
+		Width:        a.video.Width,
+		Height:       a.video.Height,
+		Seconds:      a.video.Duration,
+		HasThumbnail: len(a.thumb) > 0,
+	}
+	if a.seconds > 0 && p.Seconds == 0 {
+		p.Seconds = a.seconds
+	}
+	return p
+}
+
+// loadMedia validates mediaPath against the configured media root, reads and
+// types it, and probes its playable shape. When upload is true it also uploads
+// the file (and a video's thumbnail) to WhatsApp, which is the only step that
+// touches the network.
+func (c *Client) loadMedia(ctx context.Context, mediaPath string, upload bool) (*mediaAsset, error) {
 	safePath, err := c.ValidateMediaPath(mediaPath)
 	if err != nil {
-		return fmt.Errorf("media_path rejected: %w", err)
+		return nil, fmt.Errorf("media_path rejected: %w", err)
 	}
-	mediaData, err := os.ReadFile(safePath)
+	data, err := os.ReadFile(safePath)
 	if err != nil {
-		return fmt.Errorf("read media file: %w", err)
+		return nil, fmt.Errorf("read media file: %w", err)
 	}
 
-	mediaType, mimeType := mediaTypeFromExt(safePath)
-
-	resp, err := c.wa.Upload(ctx, mediaData, mediaType)
-	if err != nil {
-		return fmt.Errorf("Error uploading media: %v", err)
+	asset := &mediaAsset{path: safePath, data: data}
+	asset.kind, asset.mime = mediaTypeFromExt(safePath)
+	if asset.kind == whatsmeow.MediaVideo {
+		info, thumb, _ := media.AnalyzeVideo(ctx, safePath)
+		asset.video = info
+		asset.thumb = thumb
 	}
+	if asset.kind == whatsmeow.MediaAudio && strings.Contains(asset.mime, "ogg") {
+		seconds, waveform, aerr := media.AnalyzeOggOpus(data)
+		if aerr != nil {
+			return nil, fmt.Errorf("Failed to analyze Ogg Opus file: %v", aerr)
+		}
+		asset.seconds = seconds
+		asset.waveform = waveform
+	} else if asset.kind == whatsmeow.MediaAudio {
+		c.log.Warnf("Not an Ogg Opus file: %s", asset.mime)
+	}
+
+	if !upload {
+		return asset, nil
+	}
+
+	resp, err := c.wa.Upload(ctx, data, asset.kind)
+	if err != nil {
+		return nil, fmt.Errorf("Error uploading media: %v", err)
+	}
+	asset.upload = &resp
 	c.log.Infof("Media uploaded: url=%s bytes=%d", c.redactor.URL(resp.URL), resp.FileLength)
 
-	switch mediaType {
+	if len(asset.thumb) > 0 {
+		thumbResp, thumbErr := c.wa.Upload(ctx, asset.thumb, whatsmeow.MediaImage)
+		if thumbErr == nil {
+			asset.thumbUpload = &thumbResp
+		}
+	}
+	return asset, nil
+}
+
+// fillMediaMessage populates the media submessage of msg from a loaded asset.
+// When viewOnce is true the Image/Video/Audio submessage is flagged view-once;
+// DocumentMessage has no view-once support in WhatsApp clients, so the flag is
+// silently ignored for documents.
+func (c *Client) fillMediaMessage(msg *waProto.Message, asset *mediaAsset, caption string, viewOnce bool) {
+	resp := asset.upload
+	if resp == nil {
+		resp = &whatsmeow.UploadResponse{}
+	}
+	switch asset.kind {
 	case whatsmeow.MediaImage:
 		msg.ImageMessage = &waProto.ImageMessage{
 			Caption:       proto.String(caption),
-			Mimetype:      proto.String(mimeType),
+			Mimetype:      proto.String(asset.mime),
 			URL:           &resp.URL,
 			DirectPath:    &resp.DirectPath,
 			MediaKey:      resp.MediaKey,
@@ -214,20 +404,12 @@ func (c *Client) attachMedia(ctx context.Context, msg *waProto.Message, mediaPat
 			msg.ImageMessage.ViewOnce = proto.Bool(true)
 		}
 	case whatsmeow.MediaAudio:
-		var seconds uint32 = 30
-		var waveform []byte
-		if strings.Contains(mimeType, "ogg") {
-			s, w, aerr := media.AnalyzeOggOpus(mediaData)
-			if aerr != nil {
-				return fmt.Errorf("Failed to analyze Ogg Opus file: %v", aerr)
-			}
-			seconds = s
-			waveform = w
-		} else {
-			c.log.Warnf("Not an Ogg Opus file: %s", mimeType)
+		seconds := asset.seconds
+		if seconds == 0 {
+			seconds = 30
 		}
 		msg.AudioMessage = &waProto.AudioMessage{
-			Mimetype:      proto.String(mimeType),
+			Mimetype:      proto.String(asset.mime),
 			URL:           &resp.URL,
 			DirectPath:    &resp.DirectPath,
 			MediaKey:      resp.MediaKey,
@@ -236,15 +418,15 @@ func (c *Client) attachMedia(ctx context.Context, msg *waProto.Message, mediaPat
 			FileLength:    &resp.FileLength,
 			Seconds:       proto.Uint32(seconds),
 			PTT:           proto.Bool(true),
-			Waveform:      waveform,
+			Waveform:      asset.waveform,
 		}
 		if viewOnce {
 			msg.AudioMessage.ViewOnce = proto.Bool(true)
 		}
 	case whatsmeow.MediaVideo:
-		msg.VideoMessage = &waProto.VideoMessage{
+		vmsg := &waProto.VideoMessage{
 			Caption:       proto.String(caption),
-			Mimetype:      proto.String(mimeType),
+			Mimetype:      proto.String(asset.mime),
 			URL:           &resp.URL,
 			DirectPath:    &resp.DirectPath,
 			MediaKey:      resp.MediaKey,
@@ -252,15 +434,32 @@ func (c *Client) attachMedia(ctx context.Context, msg *waProto.Message, mediaPat
 			FileSHA256:    resp.FileSHA256,
 			FileLength:    &resp.FileLength,
 		}
+		if asset.video.Duration > 0 {
+			vmsg.Seconds = proto.Uint32(asset.video.Duration)
+		}
+		if asset.video.Height > 0 {
+			vmsg.Height = proto.Uint32(asset.video.Height)
+		}
+		if asset.video.Width > 0 {
+			vmsg.Width = proto.Uint32(asset.video.Width)
+		}
+		if len(asset.thumb) > 0 {
+			vmsg.JPEGThumbnail = asset.thumb
+			if asset.thumbUpload != nil {
+				vmsg.ThumbnailDirectPath = proto.String(asset.thumbUpload.DirectPath)
+				vmsg.ThumbnailSHA256 = asset.thumbUpload.FileSHA256
+				vmsg.ThumbnailEncSHA256 = asset.thumbUpload.FileEncSHA256
+			}
+		}
+		msg.VideoMessage = vmsg
 		if viewOnce {
 			msg.VideoMessage.ViewOnce = proto.Bool(true)
 		}
 	case whatsmeow.MediaDocument:
-		// View-once on documents is not supported by WhatsApp clients; silently ignored.
 		msg.DocumentMessage = &waProto.DocumentMessage{
-			Title:         proto.String(filepath.Base(mediaPath)),
+			Title:         proto.String(filepath.Base(asset.path)),
 			Caption:       proto.String(caption),
-			Mimetype:      proto.String(mimeType),
+			Mimetype:      proto.String(asset.mime),
 			URL:           &resp.URL,
 			DirectPath:    &resp.DirectPath,
 			MediaKey:      resp.MediaKey,
@@ -269,7 +468,6 @@ func (c *Client) attachMedia(ctx context.Context, msg *waProto.Message, mediaPat
 			FileLength:    &resp.FileLength,
 		}
 	}
-	return nil
 }
 
 // mediaTypeFromExt maps a file extension to a whatsmeow MediaType + mime type.

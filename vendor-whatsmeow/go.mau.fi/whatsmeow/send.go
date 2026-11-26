@@ -130,6 +130,9 @@ type SendResponse struct {
 
 	// The chat JID the message was actually sent to.
 	Chat types.JID
+
+	PHash         string
+	ExpectedPHash string
 }
 
 // SendRequestExtra contains the optional parameters for SendMessage.
@@ -469,6 +472,8 @@ func (cli *Client) SendMessage(ctx context.Context, to types.JID, message *waE2E
 		err = fmt.Errorf("%w %d", ErrServerReturnedError, errorCode)
 	}
 	expectedPHash := ag.OptionalString("phash")
+	resp.PHash = phash
+	resp.ExpectedPHash = expectedPHash
 	if len(expectedPHash) > 0 && phash != expectedPHash {
 		cli.Log.Warnf("Server returned different participant list hash (%s != %s) when sending to %s. Some devices may not have received the message.", phash, expectedPHash, to)
 		switch to.Server {

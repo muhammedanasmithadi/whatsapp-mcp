@@ -158,7 +158,7 @@ stdout carries JSON-RPC frames only; every diagnostic goes to stderr.
 
 ## MCP tools reference
 
-The server exposes **89 tools**, grouped by domain:
+The server exposes **90 tools**, grouped by domain:
 
 ### Messaging
 
@@ -178,6 +178,7 @@ The server exposes **89 tools**, grouped by domain:
 | `recover_media` | Request WhatsApp to re-send media for a message |
 | `transcribe_voice_note` | Transcribe a voice note via the configured STT endpoint |
 | `batch_send_messages` | Send multiple messages in one call |
+| `preview_send` | Dry-run a send: show the post-processed payload, and for a Status the audience, device count, and participant-list hash, without sending |
 
 ### Statuses (Stories)
 
@@ -189,6 +190,13 @@ The server exposes **89 tools**, grouped by domain:
 | `delete_status` | Delete one of your own status updates |
 | `get_status_viewers` | Viewers of a status (WhatsApp does not expose this to linked devices; returns empty list with a note) |
 | `set_status_privacy_setting` | Set who can see your statuses (`all`, `contacts`, `close_friends`, `custom`) |
+
+`send_status` fails when WhatsApp does not accept the fan-out: the server
+returns the participant-list hash it computed for your audience, and the post
+is rejected when it differs from the hash this client declared. The error
+carries both hashes and the message id. Use `preview_send` with
+`recipient='status@broadcast'` to see the audience, its device count, and the
+hash before posting.
 
 
 ### Profile & presence

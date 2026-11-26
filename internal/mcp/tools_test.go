@@ -64,6 +64,7 @@ var expectedToolNames = []string{
 	"pairing_status",
 	"pin_chat",
 	"pin_message",
+	"preview_send",
 	"recover_media",
 	"request_sync",
 	"request_status_sync",
@@ -163,7 +164,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 
 func TestNewServer_ToolCount(t *testing.T) {
 	s := NewServer(nil, nil, nil)
-	const want = 89
+	const want = 90
 	if got := len(s.MCP().ListTools()); got != want {
 		t.Errorf("tool count = %d, want %d", got, want)
 	}
