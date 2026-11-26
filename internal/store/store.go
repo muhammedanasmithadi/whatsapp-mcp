@@ -56,6 +56,7 @@ type Message struct {
 	DirectPath  string `json:"direct_path,omitempty"`
 	ChatName    string `json:"chat_name,omitempty"`
 	PhoneNumber string `json:"phone_number,omitempty"`
+	IsStarred   bool   `json:"is_starred"`
 }
 
 // Chat is a cached WhatsApp chat.
@@ -351,6 +352,16 @@ func (s *Store) StoreMessage(ctx context.Context, m Message, mediaKey, fileSHA25
 // UpdateMessage replaces the content of an existing message row. Used when
 // WhatsApp delivers an edit event for a previously-cached message. Returns
 // sql.ErrNoRows when no matching row exists.
+// SetMessageStarred records the star flag WhatsApp's app state accepted.
+// whatsmeow keeps no app-state values, so this mirror is the only read-back
+// the bridge has for a star.
+func (s *Store) SetMessageStarred(ctx context.Context, id, chatJID string, starred bool) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE messages SET is_starred = ? WHERE id = ? AND chat_jid = ?",
+		starred, id, chatJID)
+	return err
+}
+
 func (s *Store) UpdateMessage(ctx context.Context, id, chatJID, content string) error {
 	result, err := s.db.ExecContext(ctx,
 		"UPDATE messages SET content = ? WHERE id = ? AND chat_jid = ?",
@@ -1084,6 +1095,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	file_enc_sha256 BLOB,
 	file_length INTEGER,
 	poll_options_json TEXT,
+	is_starred BOOLEAN NOT NULL DEFAULT 0,
 	PRIMARY KEY (id, chat_jid),
 	FOREIGN KEY (chat_jid) REFERENCES chats(jid)
 );
@@ -1208,6 +1220,7 @@ func migrateSchema(db *sql.DB) error {
 	defer rows.Close()
 	hasPollOptions := false
 	hasDirectPath := false
+	hasStarred := false
 	for rows.Next() {
 		var (
 			cid        int
@@ -1226,6 +1239,9 @@ func migrateSchema(db *sql.DB) error {
 		if name == "direct_path" {
 			hasDirectPath = true
 		}
+		if name == "is_starred" {
+			hasStarred = true
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate table_info(messages): %w", err)
@@ -1238,6 +1254,11 @@ func migrateSchema(db *sql.DB) error {
 	if !hasDirectPath {
 		if _, err := db.Exec("ALTER TABLE messages ADD COLUMN direct_path TEXT"); err != nil {
 			return fmt.Errorf("add column direct_path: %w", err)
+		}
+	}
+	if !hasStarred {
+		if _, err := db.Exec("ALTER TABLE messages ADD COLUMN is_starred BOOLEAN NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add column is_starred: %w", err)
 		}
 	}
 	// chats table: add archived column if missing (legacy databases)

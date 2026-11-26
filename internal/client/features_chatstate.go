@@ -95,7 +95,15 @@ func (c *Client) StarMessage(ctx context.Context, chat string, messageID string,
 		}
 		sender = c.wa.Store.ID.ToNonAD()
 	}
-	return c.wa.SendAppState(ctx, appstate.BuildStar(chatJID, sender, types.MessageID(messageID), cached.IsFromMe, starred))
+	if err := c.wa.SendAppState(ctx, appstate.BuildStar(chatJID, sender, types.MessageID(messageID), cached.IsFromMe, starred)); err != nil {
+		return err
+	}
+	// whatsmeow keeps no app-state values, so mirror the flag we just asked
+	// WhatsApp to accept; otherwise a star has no read-back at all.
+	if err := c.store.SetMessageStarred(ctx, messageID, c.chatRowJID(chatJID), starred); err != nil {
+		c.log.Warnf("Record star for %s: %v", messageID, err)
+	}
+	return nil
 }
 
 // SetDisappearingTimer sets or clears a chat's disappearing-message timer.

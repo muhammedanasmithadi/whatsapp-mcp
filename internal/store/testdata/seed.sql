@@ -25,8 +25,10 @@ CREATE TABLE IF NOT EXISTS messages (
     file_enc_sha256 BLOB,
     file_length INTEGER,
     poll_options_json TEXT,
+    is_starred BOOLEAN NOT NULL DEFAULT 0,
     PRIMARY KEY (id, chat_jid),
     FOREIGN KEY (chat_jid) REFERENCES chats(jid)
+
 );
 
 CREATE TABLE IF NOT EXISTS poll_votes (

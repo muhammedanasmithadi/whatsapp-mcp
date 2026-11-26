@@ -311,7 +311,13 @@ func (c *Client) ephemeralContextInfo(ctx context.Context, chat types.JID) *waPr
 		return nil
 	}
 	gi, err := c.wa.GetGroupInfo(ctx, chat)
-	if err != nil || gi.DisappearingTimer == 0 {
+	if err != nil {
+		// The send still goes out; the message just never expires as the group
+		// setting says. Say so instead of failing silently.
+		c.log.Warnf("Read disappearing timer for %s: %v", chat, err)
+		return nil
+	}
+	if gi.DisappearingTimer == 0 {
 		return nil
 	}
 	c.log.Infof("Auto-detected group disappearing timer: %d seconds", gi.DisappearingTimer)

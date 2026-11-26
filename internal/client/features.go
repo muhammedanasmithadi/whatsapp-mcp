@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -68,8 +69,18 @@ func (c *Client) MarkChatRead(ctx context.Context, chatJID string, limit int) (i
 	for i, id := range rawIDs {
 		bySender[rawSenders[i]] = append(bySender[rawSenders[i]], types.MessageID(id))
 	}
+	// Send receipts in a deterministic order: iterating the map would ack an
+	// arbitrary subset first and the failure message would name whatever
+	// sender happened to come up next.
+	senders := make([]string, 0, len(bySender))
+	for senderRaw := range bySender {
+		senders = append(senders, senderRaw)
+	}
+	sort.Strings(senders)
+
 	count := 0
-	for senderRaw, ids := range bySender {
+	var firstErr error
+	for _, senderRaw := range senders {
 		var sender types.JID
 		if senderRaw != "" {
 			parsed, err := types.ParseJID(senderRaw)
@@ -80,12 +91,15 @@ func (c *Client) MarkChatRead(ctx context.Context, chatJID string, limit int) (i
 				sender = types.JID{User: senderRaw, Server: types.DefaultUserServer}
 			}
 		}
-		if err := c.wa.MarkRead(ctx, ids, time.Now(), chat, sender); err != nil {
-			return count, fmt.Errorf("mark read (sender=%s): %w", senderRaw, err)
+		if err := c.wa.MarkRead(ctx, bySender[senderRaw], time.Now(), chat, sender); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("mark read (sender=%s): %w", senderRaw, err)
+			}
+			continue
 		}
-		count += len(ids)
+		count += len(bySender[senderRaw])
 	}
-	return count, nil
+	return count, firstErr
 }
 
 // checkActionRate applies the daemon-side rate limit to non-message WhatsApp
