@@ -614,8 +614,10 @@ func (c *Client) resolveChatNameFallback(ctx context.Context, jid types.JID, sen
 		}
 		return "Group " + jid.User
 	}
-	if contact, err := c.wa.Store.Contacts.GetContact(ctx, jid); err == nil && contact.FullName != "" {
-		return contact.FullName
+	if c.wa != nil {
+		if contact, err := c.wa.Store.Contacts.GetContact(ctx, jid); err == nil && contact.FullName != "" {
+			return contact.FullName
+		}
 	}
 	if sender != "" {
 		return sender

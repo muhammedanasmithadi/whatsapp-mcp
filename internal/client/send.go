@@ -116,7 +116,7 @@ func (c *Client) planOutbound(ctx context.Context, recipient, message, mediaPath
 }
 
 func (c *Client) send(ctx context.Context, recipient, message, mediaPath string, viewOnce bool) SendResult {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
 	}
 
@@ -133,7 +133,7 @@ func (c *Client) send(ctx context.Context, recipient, message, mediaPath string,
 
 	c.incSends()
 
-	resp, err := c.wa.SendMessage(ctx, plan.jid, plan.message)
+	resp, err := c.sendMessage(ctx, plan.jid, plan.message)
 	if err != nil {
 		c.incErrors()
 		if !unknownOutcome(err.Error()) && c.limiter != nil {
@@ -334,7 +334,7 @@ func (c *Client) loadMedia(ctx context.Context, mediaPath string, upload bool) (
 		return asset, nil
 	}
 
-	resp, err := c.wa.Upload(ctx, data, asset.kind)
+	resp, err := c.uploadMedia(ctx, data, asset.kind)
 	if err != nil {
 		return nil, fmt.Errorf("Error uploading media: %v", err)
 	}
@@ -342,7 +342,7 @@ func (c *Client) loadMedia(ctx context.Context, mediaPath string, upload bool) (
 	c.log.Infof("Media uploaded: url=%s bytes=%d", c.redactor.URL(resp.URL), resp.FileLength)
 
 	if len(asset.thumb) > 0 {
-		thumbResp, thumbErr := c.wa.Upload(ctx, asset.thumb, whatsmeow.MediaImage)
+		thumbResp, thumbErr := c.uploadMedia(ctx, asset.thumb, whatsmeow.MediaImage)
 		if thumbErr == nil {
 			asset.thumbUpload = &thumbResp
 		}
@@ -511,7 +511,7 @@ func (c *Client) persistSent(ctx context.Context, recipientJID types.JID, msgID,
 	}
 
 	ourJID := ""
-	if c.wa.Store.ID != nil {
+	if c.wa != nil && c.wa.Store != nil && c.wa.Store.ID != nil {
 		ourJID = c.wa.Store.ID.User
 	}
 

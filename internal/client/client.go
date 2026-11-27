@@ -14,6 +14,7 @@ import (
 	"github.com/mdp/qrterminal"
 
 	"go.mau.fi/whatsmeow"
+	waProto "go.mau.fi/whatsmeow/binary/proto"
 	wmstore "go.mau.fi/whatsmeow/store"
 
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -59,6 +60,9 @@ const (
 type Client struct {
 	wa               *whatsmeow.Client
 	downloadMedia    func(context.Context, whatsmeow.DownloadableMessage) ([]byte, error)
+	uploadMedia      func(context.Context, []byte, whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
+	sendMessage      func(context.Context, types.JID, *waProto.Message) (whatsmeow.SendResponse, error)
+	socketConnected  func() bool
 	store            *store.Store
 	log              waLog.Logger
 	handlerID        uint32
@@ -144,8 +148,13 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	}
 
 	return &Client{
-		wa:               wa,
-		downloadMedia:    wa.Download,
+		wa:            wa,
+		downloadMedia: wa.Download,
+		uploadMedia:   wa.Upload,
+		sendMessage: func(ctx context.Context, to types.JID, message *waProto.Message) (whatsmeow.SendResponse, error) {
+			return wa.SendMessage(ctx, to, message)
+		},
+		socketConnected:  wa.IsConnected,
 		store:            cfg.Store,
 		log:              logger,
 		allowedMediaRoot: cfg.AllowedMediaRoot,
