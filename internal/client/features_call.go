@@ -8,7 +8,7 @@ import (
 )
 
 func (c *Client) RejectCall(ctx context.Context, from, callID string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	if strings.TrimSpace(callID) == "" {

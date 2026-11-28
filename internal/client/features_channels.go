@@ -57,7 +57,7 @@ func topReactions(counts map[string]int, limit int) map[string]int {
 }
 
 func (c *Client) ListChannels(ctx context.Context) ([]*ChannelInfo, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	return c.wa.GetSubscribedNewsletters(ctx)
@@ -98,7 +98,7 @@ func (c *Client) resolveChannelJID(ctx context.Context, input string) (types.JID
 }
 
 func (c *Client) GetChannelInfo(ctx context.Context, input string) (*ChannelInfo, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	input = strings.TrimSpace(input)
@@ -116,7 +116,7 @@ func (c *Client) GetChannelInfo(ctx context.Context, input string) (*ChannelInfo
 }
 
 func (c *Client) ListChannelMessages(ctx context.Context, input string, count int, before int64) ([]ChannelMessage, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	if count <= 0 {
@@ -166,7 +166,7 @@ func (c *Client) ListChannelMessages(ctx context.Context, input string, count in
 }
 
 func (c *Client) FollowChannel(ctx context.Context, input string) (*ChannelInfo, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	jid, info, err := c.resolveChannelJID(ctx, input)
@@ -186,7 +186,7 @@ func (c *Client) FollowChannel(ctx context.Context, input string) (*ChannelInfo,
 }
 
 func (c *Client) UnfollowChannel(ctx context.Context, input string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, _, err := c.resolveChannelJID(ctx, input)
@@ -197,7 +197,7 @@ func (c *Client) UnfollowChannel(ctx context.Context, input string) error {
 }
 
 func (c *Client) SetChannelMuted(ctx context.Context, input string, muted bool) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, _, err := c.resolveChannelJID(ctx, input)

@@ -24,7 +24,7 @@ type ChannelPostResult struct {
 }
 
 func (c *Client) SendChannelMessage(ctx context.Context, input, message, mediaPath string) (*ChannelPostResult, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	message = strings.TrimSpace(message)
@@ -144,7 +144,7 @@ func buildChannelMediaMessage(asset *mediaAsset, upload *whatsmeow.UploadRespons
 }
 
 func (c *Client) CreateChannel(ctx context.Context, name, description, picturePath string) (*ChannelInfo, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	name = strings.TrimSpace(name)

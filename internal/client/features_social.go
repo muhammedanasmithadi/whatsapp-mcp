@@ -40,7 +40,7 @@ type ProfilePictureResult struct {
 }
 
 func (c *Client) GetProfilePicture(ctx context.Context, recipient string, preview bool) (*ProfilePictureResult, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	jid, err := parseRecipient(recipient)
@@ -142,7 +142,7 @@ type ContactInfoResult struct {
 }
 
 func (c *Client) GetContactInfo(ctx context.Context, recipient string) (*ContactInfoResult, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	jid, err := parseRecipient(recipient)
@@ -259,7 +259,7 @@ func (c *Client) ListStatusUpdates(ctx context.Context, opts ListStatusOptions) 
 }
 
 func (c *Client) MarkStatusViewed(ctx context.Context, sender string, ids []string) (int, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return 0, errors.New("not connected to WhatsApp")
 	}
 	senderJID, err := parseRecipient(sender)
@@ -293,7 +293,7 @@ func (c *Client) MarkStatusViewed(ctx context.Context, sender string, ids []stri
 	for i, id := range targets {
 		messageIDs[i] = types.MessageID(id)
 	}
-	if err := c.wa.MarkRead(ctx, messageIDs, time.Now(), types.StatusBroadcastJID, senderJID); err != nil {
+	if err := c.markRead(ctx, messageIDs, time.Now(), types.StatusBroadcastJID, senderJID); err != nil {
 		return 0, fmt.Errorf("mark status viewed: %w", err)
 	}
 	return len(targets), nil
@@ -320,7 +320,7 @@ type PresenceResult struct {
 }
 
 func (c *Client) GetPresence(ctx context.Context, recipient string, wait time.Duration) (*PresenceResult, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	jid, err := parseRecipient(recipient)
@@ -476,7 +476,7 @@ func (c *Client) cachedPresence(jid types.JID) (*PresenceResult, error) {
 }
 
 func (c *Client) SendStatus(ctx context.Context, mediaPath, caption string) SendResult {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
 	}
 	r := c.SendMediaWithOptions(ctx, SendMediaOptions{
@@ -489,7 +489,7 @@ func (c *Client) SendStatus(ctx context.Context, mediaPath, caption string) Send
 }
 
 func (c *Client) DeleteStatus(ctx context.Context, messageID string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	if messageID == "" {
@@ -499,7 +499,7 @@ func (c *Client) DeleteStatus(ctx context.Context, messageID string) error {
 }
 
 func (c *Client) SetProfilePicture(ctx context.Context, mediaPath string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	safePath, err := c.ValidateMediaPath(mediaPath)
@@ -534,7 +534,7 @@ func (c *Client) SetProfilePicture(ctx context.Context, mediaPath string) error 
 }
 
 func (c *Client) SetStatusPrivacy(ctx context.Context, mode string, userJIDs []string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	var distMode waSyncAction.StatusPrivacyAction_StatusDistributionMode
@@ -557,5 +557,5 @@ func (c *Client) SetStatusPrivacy(ctx context.Context, mode string, userJIDs []s
 		jids[i] = jid
 	}
 	patch := appstate.BuildStatusPrivacy(distMode, jids)
-	return c.wa.SendAppState(ctx, patch)
+	return c.sendAppState(ctx, patch)
 }

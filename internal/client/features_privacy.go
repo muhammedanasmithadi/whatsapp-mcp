@@ -59,7 +59,7 @@ func (c *Client) SendPresence(ctx context.Context, state string) error {
 	if err != nil {
 		return err
 	}
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	if err := c.wa.SendPresence(ctx, p); err != nil {
@@ -72,7 +72,7 @@ func (c *Client) SendPresence(ctx context.Context, state string) error {
 }
 
 func (c *Client) GetPrivacySettings(ctx context.Context) (string, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", errors.New("not connected to WhatsApp")
 	}
 	settings, err := c.wa.GetPrivacySettings(ctx)
@@ -111,7 +111,7 @@ func (c *Client) SetPrivacySetting(ctx context.Context, name, value string) (str
 	if err := validatePrivacySettingValue(value); err != nil {
 		return "", err
 	}
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", errors.New("not connected to WhatsApp")
 	}
 	settings, err := c.wa.SetPrivacySetting(ctx, types.PrivacySettingType(name), types.PrivacySetting(value))
@@ -126,7 +126,7 @@ func (c *Client) SetPrivacySetting(ctx context.Context, name, value string) (str
 }
 
 func (c *Client) SetStatusMessage(ctx context.Context, text string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	if err := c.wa.SetStatusMessage(ctx, types.SetStatusInput{Text: &text}); err != nil {

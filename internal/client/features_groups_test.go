@@ -8,10 +8,16 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/muhammedanasmithadi/whatsapp-mcp/internal/security"
 )
 
 func newDisconnectedClient() *Client {
-	return &Client{log: NewStderrLogger("test", "ERROR", false)}
+	return &Client{
+		log:             NewStderrLogger("test", "ERROR", false),
+		redactor:        &security.Redactor{},
+		socketConnected: func() bool { return false },
+	}
 }
 
 func TestParseParticipantJID_PhoneOnly(t *testing.T) {

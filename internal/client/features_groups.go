@@ -28,7 +28,7 @@ func parseParticipantJIDs(raws []string) ([]types.JID, error) {
 }
 
 func (c *Client) CreateGroup(ctx context.Context, name string, participants []string) (string, string, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", "", errors.New("not connected to WhatsApp")
 	}
 	if strings.TrimSpace(name) == "" {
@@ -53,7 +53,7 @@ func (c *Client) CreateGroup(ctx context.Context, name string, participants []st
 }
 
 func (c *Client) LeaveGroup(ctx context.Context, chatJID string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, err := types.ParseJID(chatJID)
@@ -67,7 +67,7 @@ func (c *Client) LeaveGroup(ctx context.Context, chatJID string) error {
 }
 
 func (c *Client) ListJoinedGroups(ctx context.Context) (string, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", errors.New("not connected to WhatsApp")
 	}
 	groups, err := c.wa.GetJoinedGroups(ctx)
@@ -82,7 +82,7 @@ func (c *Client) ListJoinedGroups(ctx context.Context) (string, error) {
 }
 
 func (c *Client) GetGroupInfoJSON(ctx context.Context, chatJID string) (string, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", errors.New("not connected to WhatsApp")
 	}
 	jid, err := types.ParseJID(chatJID)
@@ -163,7 +163,7 @@ type ParticipantUpdateReport struct {
 }
 
 func (c *Client) UpdateGroupParticipants(ctx context.Context, chatJID string, participants []string, action string, opts ParticipantUpdateOptions) (*ParticipantUpdateReport, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	chat, err := types.ParseJID(chatJID)
@@ -427,7 +427,7 @@ func (c *Client) inviteParticipant(ctx context.Context, out *ParticipantOutcome,
 }
 
 func (c *Client) SetGroupName(ctx context.Context, chatJID, name string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, err := types.ParseJID(chatJID)
@@ -441,7 +441,7 @@ func (c *Client) SetGroupName(ctx context.Context, chatJID, name string) error {
 }
 
 func (c *Client) SetGroupTopic(ctx context.Context, chatJID, topic string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, err := types.ParseJID(chatJID)
@@ -455,7 +455,7 @@ func (c *Client) SetGroupTopic(ctx context.Context, chatJID, topic string) error
 }
 
 func (c *Client) SetGroupAnnounce(ctx context.Context, chatJID string, announceOnly bool) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, err := types.ParseJID(chatJID)
@@ -469,7 +469,7 @@ func (c *Client) SetGroupAnnounce(ctx context.Context, chatJID string, announceO
 }
 
 func (c *Client) SetGroupLocked(ctx context.Context, chatJID string, locked bool) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, err := types.ParseJID(chatJID)
@@ -483,7 +483,7 @@ func (c *Client) SetGroupLocked(ctx context.Context, chatJID string, locked bool
 }
 
 func (c *Client) GetGroupInviteLink(ctx context.Context, chatJID string, reset bool) (string, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", errors.New("not connected to WhatsApp")
 	}
 	jid, err := types.ParseJID(chatJID)
@@ -498,7 +498,7 @@ func (c *Client) GetGroupInviteLink(ctx context.Context, chatJID string, reset b
 }
 
 func (c *Client) JoinGroupWithLink(ctx context.Context, linkOrCode string) (string, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", errors.New("not connected to WhatsApp")
 	}
 	code := strings.TrimSpace(linkOrCode)

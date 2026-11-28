@@ -18,7 +18,7 @@ func (c *Client) chatRowJID(jid types.JID) string {
 }
 
 func (c *Client) SetChatMuted(ctx context.Context, recipient string, muted bool, duration time.Duration) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, err := parseRecipient(recipient)
@@ -28,7 +28,7 @@ func (c *Client) SetChatMuted(ctx context.Context, recipient string, muted bool,
 	if duration < 0 {
 		return errors.New("mute duration cannot be negative")
 	}
-	if err := c.wa.SendAppState(ctx, appstate.BuildMute(jid.ToNonAD(), muted, duration)); err != nil {
+	if err := c.sendAppState(ctx, appstate.BuildMute(jid.ToNonAD(), muted, duration)); err != nil {
 		return err
 	}
 	until := time.Time{}
@@ -42,14 +42,14 @@ func (c *Client) SetChatMuted(ctx context.Context, recipient string, muted bool,
 }
 
 func (c *Client) SetChatPinned(ctx context.Context, recipient string, pinned bool) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, err := parseRecipient(recipient)
 	if err != nil {
 		return err
 	}
-	if err := c.wa.SendAppState(ctx, appstate.BuildPin(jid.ToNonAD(), pinned)); err != nil {
+	if err := c.sendAppState(ctx, appstate.BuildPin(jid.ToNonAD(), pinned)); err != nil {
 		return err
 	}
 	if err := c.store.SetChatPinnedState(c.chatRowJID(jid), pinned); err != nil {
@@ -59,7 +59,7 @@ func (c *Client) SetChatPinned(ctx context.Context, recipient string, pinned boo
 }
 
 func (c *Client) StarMessage(ctx context.Context, chat string, messageID string, starred bool) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	if messageID == "" {
@@ -85,7 +85,7 @@ func (c *Client) StarMessage(ctx context.Context, chat string, messageID string,
 		}
 		sender = c.wa.Store.ID.ToNonAD()
 	}
-	if err := c.wa.SendAppState(ctx, appstate.BuildStar(chatJID, sender, types.MessageID(messageID), cached.IsFromMe, starred)); err != nil {
+	if err := c.sendAppState(ctx, appstate.BuildStar(chatJID, sender, types.MessageID(messageID), cached.IsFromMe, starred)); err != nil {
 		return err
 	}
 	if err := c.store.SetMessageStarred(ctx, messageID, c.chatRowJID(chatJID), starred); err != nil {
@@ -95,7 +95,7 @@ func (c *Client) StarMessage(ctx context.Context, chat string, messageID string,
 }
 
 func (c *Client) SetDisappearingTimer(ctx context.Context, recipient string, duration time.Duration) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	if duration < 0 {
@@ -109,7 +109,7 @@ func (c *Client) SetDisappearingTimer(ctx context.Context, recipient string, dur
 }
 
 func (c *Client) ArchiveChat(ctx context.Context, chatJID string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, err := parseRecipient(chatJID)
@@ -119,7 +119,7 @@ func (c *Client) ArchiveChat(ctx context.Context, chatJID string) error {
 	jid = jid.ToNonAD()
 	rowJID := c.chatRowJID(jid)
 	last := c.lastChatMessageTime(ctx, rowJID)
-	if err := c.wa.SendAppState(ctx, appstate.BuildArchive(jid, true, last, nil)); err != nil {
+	if err := c.sendAppState(ctx, appstate.BuildArchive(jid, true, last, nil)); err != nil {
 		return fmt.Errorf("archive chat: %w", err)
 	}
 	if err := c.store.ArchiveChat(rowJID); err != nil {
@@ -129,7 +129,7 @@ func (c *Client) ArchiveChat(ctx context.Context, chatJID string) error {
 }
 
 func (c *Client) UnarchiveChat(ctx context.Context, chatJID string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, err := parseRecipient(chatJID)
@@ -139,7 +139,7 @@ func (c *Client) UnarchiveChat(ctx context.Context, chatJID string) error {
 	jid = jid.ToNonAD()
 	rowJID := c.chatRowJID(jid)
 	last := c.lastChatMessageTime(ctx, rowJID)
-	if err := c.wa.SendAppState(ctx, appstate.BuildArchive(jid, false, last, nil)); err != nil {
+	if err := c.sendAppState(ctx, appstate.BuildArchive(jid, false, last, nil)); err != nil {
 		return fmt.Errorf("unarchive chat: %w", err)
 	}
 	if err := c.store.UnarchiveChat(rowJID); err != nil {
@@ -149,7 +149,7 @@ func (c *Client) UnarchiveChat(ctx context.Context, chatJID string) error {
 }
 
 func (c *Client) DeleteChat(ctx context.Context, chatJID string, deleteMedia bool) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, err := parseRecipient(chatJID)
@@ -159,7 +159,7 @@ func (c *Client) DeleteChat(ctx context.Context, chatJID string, deleteMedia boo
 	jid = jid.ToNonAD()
 	rowJID := c.chatRowJID(jid)
 	last := c.lastChatMessageTime(ctx, rowJID)
-	if err := c.wa.SendAppState(ctx, appstate.BuildDeleteChat(jid, last, nil, deleteMedia)); err != nil {
+	if err := c.sendAppState(ctx, appstate.BuildDeleteChat(jid, last, nil, deleteMedia)); err != nil {
 		return fmt.Errorf("delete chat: %w", err)
 	}
 	if err := c.store.DeleteChat(ctx, rowJID); err != nil {

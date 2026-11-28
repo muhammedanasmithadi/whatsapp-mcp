@@ -68,7 +68,7 @@ func parseParticipantRequestAction(action string) (whatsmeow.ParticipantRequestC
 }
 
 func (c *Client) SetGroupPhoto(ctx context.Context, chatJID, photoPath string) (string, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", errors.New("not connected to WhatsApp")
 	}
 	chat, err := parseGroupChatJID(chatJID)
@@ -94,7 +94,7 @@ func (c *Client) SetGroupPhoto(ctx context.Context, chatJID, photoPath string) (
 }
 
 func (c *Client) SetGroupJoinApprovalMode(ctx context.Context, chatJID string, enabled bool) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	chat, err := parseGroupChatJID(chatJID)
@@ -111,7 +111,7 @@ func (c *Client) SetGroupJoinApprovalMode(ctx context.Context, chatJID string, e
 }
 
 func (c *Client) SetGroupMemberAddMode(ctx context.Context, chatJID string, mode string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	chat, err := parseGroupChatJID(chatJID)
@@ -132,7 +132,7 @@ func (c *Client) SetGroupMemberAddMode(ctx context.Context, chatJID string, mode
 }
 
 func (c *Client) ListGroupJoinRequests(ctx context.Context, chatJID string) ([]GroupJoinRequest, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	chat, err := parseGroupChatJID(chatJID)
@@ -151,7 +151,7 @@ func (c *Client) ListGroupJoinRequests(ctx context.Context, chatJID string) ([]G
 }
 
 func (c *Client) ResolveGroupJoinRequest(ctx context.Context, chatJID string, participants []string, action string) ([]GroupJoinRequestOutcome, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	chat, err := parseGroupChatJID(chatJID)

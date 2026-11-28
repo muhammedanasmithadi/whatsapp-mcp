@@ -17,7 +17,7 @@ func (c *Client) PairPhone(ctx context.Context, phone string) (string, error) {
 	if c.wa.Store.ID != nil {
 		return "", errAlreadyPaired
 	}
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", errNotConnected
 	}
 	code, err := c.wa.PairPhone(ctx, phone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")

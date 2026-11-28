@@ -10,7 +10,7 @@ import (
 )
 
 func (c *Client) SendLocation(ctx context.Context, recipient string, latitude, longitude float64, name, address string) SendResult {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
 	}
 	if math.IsNaN(latitude) || math.IsNaN(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 {

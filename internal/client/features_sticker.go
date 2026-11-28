@@ -99,7 +99,7 @@ func (c *Client) loadStickerAsset(mediaPath string) (*stickerAsset, error) {
 }
 
 func (c *Client) SendSticker(ctx context.Context, recipient, mediaPath string) SendResult {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
 	}
 	asset, err := c.loadStickerAsset(mediaPath)

@@ -26,7 +26,7 @@ type LIDMode bool
 func (c *Client) RequestHistorySync(ctx context.Context, chatJID string, fromTimestamp time.Time, anchor AnchorMode, count int, useLID LIDMode) (string, error) {
 	c.log.Infof("[SYNC] Requesting history sync for chat: %s (anchor=%q, from=%v)", chatJID, anchor, fromTimestamp)
 
-	if c.wa == nil || !c.wa.IsConnected() {
+	if c.wa == nil || !c.socketConnected() {
 		return "", fmt.Errorf("client not connected")
 	}
 	if c.wa.Store.ID == nil {
@@ -121,7 +121,7 @@ func (c *Client) resolveAnchor(chatJID string, fromTimestamp time.Time, anchor A
 }
 
 func (c *Client) RequestStatusSync(ctx context.Context, count int) (string, error) {
-	if c.wa == nil || !c.wa.IsConnected() {
+	if c.wa == nil || !c.socketConnected() {
 		return "", fmt.Errorf("client not connected")
 	}
 	if c.wa.Store.ID == nil {

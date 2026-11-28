@@ -18,7 +18,7 @@ func (c *Client) SendPoll(ctx context.Context, recipient, question string, optio
 	if len(options) < 2 {
 		return SendResult{Success: false, Message: "poll needs at least 2 options"}
 	}
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
 	}
 	if selectableCount <= 0 {
@@ -54,7 +54,7 @@ func (c *Client) SendPoll(ctx context.Context, recipient, question string, optio
 }
 
 func (c *Client) SendPollVote(ctx context.Context, chatJID, pollMessageID string, options []string) SendResult {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
 	}
 	if pollMessageID == "" {
@@ -172,7 +172,7 @@ func resolvePollSenderJID(sender string, chat types.JID) (types.JID, error) {
 }
 
 func (c *Client) SendContactCard(ctx context.Context, recipient, name, phone, vcardOverride string) SendResult {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return SendResult{Success: false, Message: "Not connected to WhatsApp"}
 	}
 	if name == "" && phone == "" && vcardOverride == "" {

@@ -257,6 +257,20 @@ func (c *Client) IsKnownContact(jid types.JID) bool {
 	return known
 }
 
+func parseChatJID(chatJID string) (types.JID, error) {
+	if !strings.Contains(chatJID, "@") {
+		normalized, err := NormalizeRecipient(chatJID)
+		if err != nil {
+			return types.JID{}, err
+		}
+		if !strings.Contains(normalized, "@") {
+			return types.JID{User: normalized, Server: types.DefaultUserServer}, nil
+		}
+		chatJID = normalized
+	}
+	return types.ParseJID(chatJID)
+}
+
 func parseRecipient(recipient string) (types.JID, error) {
 	canonical, err := NormalizeRecipient(recipient)
 	if err != nil {

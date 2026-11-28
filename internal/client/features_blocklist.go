@@ -33,7 +33,7 @@ func blocklistJSON(list *types.Blocklist, toPhone func(string) string) any {
 }
 
 func (c *Client) GetBlocklist(ctx context.Context) (string, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", errors.New("not connected to WhatsApp")
 	}
 	list, err := c.wa.GetBlocklist(ctx, "")
@@ -56,7 +56,7 @@ func (c *Client) UnblockContact(ctx context.Context, jidRaw string) error {
 }
 
 func (c *Client) updateBlocklist(ctx context.Context, jidRaw string, action events.BlocklistChangeAction) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	jid, err := parseRecipient(jidRaw)

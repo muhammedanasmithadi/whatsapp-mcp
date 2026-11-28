@@ -52,7 +52,7 @@ type SendPreviewOptions struct {
 }
 
 func (c *Client) PreviewSend(ctx context.Context, opts SendPreviewOptions) (*SendPreview, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	plan, err := c.planOutbound(ctx, opts.Recipient, opts.Message, opts.MediaPath, opts.ViewOnce, false)
@@ -63,7 +63,7 @@ func (c *Client) PreviewSend(ctx context.Context, opts SendPreviewOptions) (*Sen
 }
 
 func (c *Client) statusAudience(ctx context.Context) (*StatusAudience, error) {
-	if c.wa == nil || !c.wa.IsConnected() {
+	if c.wa == nil || !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	privacy, err := c.wa.GetStatusPrivacy(ctx)

@@ -14,6 +14,7 @@ import (
 	"github.com/mdp/qrterminal"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	wmstore "go.mau.fi/whatsmeow/store"
 
@@ -62,6 +63,8 @@ type Client struct {
 	downloadMedia    func(context.Context, whatsmeow.DownloadableMessage) ([]byte, error)
 	uploadMedia      func(context.Context, []byte, whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	sendMessage      func(context.Context, types.JID, *waProto.Message) (whatsmeow.SendResponse, error)
+	sendAppState     func(context.Context, appstate.PatchInfo) error
+	markRead         func(context.Context, []types.MessageID, time.Time, types.JID, types.JID, ...types.ReceiptType) error
 	socketConnected  func() bool
 	store            *store.Store
 	log              waLog.Logger
@@ -154,6 +157,8 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		sendMessage: func(ctx context.Context, to types.JID, message *waProto.Message) (whatsmeow.SendResponse, error) {
 			return wa.SendMessage(ctx, to, message)
 		},
+		sendAppState:     wa.SendAppState,
+		markRead:         wa.MarkRead,
 		socketConnected:  wa.IsConnected,
 		store:            cfg.Store,
 		log:              logger,
@@ -328,7 +333,7 @@ func (c *Client) Disconnect() {
 }
 
 func (c *Client) IsConnected() bool {
-	return c.wa.IsConnected()
+	return c.socketConnected()
 }
 
 func (c *Client) AddLoggedOutHandler(fn func(*events.LoggedOut)) {
@@ -367,7 +372,7 @@ func (c *Client) ConnectionState() ConnectionState {
 	if c.wa.Store.ID == nil {
 		return ConnectionStateUnpaired
 	}
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return ConnectionStateDisconnected
 	}
 	return ConnectionStateConnected

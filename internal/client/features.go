@@ -18,7 +18,7 @@ import (
 )
 
 func (c *Client) MarkRead(ctx context.Context, chatJID string, messageIDs []string, senderJID string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	if len(messageIDs) == 0 {
@@ -41,11 +41,11 @@ func (c *Client) MarkRead(ctx context.Context, chatJID string, messageIDs []stri
 		ids[i] = types.MessageID(id)
 	}
 
-	return c.wa.MarkRead(ctx, ids, time.Now(), chat, sender)
+	return c.markRead(ctx, ids, time.Now(), chat, sender)
 }
 
 func (c *Client) MarkChatRead(ctx context.Context, chatJID string, limit int) (int, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return 0, errors.New("not connected to WhatsApp")
 	}
 	chat, err := types.ParseJID(chatJID)
@@ -81,7 +81,7 @@ func (c *Client) MarkChatRead(ctx context.Context, chatJID string, limit int) (i
 				sender = types.JID{User: senderRaw, Server: types.DefaultUserServer}
 			}
 		}
-		if err := c.wa.MarkRead(ctx, bySender[senderRaw], time.Now(), chat, sender); err != nil {
+		if err := c.markRead(ctx, bySender[senderRaw], time.Now(), chat, sender); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("mark read (sender=%s): %w", senderRaw, err)
 			}
@@ -121,10 +121,10 @@ func (c *Client) checkUsyncWindow(ctx context.Context) error {
 }
 
 func (c *Client) SendReaction(ctx context.Context, chatJID, messageID, senderJID, emoji string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
-	chat, err := types.ParseJID(chatJID)
+	chat, err := parseChatJID(chatJID)
 	if err != nil {
 		return fmt.Errorf("invalid chat JID: %w", err)
 	}
@@ -140,7 +140,7 @@ func (c *Client) SendReaction(ctx context.Context, chatJID, messageID, senderJID
 	}
 
 	reaction := c.wa.BuildReaction(chat, sender, types.MessageID(messageID), emoji)
-	resp, err := c.wa.SendMessage(ctx, chat, reaction)
+	resp, err := c.sendMessage(ctx, chat, reaction)
 	if err != nil {
 		return fmt.Errorf("send reaction: %w", err)
 	}
@@ -187,10 +187,10 @@ func (c *Client) persistReaction(ctx context.Context, chat types.JID, msgID, tar
 }
 
 func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, targetSenderJID, body string) (string, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", errors.New("not connected to WhatsApp")
 	}
-	chat, err := types.ParseJID(chatJID)
+	chat, err := parseChatJID(chatJID)
 	if err != nil {
 		return "", fmt.Errorf("invalid chat JID: %w", err)
 	}
@@ -222,7 +222,7 @@ func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, target
 		MessageContextInfo: c.ephemeralContextInfo(ctx, chat),
 	}
 
-	resp, err := c.wa.SendMessage(ctx, chat, msg)
+	resp, err := c.sendMessage(ctx, chat, msg)
 	if err != nil {
 		return "", fmt.Errorf("send reply: %w", err)
 	}
@@ -232,10 +232,10 @@ func (c *Client) SendReply(ctx context.Context, chatJID, targetMessageID, target
 }
 
 func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody string) (string, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return "", errors.New("not connected to WhatsApp")
 	}
-	chat, err := types.ParseJID(chatJID)
+	chat, err := parseChatJID(chatJID)
 	if err != nil {
 		return "", fmt.Errorf("invalid chat JID: %w", err)
 	}
@@ -247,7 +247,7 @@ func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody st
 		Conversation: proto.String(newBody),
 	}
 	edit := c.wa.BuildEdit(chat, types.MessageID(messageID), newContent)
-	resp, err := c.wa.SendMessage(ctx, chat, edit)
+	resp, err := c.sendMessage(ctx, chat, edit)
 	if err != nil {
 		return "", fmt.Errorf("send edit: %w", err)
 	}
@@ -258,10 +258,10 @@ func (c *Client) EditMessage(ctx context.Context, chatJID, messageID, newBody st
 }
 
 func (c *Client) DeleteMessage(ctx context.Context, chatJID, messageID, senderJID string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
-	chat, err := types.ParseJID(chatJID)
+	chat, err := parseChatJID(chatJID)
 	if err != nil {
 		return fmt.Errorf("invalid chat JID: %w", err)
 	}
@@ -277,7 +277,7 @@ func (c *Client) DeleteMessage(ctx context.Context, chatJID, messageID, senderJI
 	}
 
 	revoke := c.wa.BuildRevoke(chat, sender, types.MessageID(messageID))
-	if _, err := c.wa.SendMessage(ctx, chat, revoke); err != nil {
+	if _, err := c.sendMessage(ctx, chat, revoke); err != nil {
 		return fmt.Errorf("send revoke: %w", err)
 	}
 	if err := c.store.RevokeMessage(ctx, messageID, chat.String()); err != nil {
@@ -287,18 +287,18 @@ func (c *Client) DeleteMessage(ctx context.Context, chatJID, messageID, senderJI
 }
 
 func (c *Client) ForwardMessage(ctx context.Context, targetChatJID, sourceChatJID, messageID string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	if messageID == "" {
 		return errors.New("message_id required")
 	}
 
-	target, err := types.ParseJID(targetChatJID)
+	target, err := parseChatJID(targetChatJID)
 	if err != nil {
 		return fmt.Errorf("invalid target chat JID: %w", err)
 	}
-	source, err := types.ParseJID(sourceChatJID)
+	source, err := parseChatJID(sourceChatJID)
 	if err != nil {
 		return fmt.Errorf("invalid source chat JID: %w", err)
 	}
@@ -328,7 +328,7 @@ func (c *Client) ForwardMessage(ctx context.Context, targetChatJID, sourceChatJI
 		return err
 	}
 
-	resp, err := c.wa.SendMessage(ctx, target, msg)
+	resp, err := c.sendMessage(ctx, target, msg)
 	if err != nil {
 		return fmt.Errorf("send forwarded message: %w", err)
 	}
@@ -338,7 +338,7 @@ func (c *Client) ForwardMessage(ctx context.Context, targetChatJID, sourceChatJI
 }
 
 func (c *Client) SendTyping(ctx context.Context, chatJID string, active bool, kind string) error {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return errors.New("not connected to WhatsApp")
 	}
 	chat, err := types.ParseJID(chatJID)
@@ -362,7 +362,7 @@ func (c *Client) SendTyping(ctx context.Context, chatJID string, active bool, ki
 }
 
 func (c *Client) IsOnWhatsApp(ctx context.Context, phones []string) (map[string]bool, error) {
-	if !c.wa.IsConnected() {
+	if !c.socketConnected() {
 		return nil, errors.New("not connected to WhatsApp")
 	}
 	if len(phones) == 0 {
